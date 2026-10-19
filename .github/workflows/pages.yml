@@ -32,6 +32,11 @@ jobs:
           cp -r site/. _site/
           cp docs/screenshots/*.png _site/screenshots/
           cp build/icon.svg _site/icon.svg
+      - name: WebP versions of the screenshots (served with PNG fallback)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq --no-install-recommends webp >/dev/null
+          for f in _site/screenshots/*.png; do cwebp -quiet -q 82 "$f" -o "${f%.png}.webp"; done
+          sed -i "s/__LASTMOD__/$(date -u +%Y-%m-%d)/" _site/sitemap.xml
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

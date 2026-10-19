@@ -3,16 +3,120 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MQTT Scope: a desktop MQTT client for busy brokers</title>
+    <title>MQTT Scope: free MQTT client for Linux, Windows and macOS</title>
     <meta
       name="description"
-      content="MQTT Scope is a free desktop MQTT client for Linux, Windows and macOS: a live auto-subscribed topic tree, a large-message inspector, live plots and a publisher with saved messages."
+      content="MQTT Scope is a free, open-source desktop MQTT client and MQTT Explorer alternative: live topic tree, large JSON message inspector with diff, live plots and a publisher with saved messages. MQTT 3.1.1 and 5, TLS and WebSocket."
     />
-    <meta property="og:title" content="MQTT Scope" />
-    <meta property="og:description" content="A desktop MQTT client for busy brokers: live topic tree, large-message inspector, plots and a publisher with saved messages." />
-    <meta property="og:image" content="screenshots/inspector.png" />
+    <link rel="canonical" href="https://torexz.github.io/mqtt-scope/" />
+    <meta name="theme-color" content="#0f1115" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="MQTT Scope" />
+    <meta property="og:url" content="https://torexz.github.io/mqtt-scope/" />
+    <meta property="og:title" content="MQTT Scope: free MQTT client for Linux, Windows and macOS" />
+    <meta property="og:description" content="Live topic tree, large-message inspector with diff, live plots and a publisher with saved messages. Free and open source." />
+    <meta property="og:image" content="https://torexz.github.io/mqtt-scope/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="MQTT Scope showing a live topic tree and a JSON message" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="MQTT Scope: free MQTT client" />
+    <meta name="twitter:description" content="Live topic tree, large-message inspector, live plots and saved messages. Linux, Windows, macOS." />
+    <meta name="twitter:image" content="https://torexz.github.io/mqtt-scope/og.png" />
     <meta name="color-scheme" content="dark light" />
     <link rel="icon" type="image/svg+xml" href="icon.svg" />
+    <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "MQTT Scope",
+  "description": "Free, open-source desktop MQTT client: live topic tree, large JSON message inspector with diff, live plots and a publisher with saved messages.",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux, Windows, macOS",
+  "url": "https://torexz.github.io/mqtt-scope/",
+  "downloadUrl": "https://github.com/ToRexZ/mqtt-scope/releases/latest",
+  "screenshot": "https://torexz.github.io/mqtt-scope/screenshots/inspector.png",
+  "image": "https://torexz.github.io/mqtt-scope/og.png",
+  "license": "https://opensource.org/licenses/MIT",
+  "isAccessibleForFree": true,
+  "offers": {
+    "@type": "Offer",
+    "price": "0",
+    "priceCurrency": "USD"
+  },
+  "author": {
+    "@type": "Person",
+    "name": "Victor Risager",
+    "url": "https://github.com/ToRexZ"
+  },
+  "codeRepository": "https://github.com/ToRexZ/mqtt-scope"
+}
+    </script>
+    <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Is MQTT Scope free?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. MQTT Scope is free and open source under the MIT license, for Linux, Windows and macOS."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Is MQTT Scope an alternative to MQTT Explorer?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Like MQTT Explorer it subscribes to everything and shows the broker as a live topic tree. It adds a large-message inspector with a structural diff, live plots of any JSON field with aliases, a library of saved messages, several brokers at once (one per window) and safety guards for publishing to live systems."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Which MQTT versions and transports does it support?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "MQTT 3.1.1 and MQTT 5.0 over TCP (mqtt://), TLS (mqtts://, with custom CA and client certificates), WebSocket (ws://) and secure WebSocket (wss://), with username and password authentication."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can it handle large JSON messages and busy brokers?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Multi-megabyte JSON messages open instantly because the tree renders on demand, search filters a large document down to the matching branches, and the virtualised topic tree stays smooth with tens of thousands of topics."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Can I plot MQTT values?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. Pick numbers from any topic or JSON field, from several topics at once, and give each series an alias. Plots update live and can be exported as CSV."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Does it work with VDA5050 and robot fleets?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Yes. It was built against VDA5050 robot brokers: state, visualization, order and factsheet messages, 64-bit ids kept exact, and saved instant actions you can send with one click."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "How do I install it on Linux?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Download the AppImage or tar.gz from the latest release. On Arch Linux, build the mqtt-scope-bin package from the repository's packaging/aur folder with makepkg -si."
+      }
+    }
+  ]
+}
+    </script>
     <link rel="stylesheet" href="style.css" />
     <script src="download.js" defer></script>
   </head>
@@ -21,6 +125,7 @@
       <a class="brand" href="#top"><img src="icon.svg" alt="" width="28" height="28" /> MQTT Scope</a>
       <nav>
         <a href="#features">Features</a>
+        <a href="#faq">FAQ</a>
         <a href="#download">Download</a>
         <a href="https://github.com/ToRexZ/mqtt-scope">GitHub</a>
       </nav>
@@ -29,6 +134,7 @@
     <main id="top">
       <section class="hero">
         <h1>See everything on your MQTT broker.</h1>
+        <p class="kicker">Free MQTT client for Linux, Windows and macOS</p>
         <p class="lead">
           A desktop MQTT client for busy brokers: every topic in a live tree, large JSON messages you can actually read,
           live plots of any value, and a publisher that remembers the messages you send most.
@@ -38,7 +144,7 @@
           <a class="button" href="#download">All platforms</a>
         </div>
         <p class="meta" id="release-meta">Free and open source (MIT) · Linux, Windows, macOS</p>
-        <a class="shot-link" href="screenshots/inspector.png"><img class="shot hero-shot" src="screenshots/inspector.png" alt="MQTT Scope showing the topic tree and a VDA5050 state message in the inspector" width="1600" height="1000" /></a>
+        <a class="shot-link" href="screenshots/inspector.png"><picture><source type="image/webp" srcset="screenshots/inspector.webp" /><img class="shot hero-shot" src="screenshots/inspector.png" alt="MQTT Scope showing the topic tree and a VDA5050 state message in the inspector" width="1600" height="1000" fetchpriority="high" /></picture></a>
       </section>
 
       <section id="features" class="features">
@@ -53,7 +159,7 @@
               inside payloads.
             </p>
           </div>
-          <a class="shot-link" href="screenshots/tree.png"><img class="shot" src="screenshots/tree.png" alt="Topic tree with live values, and the latest values of a branch in the inspector" loading="lazy" width="1600" height="1000" /></a>
+          <a class="shot-link" href="screenshots/tree.png"><picture><source type="image/webp" srcset="screenshots/tree.webp" /><img class="shot" src="screenshots/tree.png" alt="Topic tree with live values, and the latest values of a branch in the inspector" loading="lazy" width="1600" height="1000" /></picture></a>
         </article>
 
         <article class="feature reverse">
@@ -65,7 +171,7 @@
               Search filters a multi-megabyte document down to the matching branches.
             </p>
           </div>
-          <a class="shot-link" href="screenshots/search-large-message.png"><img class="shot" src="screenshots/search-large-message.png" alt="Searching a 470 KB JSON message" loading="lazy" width="1600" height="1000" /></a>
+          <a class="shot-link" href="screenshots/search-large-message.png"><picture><source type="image/webp" srcset="screenshots/search-large-message.webp" /><img class="shot" src="screenshots/search-large-message.png" alt="Searching a 470 KB JSON message" loading="lazy" width="1600" height="1000" /></picture></a>
         </article>
 
         <article class="feature">
@@ -73,7 +179,7 @@
             <h3>See exactly what changed</h3>
             <p>A structural diff lists every added, removed and changed field between two messages, path by path.</p>
           </div>
-          <a class="shot-link" href="screenshots/diff.png"><img class="shot" src="screenshots/diff.png" alt="Structural diff between two robot state messages" loading="lazy" width="1600" height="1000" /></a>
+          <a class="shot-link" href="screenshots/diff.png"><picture><source type="image/webp" srcset="screenshots/diff.webp" /><img class="shot" src="screenshots/diff.png" alt="Structural diff between two robot state messages" loading="lazy" width="1600" height="1000" /></picture></a>
         </article>
 
         <article class="feature reverse">
@@ -84,7 +190,7 @@
               alias. Up to eight series per plot, a live time window, hover values, and CSV export.
             </p>
           </div>
-          <a class="shot-link" href="screenshots/plot-picker.png"><img class="shot" src="screenshots/plot-picker.png" alt="Picking values to plot from a message's structure" loading="lazy" width="1600" height="1000" /></a>
+          <a class="shot-link" href="screenshots/plot-picker.png"><picture><source type="image/webp" srcset="screenshots/plot-picker.webp" /><img class="shot" src="screenshots/plot-picker.png" alt="Picking values to plot from a message's structure" loading="lazy" width="1600" height="1000" /></picture></a>
         </article>
 
         <article class="feature">
@@ -96,7 +202,7 @@
               twice.
             </p>
           </div>
-          <a class="shot-link" href="screenshots/publisher-saved.png"><img class="shot" src="screenshots/publisher-saved.png" alt="Publisher with a library of saved messages" loading="lazy" width="1600" height="1000" /></a>
+          <a class="shot-link" href="screenshots/publisher-saved.png"><picture><source type="image/webp" srcset="screenshots/publisher-saved.webp" /><img class="shot" src="screenshots/publisher-saved.png" alt="Publisher with a library of saved messages" loading="lazy" width="1600" height="1000" /></picture></a>
         </article>
 
         <ul class="grid">
@@ -107,6 +213,38 @@
           <li><strong>Pop-out windows</strong> Keep a topic open in its own window, or maximise the inspector.</li>
           <li><strong>Secure by default</strong> Sandboxed UI, payloads never executed, passwords in the OS keychain.</li>
         </ul>
+      </section>
+
+      <section id="faq" class="faq">
+        <h2>Questions</h2>
+        <details>
+          <summary>Is MQTT Scope free?</summary>
+          <p>Yes. MQTT Scope is free and open source under the MIT license, for Linux, Windows and macOS.</p>
+        </details>
+        <details>
+          <summary>Is MQTT Scope an alternative to MQTT Explorer?</summary>
+          <p>Yes. Like MQTT Explorer it subscribes to everything and shows the broker as a live topic tree. It adds a large-message inspector with a structural diff, live plots of any JSON field with aliases, a library of saved messages, several brokers at once (one per window) and safety guards for publishing to live systems.</p>
+        </details>
+        <details>
+          <summary>Which MQTT versions and transports does it support?</summary>
+          <p>MQTT 3.1.1 and MQTT 5.0 over TCP (mqtt://), TLS (mqtts://, with custom CA and client certificates), WebSocket (ws://) and secure WebSocket (wss://), with username and password authentication.</p>
+        </details>
+        <details>
+          <summary>Can it handle large JSON messages and busy brokers?</summary>
+          <p>Yes. Multi-megabyte JSON messages open instantly because the tree renders on demand, search filters a large document down to the matching branches, and the virtualised topic tree stays smooth with tens of thousands of topics.</p>
+        </details>
+        <details>
+          <summary>Can I plot MQTT values?</summary>
+          <p>Yes. Pick numbers from any topic or JSON field, from several topics at once, and give each series an alias. Plots update live and can be exported as CSV.</p>
+        </details>
+        <details>
+          <summary>Does it work with VDA5050 and robot fleets?</summary>
+          <p>Yes. It was built against VDA5050 robot brokers: state, visualization, order and factsheet messages, 64-bit ids kept exact, and saved instant actions you can send with one click.</p>
+        </details>
+        <details>
+          <summary>How do I install it on Linux?</summary>
+          <p>Download the AppImage or tar.gz from the latest release. On Arch Linux, build the mqtt-scope-bin package from the repository's packaging/aur folder with makepkg -si.</p>
+        </details>
       </section>
 
       <section id="download" class="download">

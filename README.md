@@ -8,7 +8,7 @@ Desktop MQTT client for inspecting busy brokers: an auto-subscribed live topic
 tree, a large message inspector, live plots, and a publisher with a library of
 saved messages. Runs on Linux, Windows and macOS.
 
-**[Download the latest release](https://github.com/ToRexZ/mqtt-scope/releases/latest)**
+**[Website](https://torexz.github.io/mqtt-scope/)** · **[Download the latest release](https://github.com/ToRexZ/mqtt-scope/releases/latest)**
 
 ![Inspector](docs/screenshots/inspector.png)
 
