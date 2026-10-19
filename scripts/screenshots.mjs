@@ -64,11 +64,16 @@ try {
   await page.waitForFunction(() => !!window.__mqttscope.tree.find('uagv/v2/DemoRobotics/AGV-001/state'), null, { timeout: 15000 });
   await page.evaluate(() => {
     const { plots } = window.__mqttscope;
-    plots.addSeries(null, 'uagv/v2/DemoRobotics/AGV-001/state', ['batteryState', 'batteryCharge']);
-    const p = plots.plots.at(-1);
-    plots.addSeries(p.id, 'uagv/v2/DemoRobotics/AGV-002/state', ['batteryState', 'batteryCharge']);
-    plots.addSeries(null, 'sensors/hall-1/temperature', null);
-    plots.addSeries(plots.plots.at(-1).id, 'sensors/hall-2/temperature', null);
+    const a1 = 'uagv/v2/DemoRobotics/AGV-001/state';
+    const id = plots.addSeries(null, a1, ['batteryState', 'batteryCharge'], { alias: 'AGV-001 battery %', quiet: true });
+    plots.addSeries(id, 'uagv/v2/DemoRobotics/AGV-002/state', ['batteryState', 'batteryCharge'], { alias: 'AGV-002 battery %', quiet: true });
+    plots.addSeries(id, a1, ['driving'], { alias: 'AGV-001 driving', quiet: true });
+    plots.plots.at(-1).title = 'Fleet battery';
+    const t = plots.addSeries(null, 'sensors/hall-1/temperature', null, { alias: 'Hall 1 °C', quiet: true });
+    plots.addSeries(t, 'sensors/hall-2/temperature', null, { alias: 'Hall 2 °C', quiet: true });
+    plots.plots.at(-1).title = 'Temperature';
+    plots.selectedId = id;
+    plots.renderAll();
   });
   await page.waitForTimeout(3000);
   await select('uagv/v2/DemoRobotics/AGV-001/state');
@@ -100,7 +105,9 @@ try {
   await page.waitForTimeout(20000);
   await page.click('.right-tabs .tab[data-tab="plots"]');
   await page.waitForTimeout(800);
-  await page.hover('.plot-card:nth-child(2) canvas', { position: { x: 380, y: 140 } });
+  await page.click('.ps-series-item:nth-child(3) summary .ps-series-name');
+  const box = await page.locator('.plot-card').first().locator('canvas').boundingBox();
+  await page.mouse.move(box.x + box.width * 0.72, box.y + 70);
   await page.waitForTimeout(300);
   await shot('plots');
   await page.click('text=+ New plot');

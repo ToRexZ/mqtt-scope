@@ -1,18 +1,26 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_SETTINGS, normalizeSettings } from '../../renderer/settings.js';
+import { DEFAULT_SETTINGS, normalizeSettings as normalizeAll } from '../../renderer/settings.js';
+
+// These tests cover the numeric limits; autoExpand and keys are tested below.
+const normalizeSettings = (raw) => {
+  const { historyLimit, historyMB } = normalizeAll(raw);
+  return { historyLimit, historyMB };
+};
+const NUMERIC_DEFAULTS = { historyLimit: DEFAULT_SETTINGS.historyLimit, historyMB: DEFAULT_SETTINGS.historyMB };
 
 describe('normalizeSettings', () => {
   test('defaults', () => {
-    assert.deepEqual(DEFAULT_SETTINGS, { historyLimit: 100, historyMB: 64 });
-    assert.deepEqual(normalizeSettings(undefined), DEFAULT_SETTINGS);
-    assert.deepEqual(normalizeSettings(null), DEFAULT_SETTINGS);
-    assert.deepEqual(normalizeSettings({}), DEFAULT_SETTINGS);
+    assert.deepEqual(DEFAULT_SETTINGS, { historyLimit: 100, historyMB: 64, autoExpand: true, keys: {} });
+    assert.deepEqual(normalizeAll(undefined), DEFAULT_SETTINGS);
+    assert.deepEqual(normalizeAll(null), DEFAULT_SETTINGS);
+    assert.deepEqual(normalizeAll({}), DEFAULT_SETTINGS);
   });
 
   test('returns a fresh object, never DEFAULT_SETTINGS itself', () => {
-    const out = normalizeSettings({});
-    assert.notEqual(out, DEFAULT_SETTINGS);
+    const out = normalizeAll({});
+    assert.notEqual(out, NUMERIC_DEFAULTS);
+    assert.notEqual(out.keys, DEFAULT_SETTINGS.keys);
     out.historyLimit = 1;
     assert.equal(DEFAULT_SETTINGS.historyLimit, 100);
   });
@@ -42,13 +50,13 @@ describe('normalizeSettings', () => {
 
   test('non-numeric garbage falls back to defaults per key', () => {
     for (const bad of ['abc', NaN, Infinity, -Infinity, {}, '1e9999', undefined, () => 1, Symbol.iterator.description]) {
-      assert.deepEqual(normalizeSettings({ historyLimit: bad, historyMB: bad }), DEFAULT_SETTINGS, String(bad));
+      assert.deepEqual(normalizeSettings({ historyLimit: bad, historyMB: bad }), NUMERIC_DEFAULTS, String(bad));
     }
     assert.deepEqual(normalizeSettings({ historyLimit: 'x', historyMB: 8 }), { historyLimit: 100, historyMB: 8 });
   });
 
   test('non-object input falls back to defaults', () => {
-    for (const raw of ['str', 42, true, []]) assert.deepEqual(normalizeSettings(raw), DEFAULT_SETTINGS, String(raw));
+    for (const raw of ['str', 42, true, []]) assert.deepEqual(normalizeSettings(raw), NUMERIC_DEFAULTS, String(raw));
   });
 
   test('unknown keys are dropped', () => {
@@ -60,7 +68,24 @@ describe('normalizeSettings', () => {
     // Number(null) === 0, Number('') === 0, Number(true) === 1, Number([]) === 0:
     // an emptied settings field must not silently become the minimum.
     for (const bad of [null, '', '   ', false, true, []]) {
-      assert.deepEqual(normalizeSettings({ historyLimit: bad, historyMB: bad }), DEFAULT_SETTINGS, JSON.stringify(bad));
+      assert.deepEqual(normalizeSettings({ historyLimit: bad, historyMB: bad }), NUMERIC_DEFAULTS, JSON.stringify(bad));
     }
+  });
+});
+
+describe('normalizeSettings: autoExpand and keyboard shortcuts', () => {
+  test('autoExpand defaults to true and only accepts booleans', () => {
+    assert.equal(normalizeAll({}).autoExpand, true);
+    assert.equal(normalizeAll({ autoExpand: false }).autoExpand, false);
+    assert.equal(normalizeAll({ autoExpand: 'false' }).autoExpand, true);
+    assert.equal(normalizeAll({ autoExpand: 0 }).autoExpand, true);
+  });
+  test('keys keeps overrides of known actions that differ from the default', () => {
+    const k = normalizeAll({ keys: { connections: 'Mod+J', settings: 'Mod+,', bogus: 'Mod+B', clear: '', find: 5 } }).keys;
+    assert.deepEqual(k, { connections: 'Mod+J' });
+    assert.deepEqual(normalizeAll({ keys: 'nope' }).keys, {});
+  });
+  test('unbinding an action with a default is kept', () => {
+    assert.deepEqual(normalizeAll({ keys: { maximize: '' } }).keys, { maximize: '' });
   });
 });

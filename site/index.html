@@ -96,7 +96,7 @@
       "name": "Can I plot MQTT values?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes. Pick numbers from any topic or JSON field, from several topics at once, and give each series an alias. Plots update live and can be exported as CSV."
+        "text": "Yes. Pick numbers from any topic or JSON field, from several topics at once, give each series an alias and a colour, and show booleans as state bars. Plots update live, share a synced time bar, can be saved as layouts and exported as CSV."
       }
     },
     {
@@ -187,11 +187,12 @@
           <div class="text">
             <h3>Plot any value, live</h3>
             <p>
-              Pick numbers from any topic or JSON field, from several topics at once, and give each series a readable
-              alias. Up to eight series per plot, a live time window, hover values, and CSV export.
+              Pick numbers from any topic or JSON field, from several topics at once. A settings panel lets you rename
+              plots, pick colours, fix the y-axis and show true/false values as state bars. Hovering one plot syncs the
+              time bar across all of them, and layouts can be saved and shared as files.
             </p>
           </div>
-          <a class="shot-link" href="screenshots/plot-picker.png"><picture><source type="image/webp" srcset="screenshots/plot-picker.webp" /><img class="shot" src="screenshots/plot-picker.png" alt="Picking values to plot from a message's structure" loading="lazy" width="1600" height="1000" /></picture></a>
+          <a class="shot-link" href="screenshots/plots.png"><picture><source type="image/webp" srcset="screenshots/plots.webp" /><img class="shot" src="screenshots/plots.png" alt="Plots with a settings panel, a state bar for a boolean and a synced time bar" loading="lazy" width="1600" height="1000" /></picture></a>
         </article>
 
         <article class="feature">
@@ -211,7 +212,7 @@
           <li><strong>Several brokers</strong> One connection per window; saved connections and messages are shared.</li>
           <li><strong>Live subscriptions</strong> Add or remove topic filters without reconnecting.</li>
           <li><strong>Exact numbers</strong> 64-bit ids and nanosecond timestamps are shown and re-sent exactly.</li>
-          <li><strong>Pop-out windows</strong> Keep a topic open in its own window, or maximise the inspector.</li>
+          <li><strong>Your shortcuts</strong> Every keyboard shortcut can be changed; Enter connects to the selected broker.</li>
           <li><strong>Secure by default</strong> Sandboxed UI, payloads never executed, passwords in the OS keychain.</li>
         </ul>
       </section>
@@ -236,7 +237,7 @@
         </details>
         <details>
           <summary>Can I plot MQTT values?</summary>
-          <p>Yes. Pick numbers from any topic or JSON field, from several topics at once, and give each series an alias. Plots update live and can be exported as CSV.</p>
+          <p>Yes. Pick numbers from any topic or JSON field, from several topics at once, give each series an alias and a colour, and show booleans as state bars. Plots update live, share a synced time bar, can be saved as layouts and exported as CSV.</p>
         </details>
         <details>
           <summary>Does it work with VDA5050 and robot fleets?</summary>

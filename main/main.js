@@ -21,6 +21,7 @@ const popouts = new Map(); // webContents.id -> { win, topic, ownerId, init }
 let profiles;
 let stores;
 let quitting = false;
+let menuShortcuts = {}; // action id -> accelerator label, from the renderer's settings
 
 process.on('uncaughtException', (err) => log.error('uncaughtException', err));
 process.on('unhandledRejection', (err) => log.error('unhandledRejection', err));
@@ -173,6 +174,14 @@ function registerIpc() {
   });
 
   ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(String(text)));
+  ipcMain.handle('app:newWindow', () => {
+    createMainWindow();
+  });
+  ipcMain.on('menu:shortcuts', (_e, map) => {
+    if (!map || typeof map !== 'object') return;
+    menuShortcuts = Object.fromEntries(Object.entries(map).filter(([k, v]) => typeof k === 'string' && (typeof v === 'string' || v === null)));
+    buildMenu();
+  });
 
   ipcMain.handle('dialog:pickFile', async (e, title) => {
     const res = await dialog.showOpenDialog(parent(e), { title: String(title || 'Choose file'), properties: ['openFile'] });
@@ -241,16 +250,19 @@ function buildMenu() {
     const w = focusedMain();
     if (w && !w.win.isDestroyed()) w.win.webContents.send('menu', action);
   };
+  // Shortcuts are handled (and rebindable) in the renderer; the menu only
+  // shows them, so it must not register them a second time.
+  const keys = (id) => (menuShortcuts[id] ? { accelerator: menuShortcuts[id], registerAccelerator: false } : {});
   const isMac = process.platform === 'darwin';
   const template = [
     ...(isMac ? [{ role: 'appMenu' }] : []),
     {
       label: 'File',
       submenu: [
-        { label: 'New Window', accelerator: 'CmdOrCtrl+Shift+N', click: () => createMainWindow() },
-        { label: 'Connections…', accelerator: 'CmdOrCtrl+K', click: toRenderer('connections') },
-        { label: 'Subscriptions…', accelerator: 'CmdOrCtrl+Shift+S', click: toRenderer('subscriptions') },
-        { label: 'Settings…', accelerator: 'CmdOrCtrl+,', click: toRenderer('settings') },
+        { label: 'New Window', click: () => createMainWindow(), ...keys('newWindow') },
+        { label: 'Connections…', click: toRenderer('connections'), ...keys('connections') },
+        { label: 'Subscriptions…', click: toRenderer('subscriptions'), ...keys('subscriptions') },
+        { label: 'Settings…', click: toRenderer('settings'), ...keys('settings') },
         { type: 'separator' },
         { label: 'Open Data Folder', click: () => shell.openPath(app.getPath('userData')) },
         { type: 'separator' },
@@ -261,8 +273,13 @@ function buildMenu() {
     {
       label: 'View',
       submenu: [
-        // F11 is handled in the renderer; shown here only as a hint.
-        { label: 'Maximize Inspector', accelerator: 'F11', registerAccelerator: false, click: toRenderer('maximize') },
+        { label: 'Inspector', click: toRenderer('tabInspector'), ...keys('tabInspector') },
+        { label: 'Plots', click: toRenderer('tabPlots'), ...keys('tabPlots') },
+        { label: 'Add Data to New Plot…', click: toRenderer('newPlot'), ...keys('newPlot') },
+        { label: 'Maximize Inspector', click: toRenderer('maximize'), ...keys('maximize') },
+        { type: 'separator' },
+        { label: 'Pause / Resume Updates', click: toRenderer('pause'), ...keys('pause') },
+        { label: 'Clear Topics', click: toRenderer('clear'), ...keys('clear') },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
@@ -275,6 +292,7 @@ function buildMenu() {
     {
       label: 'Help',
       submenu: [
+        { label: 'Keyboard Shortcuts…', click: toRenderer('keyboardSettings') },
         {
           label: 'About MQTT Scope',
           click: () =>
@@ -289,7 +307,16 @@ function buildMenu() {
       ],
     },
   ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  try {
+    Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+  } catch (err) {
+    // A shortcut Electron cannot display must never break the menu.
+    log.warn('menu', err.message);
+    if (Object.keys(menuShortcuts).length) {
+      menuShortcuts = {};
+      buildMenu();
+    }
+  }
 }
 
 function start() {

@@ -33,7 +33,7 @@ test('settings: messages kept per topic limits history and persists', async ({ e
   await dlg.locator('[name="historyLimit"]').fill('5');
   await dlg.getByRole('button', { name: 'Save' }).click();
   await expect(dlg).toHaveCount(0);
-  expect(await page.evaluate(() => window.__mqttscope.settings)).toEqual({ historyLimit: 5, historyMB: 64 });
+  expect(await page.evaluate(() => window.__mqttscope.settings)).toEqual({ historyLimit: 5, historyMB: 64, autoExpand: true, keys: {} });
 
   // Cancel discards changes.
   await page.locator('#btn-settings').click();

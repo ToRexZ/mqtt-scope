@@ -65,16 +65,20 @@ saved messages. Runs on Linux, Windows and macOS.
   values to plot…*) opens a picker: a scrollable, filterable list of topics on
   the left; the structure of the selected message on the right with a checkbox
   next to every number. Pick values from several topics at once.
-- Give any series an **alias**: in the picker, or later by double-clicking its
-  legend label (✎). Aliases show in the legend, the hover tooltip and CSV
-  exports; the source topic and JSON path stay visible on hover.
+- A **settings panel** for the selected plot, laid out like Lichtblick's:
+  title (rename), time window, legend on/off and values, fixed or automatic
+  y-axis range, and per series: visibility, label (alias), **colour picker**
+  or palette colour, display style and line width.
+- **Booleans as state bars**: true/false values show as a horizontal bar that
+  changes colour (each series can be a line, line with points, steps or a state
+  bar; booleans default to a state bar).
+- **Synced time bar**: hovering one plot moves the time bar on every plot and
+  shows the values at that moment in each legend.
+- **Layouts**: save the plots as named layouts, switch between them, and export
+  or import a layout as a `.json` file to share with colleagues.
 - Quick add: right-click a numeric topic, or a number in the inspector's Tree
-  view, → *Add to new plot* / *Add to plot “…”*.
-- Up to 8 series per plot on one shared axis, live time window (1 min – 1 h,
-  or all), hover for values, freeze, export CSV (time, series alias, topic,
-  path, value).
-- Plot definitions and aliases are saved; data is collected while the app runs
-  (existing history is back-filled when a series is added).
+  view, → *Add to new plot* / *Add to plot “…”*. Up to 8 series per plot,
+  freeze, CSV export (time, series alias, topic, path, value).
 
 ![Plots](docs/screenshots/plots.png)
 
@@ -121,23 +125,30 @@ Windows choose "More info → Run anyway".
 
 ## Keyboard shortcuts
 
+All shortcuts can be changed in **Settings → Keyboard** (click one and press the
+new keys; clashes are flagged). Defaults (Ctrl is Cmd on macOS):
+
 | Keys | Action |
 |---|---|
+| Enter | Connect to the selected connection (↑ ↓ choose it) |
 | Ctrl+K | Connections |
 | Ctrl+Shift+S | Subscriptions |
 | Ctrl+Shift+N | New window (another broker) |
 | Ctrl+, | Settings |
 | Ctrl+F | Filter topics (or search the message when the inspector has focus) |
+| Ctrl+Enter | Publish (in the publisher) |
+| F11 | Maximize inspector (Esc restores) |
+| Ctrl+1 / Ctrl+2 | Inspector / Plots |
+| Ctrl+Shift+A | Add data to a new plot |
+| Ctrl+Shift+P | Pause / resume |
 | ↑ ↓ ← → Enter | Navigate / expand the topic tree |
 | Enter / Shift+Enter | Next / previous search match |
-| F11 or Ctrl+M | Maximize inspector (Esc restores) |
-| Ctrl+Enter | Publish |
-| Ctrl + / Ctrl − / Ctrl 0 | Zoom |
 
 ## Settings and data
 
-Settings: messages kept per topic (default 100) and history size per topic
-(default 64 MB; the latest message is always kept).
+Settings → General: messages kept per topic (default 100), history size per
+topic (default 64 MB; the latest message is always kept), and whether clicking
+a topic in the tree also expands it one level (default on).
 
 Data lives in the app data folder (File → Open Data Folder):
 `profiles.json` (connections), `savedMessages.json`, `plots.json`,
@@ -200,7 +211,8 @@ main/          Electron main process (CommonJS)
 renderer/      UI (plain ES modules, no framework or build step)
   app.js         wiring; topicTree.js data model; treeView.js virtual list
   viewer.js      inspector; jsonTree.js, jsonDiff.js, payload.js
-  plots.js, plotPicker.js, fields.js, chart.js, plotMath.js   plots
+  plots.js, plotPicker.js, plotLayouts.js, fields.js, chart.js, plotMath.js   plots
+  keys.js        keyboard shortcuts (defaults, rebinding, matching)
   publisher.js, connectionDialog.js, subscriptionsDialog.js, settings.js
 test/          unit, integration, e2e (+ helpers: in-process broker, app launcher)
 ```

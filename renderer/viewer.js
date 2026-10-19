@@ -185,14 +185,11 @@ export class MessageViewer {
 
     this.root.append(head, bar, main);
     this.root.classList.toggle('no-history', !this.showHistory);
-    this.root.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-        e.preventDefault();
-        e.stopPropagation();
-        this.search.focus();
-        this.search.select();
-      }
-    });
+  }
+
+  focusSearch() {
+    this.search.focus();
+    this.search.select();
   }
 
   setMaximized(on) {

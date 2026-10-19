@@ -50,3 +50,28 @@ export function windowRange(series, windowSec, now) {
   const t0 = Number.isFinite(first) ? Math.max(full, Math.min(first, now - 10000)) : full;
   return { t0, t1: now };
 }
+
+// Spans of constant state for a state-bar series, clipped to [t0, t1]. The
+// value in force at t0 comes from the last point before it, and the last
+// state lasts until t1. Non-zero values are "on".
+export function stateSegments(points, t0, t1) {
+  const out = [];
+  if (!points.length || !(t1 > t0)) return out;
+  let i = 0;
+  while (i < points.length && points[i].t <= t0) i++;
+  let from = i > 0 ? t0 : points[0].t;
+  let value = i > 0 ? points[i - 1].v : points[0].v;
+  if (i === 0) i = 1;
+  for (; i < points.length && points[i].t < t1; i++) {
+    const p = points[i];
+    if (p.v === value) continue;
+    if (p.t > from) out.push({ from, to: p.t, value, on: value !== 0 });
+    from = p.t;
+    value = p.v;
+  }
+  if (from < t1) out.push({ from: Math.max(from, t0), to: t1, value, on: value !== 0 });
+  return out.filter((s) => s.to > t0 && s.from < t1);
+}
+
+// True when every value is 0 or 1 (booleans are plotted as 0/1).
+export const isBinary = (points) => points.length > 0 && points.every((p) => p.v === 0 || p.v === 1);

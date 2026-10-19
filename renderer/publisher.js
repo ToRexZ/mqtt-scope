@@ -52,7 +52,7 @@ export class Publisher {
     this.retain = el('input');
     this.retain.type = 'checkbox';
     retainLabel.append(this.retain, document.createTextNode(' Retain'));
-    this.sendBtn = button('Publish', 'Publish (Ctrl+Enter)', () => this.publish(), 'btn primary');
+    this.sendBtn = button('Publish', 'Publish', () => this.publish(), 'btn primary');
     row1.append(this.topic, this.topicList, this.followBtn, this.qos, retainLabel, this.sendBtn);
 
     const row2 = el('div', 'pub-row');
@@ -90,12 +90,6 @@ export class Publisher {
       if (e.key === 'Tab' && !e.shiftKey) {
         e.preventDefault();
         document.execCommand('insertText', false, '  ');
-      }
-    });
-    this.root.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-        e.preventDefault();
-        if (!e.repeat) this.publish();
       }
     });
 

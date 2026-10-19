@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('api', {
   onWarning: (cb) => ipcRenderer.on('mqtt:warning', (_e, message) => cb(message)),
   onMenu: (cb) => ipcRenderer.on('menu', (_e, action) => cb(action)),
   onFlush: (cb) => ipcRenderer.on('app:flush', () => cb()),
+  newWindow: () => ipcRenderer.invoke('app:newWindow'),
+  setMenuShortcuts: (map) => ipcRenderer.send('menu:shortcuts', map),
   flushed: () => ipcRenderer.send('app:flushed'),
 
   listProfiles: () => ipcRenderer.invoke('profiles:list'),

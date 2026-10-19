@@ -2,6 +2,7 @@
 // selected one. Edits are saved automatically.
 
 import { el, button, toast } from './ui.js';
+import { comboFromEvent, isTypingTarget } from './keys.js';
 import { DEFAULT_PORTS, blankProfile, parseSubscriptions, formatSubscriptions, newId } from './profiles.js';
 
 
@@ -70,10 +71,31 @@ export class ConnectionDialog {
     this.box = el('div', 'modal conn-dialog');
     this.overlay.append(this.box);
     document.body.append(this.overlay);
-    this.overlay.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape') this.close();
-    });
+    this.overlay.addEventListener('keydown', (e) => this.handleKey(e));
     this.render();
+  }
+
+  // Enter (rebindable) connects; arrow keys move through the list.
+  handleKey(e) {
+    if (e.key === 'Escape') return this.close();
+    const t = e.target;
+    const connectKey = this.opts.getBinding?.('connectSelected') ?? 'Enter';
+    if (connectKey && comboFromEvent(e) === connectKey) {
+      // Enter still adds lines to the subscription list and presses focused buttons.
+      if (t.closest('textarea, select, button') || t.type === 'checkbox') return;
+      e.preventDefault();
+      this.connect();
+      return;
+    }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !isTypingTarget(t)) {
+      e.preventDefault();
+      const i = this.profiles.findIndex((p) => p.id === this.selectedId);
+      const next = this.profiles[Math.max(0, Math.min(this.profiles.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+      if (next && next.id !== this.selectedId) {
+        this.selectedId = next.id;
+        this.render();
+      }
+    }
   }
 
   close() {
@@ -98,7 +120,9 @@ export class ConnectionDialog {
     else this.statusEl.textContent = `${s.state[0].toUpperCase()}${s.state.slice(1)}… ${s.url || ''}`;
   }
 
-  render() {
+  // focus: 'list' puts focus on the selected connection (so Enter connects),
+  // 'name' on the name field (for a new connection).
+  render(focus = 'list') {
     this.box.textContent = '';
     const side = el('div', 'conn-list');
     const listHead = el('div', 'conn-list-head');
@@ -109,12 +133,14 @@ export class ConnectionDialog {
         this.profiles.push(p);
         this.selectedId = p.id;
         this.persist();
-        this.render();
+        this.render('name');
       }, 'btn small'),
     );
     side.append(listHead);
     for (const p of this.profiles) {
       const item = el('div', 'conn-item' + (p.id === this.selectedId ? ' active' : ''));
+      item.tabIndex = p.id === this.selectedId ? 0 : -1;
+      item.title = 'Double-click or press Enter to connect';
       item.append(el('div', 'conn-name', p.name || '(unnamed)'), el('div', 'conn-url', `${p.protocol}://${p.host}:${p.port}`));
       item.addEventListener('click', () => {
         this.selectedId = p.id;
@@ -130,6 +156,8 @@ export class ConnectionDialog {
 
     const close = button('×', 'Close (Esc)', () => this.close(), 'btn icon modal-close');
     this.box.append(side, form, close);
+    if (focus === 'name') form.querySelector('input[name="name"]')?.select();
+    else side.querySelector('.conn-item.active')?.focus();
   }
 
   renderForm(form, p) {
@@ -276,7 +304,7 @@ export class ConnectionDialog {
         this.profiles.push(copy);
         this.selectedId = copy.id;
         this.persist();
-        this.render();
+        this.render('name');
       }),
       el('span', 'spacer'),
       button('Connect', 'Connect to this broker', () => this.connect(), 'btn primary connect-btn'),

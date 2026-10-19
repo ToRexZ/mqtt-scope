@@ -12,6 +12,7 @@ import { decode, extractNumber, hexDump } from './payload.js';
 import { DEFAULT_SETTINGS, normalizeSettings, openSettings } from './settings.js';
 import { hasNumbers } from './fields.js';
 import { openSubscriptions } from './subscriptionsDialog.js';
+import { ACTIONS, bindingIndex, comboFromEvent, isPlainKey, isTypingTarget, resolveBindings, toAccelerator } from './keys.js';
 
 const api = window.api;
 const $ = (sel) => document.querySelector(sel);
@@ -22,6 +23,8 @@ const RENDER_INTERVAL_MS = 120;
 const DELETE_ECHO_MS = 5000;
 
 let settings = { ...DEFAULT_SETTINGS };
+let bindings = resolveBindings({});
+let keyIndex = bindingIndex(bindings);
 const tree = new TopicTree();
 applySettings(settings);
 
@@ -30,6 +33,10 @@ function applySettings(next) {
   tree.historyLimit = settings.historyLimit;
   tree.historyBytes = settings.historyMB * 1024 * 1024;
   tree.trimHistories();
+  bindings = resolveBindings(settings.keys);
+  keyIndex = bindingIndex(bindings);
+  // The menu shows the current shortcuts (the keys themselves are handled here).
+  api.setMenuShortcuts?.(Object.fromEntries(ACTIONS.map((a) => [a.id, toAccelerator(bindings[a.id])])));
 }
 let selected = null;
 let selectedDirty = false;
@@ -82,6 +89,7 @@ const publisher = new Publisher($('#publisher-host'), {
 
 const connections = new ConnectionDialog({
   api,
+  getBinding: (id) => bindings[id],
   onConnect: async (profile) => {
     // A different broker means a different topic space; reconnecting to the same one keeps the tree.
     const brokerKey = (p) => p && `${p.id}|${p.protocol}|${p.host}|${p.port}|${p.wsPath || ''}`;
@@ -190,7 +198,12 @@ function clearTree() {
 
 // ------------------------------------------------------------------ selection
 
-function selectNode(node) {
+function selectNode(node, source) {
+  // Clicking a topic opens it one level so its sub-topics show (Settings → General).
+  if (source === 'click' && settings.autoExpand && node.children.size && !node.expanded) {
+    node.expanded = true;
+    treeView.refresh();
+  }
   selected = node;
   viewer.show(node);
   publisher.setTopic(node.path);
@@ -307,10 +320,7 @@ api.onFlush(async () => {
 
 api.onMenu((action) => {
   if (document.querySelector('.modal-overlay') && action !== 'connections') return;
-  if (action === 'connections') connections.open();
-  else if (action === 'settings') $('#btn-settings').click();
-  else if (action === 'maximize') toggleMaximize();
-  else if (action === 'subscriptions') showSubscriptions();
+  ACTION_HANDLERS[action]?.();
 });
 
 // Another window saved shared data: pick up its changes.
@@ -350,10 +360,12 @@ $('#btn-pause').addEventListener('click', () => {
   }
 });
 $('#btn-clear').addEventListener('click', clearTree);
-$('#btn-settings').addEventListener('click', async () => {
-  const next = await openSettings(api, settings);
+$('#btn-settings').addEventListener('click', () => showSettings());
+
+async function showSettings(tab) {
+  const next = await openSettings(api, settings, { tab });
   if (next) applySettings(next);
-});
+}
 $('#btn-collapse-all').addEventListener('click', () => {
   tree.setExpandedRecursive(tree.root, false);
   treeView.refresh();
@@ -390,19 +402,42 @@ function toggleMaximize(force) {
   if (on) showTab('inspector');
 }
 
-document.addEventListener('keydown', (e) => {
-  if (document.querySelector('.modal-overlay')) return;
-  const mod = e.ctrlKey || e.metaKey;
-  if (mod && e.key === 'f' && !e.target.closest('.viewer')) {
-    e.preventDefault();
+// ------------------------------------------------------------------ keyboard
+
+// What each shortcut does (see keys.js; rebindable in Settings → Keyboard).
+const ACTION_HANDLERS = {
+  connections: () => connections.open(),
+  subscriptions: () => showSubscriptions(),
+  newWindow: () => api.newWindow(),
+  settings: () => showSettings(),
+  find: (e) => {
+    if (e?.target?.closest?.('.viewer')) return viewer.focusSearch();
     $('#tree-filter').focus();
     $('#tree-filter').select();
-  } else if (e.key === 'F11' || (mod && e.key === 'm')) {
-    e.preventDefault();
-    toggleMaximize();
-  } else if (e.key === 'Escape' && $('#layout').classList.contains('max-viewer')) {
-    toggleMaximize(false);
-  }
+  },
+  publish: (e) => !e?.repeat && publisher.publish(),
+  maximize: () => toggleMaximize(),
+  tabInspector: () => showTab('inspector'),
+  tabPlots: () => showTab('plots'),
+  newPlot: () => {
+    showTab('plots');
+    plots.openPicker();
+  },
+  pause: () => $('#btn-pause').click(),
+  clear: () => $('#btn-clear').click(),
+  keyboardSettings: () => showSettings('keyboard'),
+};
+
+document.addEventListener('keydown', (e) => {
+  if (document.querySelector('.modal-overlay')) return; // dialogs handle their own keys
+  if (e.key === 'Escape' && $('#layout').classList.contains('max-viewer')) return toggleMaximize(false);
+  const combo = comboFromEvent(e);
+  const action = combo && keyIndex.get(combo);
+  if (!action || !ACTION_HANDLERS[action]) return;
+  if (isPlainKey(combo) && isTypingTarget(e.target)) return; // let plain keys type
+  if (action === 'publish' && !e.target.closest?.('.publisher')) return;
+  e.preventDefault();
+  ACTION_HANDLERS[action](e);
 });
 
 splitter($('#split-main'), {

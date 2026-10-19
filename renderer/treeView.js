@@ -27,9 +27,17 @@ export class TreeView {
     scrollEl.addEventListener('scroll', () => this.renderViewport());
     new ResizeObserver(() => this.renderViewport()).observe(scrollEl);
     this.inner.addEventListener('click', (e) => this.handleClick(e));
+    // A double-click toggles relative to the state before its first click,
+    // which may already have expanded the node (auto-expand on select).
+    this.inner.addEventListener('mousedown', (e) => {
+      const row = this.rowAt(e);
+      if (row && e.detail === 1) this.beforeClick = { node: row.node, expanded: row.node.expanded };
+    });
     this.inner.addEventListener('dblclick', (e) => {
       const row = this.rowAt(e);
-      if (row && row.node.children.size) this.toggle(row.node);
+      if (!row || !row.node.children.size) return;
+      const before = this.beforeClick?.node === row.node ? this.beforeClick.expanded : row.node.expanded;
+      this.toggle(row.node, !before);
     });
     this.inner.addEventListener('contextmenu', (e) => {
       const row = this.rowAt(e);
@@ -134,7 +142,7 @@ export class TreeView {
       this.toggle(row.node);
       return;
     }
-    this.select(row.node);
+    this.select(row.node, 'click');
   }
 
   toggle(node, expanded = !node.expanded) {
@@ -142,10 +150,11 @@ export class TreeView {
     this.refresh();
   }
 
-  select(node) {
+  // source: 'click' for mouse selection, 'key' for keyboard navigation.
+  select(node, source = 'api') {
     this.selected = node;
     this.renderViewport();
-    this.onSelect(node);
+    this.onSelect(node, source);
   }
 
   scrollToIndex(i) {
@@ -197,7 +206,7 @@ export class TreeView {
     }
     e.preventDefault();
     if (i < 0) i = 0;
-    this.select(this.rows[i].node);
+    this.select(this.rows[i].node, 'key');
     this.scrollToIndex(i);
   }
 }
