@@ -1,0 +1,229 @@
+// Connection manager: several saved profiles, protocol-dependent fields,
+// duplicate/delete, auto-save and persistence across restarts.
+
+import path from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
+import { test, expect, makeUserData, mockDialogs, dialogCalls, waitForFile } from './fixtures.mjs';
+
+const PASSWORD = 's3cret-Pa55word';
+
+test('connection manager: create, protocol defaults, duplicate, delete and persistence', async ({ env }) => {
+  const userData = makeUserData();
+  const profilesFile = path.join(userData, 'profiles.json');
+  const first = await env.launch({ userData });
+  const { app, page } = first;
+
+  // The dialog opens on start with the built-in default profile.
+  const dlg = page.locator('.conn-dialog');
+  await expect(dlg).toBeVisible();
+  await expect(dlg.locator('.conn-item .conn-name')).toHaveText(['Local broker']);
+  const field = (name) => dlg.locator(`.conn-form [name="${name}"]`);
+
+  // + New adds and selects a blank profile.
+  await dlg.getByRole('button', { name: '+ New' }).click();
+  await expect(dlg.locator('.conn-item')).toHaveCount(2);
+  await expect(dlg.locator('.conn-item.active .conn-name')).toHaveText('New connection');
+  await expect(field('name')).toHaveValue('New connection');
+
+  await field('name').fill('Alpha');
+  await field('host').fill('alpha.example.com');
+  await expect(dlg.locator('.conn-item.active .conn-name')).toHaveText('Alpha');
+  await expect(dlg.locator('.conn-item.active .conn-url')).toHaveText('mqtt://alpha.example.com:1883');
+
+  // Protocol switch: default ports follow the protocol, ws path / TLS only where relevant.
+  const proto = field('protocol');
+  const port = field('port');
+  const wsPath = field('wsPath');
+  const tls = dlg.locator('fieldset.tls');
+  await expect(port).toHaveValue('1883');
+  await expect(wsPath).toBeHidden();
+  await expect(tls).toBeHidden();
+
+  await proto.selectOption('mqtts');
+  await expect(port).toHaveValue('8883');
+  await expect(wsPath).toBeHidden();
+  await expect(tls).toBeVisible();
+  await expect(dlg.locator('.conn-item.active .conn-url')).toHaveText('mqtts://alpha.example.com:8883');
+
+  await proto.selectOption('ws');
+  await expect(port).toHaveValue('9001');
+  await expect(wsPath).toBeVisible();
+  await expect(tls).toBeHidden();
+
+  await proto.selectOption('wss');
+  await expect(wsPath).toBeVisible();
+  await expect(tls).toBeVisible();
+
+  await proto.selectOption('mqtt');
+  await expect(port).toHaveValue('1883');
+  await expect(wsPath).toBeHidden();
+  await expect(tls).toBeHidden();
+
+  // A custom port is never replaced by a protocol switch.
+  await port.fill('18830');
+  await proto.selectOption('mqtts');
+  await expect(port).toHaveValue('18830');
+  await proto.selectOption('ws');
+  await expect(port).toHaveValue('18830');
+  await proto.selectOption('mqtt');
+  await expect(port).toHaveValue('18830');
+  await expect(dlg.locator('.conn-item.active .conn-url')).toHaveText('mqtt://alpha.example.com:18830');
+
+  // The rest of the form.
+  await field('mqttVersion').selectOption('5');
+  await field('username').fill('alice');
+  await field('password').fill(PASSWORD);
+  await expect(field('password')).toHaveAttribute('type', 'password');
+  await dlg.getByRole('button', { name: 'Show', exact: true }).click();
+  await expect(field('password')).toHaveAttribute('type', 'text');
+  await field('clientId').fill('wb-alpha');
+  await field('keepalive').fill('30');
+  await field('subscriptions').fill('sensors/# 1\nalerts/+');
+  await field('clean').uncheck();
+
+  // Duplicate copies every field into a new, selected profile.
+  await dlg.getByRole('button', { name: 'Duplicate' }).click();
+  await expect(dlg.locator('.conn-item .conn-name')).toHaveText(['Local broker', 'Alpha', 'Alpha (copy)']);
+  await expect(dlg.locator('.conn-item.active .conn-name')).toHaveText('Alpha (copy)');
+  await expect(field('host')).toHaveValue('alpha.example.com');
+  await expect(field('port')).toHaveValue('18830');
+  await expect(field('username')).toHaveValue('alice');
+  await field('name').fill('Beta');
+  await field('host').fill('beta.example.com');
+  await expect(dlg.locator('.conn-item .conn-name')).toHaveText(['Local broker', 'Alpha', 'Beta']);
+
+  // Selecting another profile shows its own values.
+  await dlg.locator('.conn-item', { hasText: 'Alpha' }).click();
+  await expect(field('host')).toHaveValue('alpha.example.com');
+  await dlg.locator('.conn-item', { hasText: 'Beta' }).click();
+  await expect(field('host')).toHaveValue('beta.example.com');
+
+  // Delete, cancelled: nothing changes.
+  await mockDialogs(app, { confirm: false });
+  await dlg.getByRole('button', { name: 'Delete' }).click();
+  await expect.poll(() => dialogCalls(app)).toEqual([expect.objectContaining({ kind: 'confirm', message: 'Delete connection “Beta”?' })]);
+  await expect(dlg.locator('.conn-item .conn-name')).toHaveText(['Local broker', 'Alpha', 'Beta']);
+  await expect(dlg.locator('.conn-item.active .conn-name')).toHaveText('Beta');
+
+  // Delete, confirmed.
+  await mockDialogs(app, { confirm: true });
+  await dlg.getByRole('button', { name: 'Delete' }).click();
+  await expect(dlg.locator('.conn-item .conn-name')).toHaveText(['Local broker', 'Alpha']);
+
+  // Edits are saved automatically.
+  const saved = JSON.parse(
+    await waitForFile(profilesFile, (buf) => {
+      const list = JSON.parse(buf);
+      return list.length === 2 && list[1].name === 'Alpha' && list[1].clean === false && list[1].keepalive === 30;
+    }),
+  );
+  expect(saved.map((p) => p.name)).toEqual(['Local broker', 'Alpha']);
+  expect(saved[1]).toMatchObject({
+    protocol: 'mqtt',
+    host: 'alpha.example.com',
+    port: 18830,
+    mqttVersion: 5,
+    username: 'alice',
+    clientId: 'wb-alpha',
+    keepalive: 30,
+    clean: false,
+    subscriptions: [
+      { topic: 'sensors/#', qos: 1 },
+      { topic: 'alerts/+', qos: 0 },
+    ],
+  });
+
+  // Password at rest: encrypted when the OS offers it, otherwise plaintext (documented).
+  const raw = readFileSync(profilesFile, 'utf8');
+  const encryption = await app.evaluate(({ safeStorage }) => ({
+    available: safeStorage.isEncryptionAvailable(),
+    backend: process.platform === 'linux' ? safeStorage.getSelectedStorageBackend() : 'os',
+  }));
+  if (encryption.available) {
+    expect(raw).not.toContain(PASSWORD);
+    expect(saved[1].passwordEnc).toBeTruthy();
+    expect(saved[1].password).toBeUndefined();
+  } else {
+    test.info().annotations.push({
+      type: 'note',
+      description: `safeStorage unavailable (backend ${encryption.backend}): passwords are stored in plaintext in profiles.json (mode 0600)`,
+    });
+    expect(saved[1].password).toBe(PASSWORD);
+  }
+  expect(first.errors).toEqual([]);
+  await env.closeApp(first);
+
+  // Relaunch with the same data directory: everything is back.
+  const second = await env.launch({ userData });
+  const dlg2 = second.page.locator('.conn-dialog');
+  await expect(dlg2.locator('.conn-item .conn-name')).toHaveText(['Local broker', 'Alpha']);
+  await expect(dlg2.locator('.conn-item .conn-url')).toHaveText(['mqtt://localhost:1883', 'mqtt://alpha.example.com:18830']);
+  await dlg2.locator('.conn-item', { hasText: 'Alpha' }).click();
+  const f2 = (name) => dlg2.locator(`.conn-form [name="${name}"]`);
+  await expect(f2('name')).toHaveValue('Alpha');
+  await expect(f2('protocol')).toHaveValue('mqtt');
+  await expect(f2('host')).toHaveValue('alpha.example.com');
+  await expect(f2('port')).toHaveValue('18830');
+  await expect(f2('mqttVersion')).toHaveValue('5');
+  await expect(f2('username')).toHaveValue('alice');
+  await expect(f2('password')).toHaveValue(PASSWORD);
+  await expect(f2('clientId')).toHaveValue('wb-alpha');
+  await expect(f2('keepalive')).toHaveValue('30');
+  await expect(f2('subscriptions')).toHaveValue('sensors/# 1\nalerts/+');
+  await expect(f2('clean')).not.toBeChecked();
+  await expect(dlg2.locator('fieldset.tls')).toBeHidden();
+  expect(second.errors).toEqual([]);
+});
+
+test('connection dialog: Escape closes it, the connection pill reopens it, profiles persist via Connect', async ({ env }) => {
+  const broker = await env.broker();
+  const userData = makeUserData();
+  const { page, errors } = await env.launch({ userData });
+  const dlg = page.locator('.conn-dialog');
+  await expect(dlg).toBeVisible();
+
+  // Point the default profile at the test broker and connect from the dialog.
+  await dlg.locator('[name="host"]').fill('127.0.0.1');
+  await dlg.locator('[name="port"]').fill(String(broker.port));
+  await dlg.locator('[name="subscriptions"]').fill('#');
+  await dlg.locator('.connect-btn').click();
+  await expect(dlg).toHaveCount(0); // closes once connected
+  await expect(page.locator('#status-text')).toHaveText(`Connected — mqtt://127.0.0.1:${broker.port}`);
+  await expect(page.locator('#conn-label')).toHaveText('Local broker');
+  await expect(page.locator('#btn-disconnect')).toBeVisible();
+
+  // Reopen from the pill, close with Escape.
+  await page.locator('#btn-connections').click();
+  await expect(dlg).toBeVisible();
+  await dlg.locator('[name="name"]').press('Escape');
+  await expect(dlg).toHaveCount(0);
+
+  // Connect flushed the edits to disk.
+  const saved = JSON.parse(await waitForFile(path.join(userData, 'profiles.json'), (b) => JSON.parse(b)[0].port === broker.port));
+  expect(saved[0]).toMatchObject({ host: '127.0.0.1', port: broker.port, subscriptions: [{ topic: '#', qos: 0 }] });
+  expect(errors).toEqual([]);
+});
+
+test('edits made right before the window is closed are not lost (connections, plots)', async ({ env }) => {
+  const userData = makeUserData({
+    plots: { plots: [{ id: 'p1', title: 'Seeded', windowSec: 300, series: [{ id: 's1', topic: 'a/b', segs: null, slot: 0 }] }] },
+  });
+  const { app, page, errors } = await env.launch({ userData });
+  await page.locator('.conn-dialog .modal-close').click();
+  await page.locator('.right-tabs .tab[data-tab="plots"]').click();
+  await page.locator('.plot-card select').selectOption('60');
+  await page.locator('#btn-connections').click();
+  await page.locator('.conn-dialog [name="name"]').fill('Renamed just before closing');
+  expect(errors).toEqual([]);
+
+  // The user closes the window straight away (as with the window's close button).
+  const closed = app.waitForEvent('close');
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].close());
+  await closed;
+
+  const file = path.join(userData, 'profiles.json');
+  const profiles = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [];
+  expect.soft(profiles[0]?.name, 'connection renamed just before closing').toBe('Renamed just before closing');
+  const plots = JSON.parse(readFileSync(path.join(userData, 'plots.json'), 'utf8'));
+  expect.soft(plots.plots[0].windowSec, 'plot time window changed just before closing').toBe(60);
+});

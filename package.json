@@ -1,0 +1,104 @@
+{
+  "name": "mqtt-scope",
+  "productName": "MQTT Scope",
+  "version": "0.1.0",
+  "description": "Desktop MQTT client: live auto-subscribed topic tree, large message inspector, live plots and a publisher with saved messages",
+  "main": "main/main.js",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "demo-broker": "node scripts/demo-broker.mjs",
+    "test": "npm run test:unit && npm run test:integration && npm run test:e2e",
+    "test:unit": "node --test \"test/unit/**/*.test.mjs\"",
+    "test:integration": "node --test --test-concurrency=1 \"test/integration/**/*.test.mjs\"",
+    "test:e2e": "playwright test",
+    "dist": "electron-builder",
+    "dist:linux": "electron-builder --linux",
+    "dist:win": "electron-builder --win",
+    "dist:mac": "electron-builder --mac",
+    "verify:package": "node scripts/verify-package.mjs"
+  },
+  "build": {
+    "appId": "io.github.torexz.mqtt-scope",
+    "productName": "MQTT Scope",
+    "artifactName": "MQTT-Scope-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "files": [
+      "main/**",
+      "renderer/**",
+      "package.json",
+      "!**/*.map"
+    ],
+    "linux": {
+      "target": [
+        "AppImage",
+        "tar.gz"
+      ],
+      "category": "Development",
+      "icon": "build/icon.png",
+      "synopsis": "MQTT client with live topic tree, inspector, plots and publisher",
+      "syncDesktopName": true
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "MQTT-Scope-${version}-win-${arch}-setup.${ext}"
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "icon": "build/icon.png"
+    },
+    "portable": {
+      "artifactName": "MQTT-Scope-${version}-win-${arch}-portable.${ext}"
+    },
+    "electronFuses": {
+      "runAsNode": false,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "onlyLoadAppFromAsar": true
+    }
+  },
+  "dependencies": {
+    "mqtt": "^5.16.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "aedes": "^1.2.0",
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3",
+    "ws": "^8.22.0"
+  },
+  "author": "Victor Hoffmann Risager",
+  "homepage": "https://github.com/ToRexZ/mqtt-scope",
+  "desktopName": "mqtt-scope.desktop",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ToRexZ/mqtt-scope.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ToRexZ/mqtt-scope/issues"
+  },
+  "keywords": [
+    "mqtt",
+    "mqtt-client",
+    "mqtt-explorer",
+    "electron",
+    "iot",
+    "robotics",
+    "vda5050",
+    "desktop"
+  ]
+}

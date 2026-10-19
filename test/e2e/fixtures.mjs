@@ -1,0 +1,250 @@
+// Shared fixtures and helpers for the end-to-end suite.
+//
+// `env` owns every broker, app and test client a test creates and tears them
+// down afterwards (apps first, then clients, then brokers), even when the
+// test fails.
+
+import { test as base, expect } from '@playwright/test';
+import { readFileSync, existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { startBroker, testClient } from '../helpers/broker.mjs';
+import { launchApp, makeUserData, profile, connect } from '../helpers/app.mjs';
+
+export { expect };
+export { makeUserData, profile, connect };
+export { selectTopic } from '../helpers/app.mjs';
+export { makeCerts, until } from '../helpers/broker.mjs';
+
+export const test = base.extend({
+  env: async ({}, use) => {
+    const apps = [];
+    const clients = [];
+    const brokers = [];
+    const env = {
+      async broker(opts) {
+        const b = await startBroker(opts);
+        brokers.push(b);
+        return b;
+      },
+      async launch(opts) {
+        const ctx = await launchApp(opts);
+        apps.push(ctx);
+        await unthrottle(ctx.app);
+        return ctx;
+      },
+      // Starts an app whose only profile points at `broker` and connects it.
+      async connected(broker, { userData, extra, connectNow = true } = {}) {
+        const ctx = await env.launch({ userData: userData || makeUserData({ profiles: [profile(broker.port, extra)] }) });
+        if (connectNow) await connect(ctx.page);
+        return ctx;
+      },
+      async client(port, opts) {
+        const c = await testClient(port, opts);
+        clients.push(c);
+        return c;
+      },
+      async closeApp(ctx) {
+        await closeQuietly(ctx.app);
+      },
+    };
+    await use(env);
+    for (const a of apps) await closeQuietly(a.app);
+    for (const c of clients) await c.end().catch(() => {});
+    for (const b of brokers) await b.close().catch(() => {});
+  },
+});
+
+// Windows are created hidden in tests. Chromium throttles animation frames of
+// hidden windows to ~1/s after a few seconds, which makes every Playwright
+// click wait ~2 s for its stability check. A user's window is visible, so show
+// every window (without focusing it). Under --ozone-platform=headless nothing
+// appears on screen.
+async function unthrottle(app) {
+  if (process.env.MQTTSCOPE_E2E_HEADED) return;
+  await app.evaluate(({ app: electronApp, BrowserWindow }) => {
+    const fix = (w) => {
+      w.webContents.setBackgroundThrottling(false);
+      if (!w.isVisible()) w.showInactive();
+    };
+    for (const w of BrowserWindow.getAllWindows()) fix(w);
+    electronApp.on('browser-window-created', (_e, w) => fix(w));
+  });
+}
+
+async function closeQuietly(app) {
+  try {
+    await app.close();
+  } catch {}
+}
+
+export function tempDir(prefix = 'mqttscope-e2e-files-') {
+  return mkdtempSync(path.join(tmpdir(), prefix));
+}
+
+// ------------------------------------------------------------ tree
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+// The visible tree row whose name is exactly `name`.
+export function row(page, name) {
+  return page
+    .locator('#tree-scroll .tree-row:not([hidden])')
+    .filter({ has: page.locator('.name').filter({ hasText: new RegExp(`^${escapeRe(name)}$`) }) });
+}
+
+// The visible tree row for a full topic path (names can repeat across
+// branches). Collapsed ancestors are expanded by clicking their carets.
+export async function rowByPath(page, topic) {
+  const index = (t) => page.evaluate((p) => window.__mqttscope.treeView.rows.findIndex((r) => r.node.path === p), t);
+  const parts = topic.split('/');
+  for (let n = 1; n <= parts.length; n++) {
+    const p = parts.slice(0, n).join('/');
+    await expect.poll(() => index(p), { message: `tree row for ${p}` }).toBeGreaterThanOrEqual(0);
+    const r = page.locator(`#tree-scroll .tree-row[data-index="${await index(p)}"]:not([hidden])`);
+    if (n === parts.length) return r;
+    if ((await r.locator('.caret').textContent()) === '▸') {
+      await r.locator('.caret').click();
+      await expect(r.locator('.caret')).toHaveText('▾');
+    }
+  }
+}
+
+// Rendered rows in display order.
+export function treeRows(page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll('#tree-scroll .tree-row:not([hidden])')]
+      .sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index))
+      .map((r) => ({
+        name: r.querySelector('.name').textContent,
+        depth: (parseInt(r.style.paddingLeft, 10) - 4) / 16,
+        caret: r.querySelector('.caret').textContent,
+        value: r.querySelector('.value').hidden ? null : r.querySelector('.value').textContent,
+        badge: r.querySelector('.badge').textContent,
+        selected: r.classList.contains('selected'),
+        emptyLevel: r.querySelector('.name').classList.contains('empty-level'),
+      })),
+  );
+}
+
+export const rowNames = async (page) => (await treeRows(page)).map((r) => '  '.repeat(r.depth) + r.name);
+
+export async function waitForTopic(page, topic) {
+  await page.waitForFunction((t) => !!window.__mqttscope.tree.find(t)?.messageCount, topic, { timeout: 10_000 });
+}
+
+// ------------------------------------------------------------ menus, dialogs
+
+// Like helpers/app.mjs mockDialogs (same answers object), but also records
+// every native dialog the app opens so tests can check what was asked.
+export async function mockDialogs(app, answers) {
+  await app.evaluate(({ dialog }, a) => {
+    const calls = (globalThis.__dialogCalls ||= []);
+    const opts = (args) => args.find((x) => x && typeof x === 'object' && ('message' in x || 'defaultPath' in x || 'properties' in x)) || {};
+    dialog.showMessageBox = async (...args) => {
+      calls.push({ kind: 'confirm', message: opts(args).message, detail: opts(args).detail });
+      return { response: a.confirm === false ? 1 : 0 };
+    };
+    dialog.showSaveDialog = async (...args) => {
+      calls.push({ kind: 'save', defaultPath: opts(args).defaultPath });
+      return a.saveFile ? { canceled: false, filePath: a.saveFile } : { canceled: true };
+    };
+    dialog.showOpenDialog = async (...args) => {
+      calls.push({ kind: 'open', title: opts(args).title });
+      return a.openFile ? { canceled: false, filePaths: [a.openFile] } : { canceled: true, filePaths: [] };
+    };
+  }, answers);
+}
+
+export const dialogCalls = (app) => app.evaluate(() => globalThis.__dialogCalls || []);
+
+export async function menu(page, label) {
+  const item = page.locator('.ctx-menu .ctx-item').filter({ hasText: new RegExp(`^${escapeRe(label)}$`) });
+  await expect(item).toBeVisible();
+  await item.click();
+}
+
+export async function menuLabels(page) {
+  await expect(page.locator('.ctx-menu')).toBeVisible();
+  return page.locator('.ctx-menu .ctx-item').allTextContents();
+}
+
+// Answers the in-page prompt modal (ui.js promptText) with its OK button.
+// (Pressing Enter is covered separately: see keyboard.spec.mjs.)
+export async function answerPrompt(page, value) {
+  const box = page.locator('.modal.prompt');
+  const input = box.locator('input.input');
+  await expect(input).toBeVisible();
+  const handle = await box.elementHandle();
+  await input.fill(value);
+  await box.locator('button[type="submit"]').click();
+  // This prompt closed (another one may open right after it).
+  await handle.waitForElementState('hidden');
+}
+
+export const toast = (page, kind) => page.locator(kind ? `.toast.${kind}` : '.toast');
+
+// ------------------------------------------------------------ inspector
+
+export const viewerBody = (page) => page.locator('#viewer-host .viewer-body');
+export const viewerTab = (page, mode) => page.locator(`#viewer-host .viewer-toolbar .tab[data-mode="${mode}"]`);
+export const viewerButton = (page, label) => page.locator('#viewer-host .viewer').getByRole('button', { name: label, exact: true });
+export const historyItems = (page) => page.locator('#viewer-host .history-item');
+
+export async function clipboard(app) {
+  return app.evaluate(({ clipboard: c }) => c.readText());
+}
+
+// Runs `action` and returns the window it opens, sized like a real window.
+export async function popupFrom(app, action) {
+  const [popup] = await Promise.all([app.waitForEvent('window'), action()]);
+  await popup.waitForLoadState('domcontentloaded');
+  await popup.setViewportSize({ width: 1200, height: 900 });
+  const errors = [];
+  popup.on('pageerror', (e) => errors.push(String(e)));
+  popup.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  return { popup, errors };
+}
+
+// ------------------------------------------------------------ files
+
+export function readJson(file) {
+  return JSON.parse(readFileSync(file, 'utf8'));
+}
+
+export async function waitForFile(file, pred = () => true, message = file) {
+  await expect
+    .poll(
+      () => {
+        if (!existsSync(file)) return false;
+        try {
+          return !!pred(readFileSync(file));
+        } catch {
+          return false;
+        }
+      },
+      { message: `waiting for ${message}`, timeout: 10_000 },
+    )
+    .toBe(true);
+  return readFileSync(file);
+}
+
+// A port nothing listens on.
+export async function closedPort() {
+  const { createServer } = await import('node:net');
+  const srv = createServer();
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  const { port } = srv.address();
+  await new Promise((r) => srv.close(r));
+  return port;
+}
+
+// Records every value `#status-text` takes, so short-lived states are not missed.
+export async function recordStatus(page) {
+  await page.evaluate(() => {
+    const el = document.querySelector('#status-text');
+    window.__statusLog = [el.textContent];
+    new MutationObserver(() => window.__statusLog.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true });
+  });
+  return () => page.evaluate(() => window.__statusLog.slice());
+}

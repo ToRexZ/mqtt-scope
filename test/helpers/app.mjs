@@ -1,0 +1,76 @@
+// Launches the real Electron app for end-to-end tests: isolated data
+// directory, hidden windows, headless rendering.
+
+import { _electron as electron } from '@playwright/test';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+export function makeUserData({ profiles, savedMessages, plots, settings } = {}) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'mqttscope-e2e-'));
+  if (profiles) writeFileSync(path.join(dir, 'profiles.json'), JSON.stringify(profiles));
+  if (savedMessages) writeFileSync(path.join(dir, 'savedMessages.json'), JSON.stringify(savedMessages));
+  if (plots) writeFileSync(path.join(dir, 'plots.json'), JSON.stringify(plots));
+  if (settings) writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings));
+  return dir;
+}
+
+export function profile(port, extra = {}) {
+  return {
+    id: `p${port}`,
+    name: `Test broker ${port}`,
+    protocol: 'mqtt',
+    host: '127.0.0.1',
+    port,
+    mqttVersion: 4,
+    subscriptions: [{ topic: '#', qos: 0 }],
+    ...extra,
+  };
+}
+
+// Returns { app, page, userData, errors }. `errors` collects renderer
+// exceptions and console errors so tests can assert there were none.
+export async function launchApp({ userData = makeUserData(), headless = !process.env.MQTTSCOPE_E2E_HEADED } = {}) {
+  const app = await electron.launch({
+    args: [appDir, ...(headless ? ['--ozone-platform=headless'] : [])],
+    env: { ...process.env, MQTTSCOPE_USER_DATA: userData, MQTTSCOPE_HIDDEN: headless ? '1' : '' },
+  });
+  const page = await app.firstWindow();
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(String(e)));
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  await page.setViewportSize({ width: 1600, height: 1000 });
+  await page.waitForFunction(() => !!window.__mqttscope);
+  return { app, page, userData, errors };
+}
+
+// Replaces native dialogs in the main process so tests can drive them.
+// answers: { confirm: boolean, saveFile: path|null, openFile: path|null }
+export async function mockDialogs(app, answers) {
+  await app.evaluate(({ dialog }, a) => {
+    dialog.showMessageBox = async () => ({ response: a.confirm === false ? 1 : 0 });
+    dialog.showSaveDialog = async () => (a.saveFile ? { canceled: false, filePath: a.saveFile } : { canceled: true });
+    dialog.showOpenDialog = async () => (a.openFile ? { canceled: false, filePaths: [a.openFile] } : { canceled: true, filePaths: [] });
+  }, answers);
+}
+
+// Connects using the connection dialog's selected profile.
+export async function connect(page) {
+  await page.waitForSelector('.conn-dialog');
+  await page.click('.connect-btn');
+  await page.waitForFunction(() => window.__mqttscope.status.state === 'connected', null, { timeout: 10000 });
+}
+
+// Selects a topic in the tree by path (expanding its parents).
+export async function selectTopic(page, topic) {
+  await page.waitForFunction((t) => !!window.__mqttscope.tree.find(t), topic, { timeout: 10000 });
+  await page.evaluate((t) => {
+    const { tree, treeView } = window.__mqttscope;
+    const node = tree.find(t);
+    treeView.reveal(node);
+    treeView.select(node);
+  }, topic);
+}
