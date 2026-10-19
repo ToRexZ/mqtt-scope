@@ -204,4 +204,4 @@ and new windows are blocked.
 
 ## License
 
-[MIT](LICENSE) © 2026 Victor Hoffmann Risager
+[MIT](LICENSE) © 2026 Victor Risager

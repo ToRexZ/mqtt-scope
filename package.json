@@ -81,7 +81,7 @@
     "electron-builder": "^26.15.3",
     "ws": "^8.22.0"
   },
-  "author": "Victor Hoffmann Risager",
+  "author": "Victor Risager",
   "homepage": "https://github.com/ToRexZ/mqtt-scope",
   "desktopName": "mqtt-scope.desktop",
   "repository": {
