@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=MQTT Scope
+GenericName=MQTT Client
+Comment=Inspect, plot and publish MQTT messages
+Exec=mqtt-scope %U
+Icon=mqtt-scope
+Terminal=false
+Type=Application
+Categories=Development;
+Keywords=mqtt;broker;iot;robotics;vda5050;
+StartupWMClass=mqtt-scope

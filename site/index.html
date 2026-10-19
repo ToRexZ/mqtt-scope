@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MQTT Scope: a desktop MQTT client for busy brokers</title>
+    <meta
+      name="description"
+      content="MQTT Scope is a free desktop MQTT client for Linux, Windows and macOS: a live auto-subscribed topic tree, a large-message inspector, live plots and a publisher with saved messages."
+    />
+    <meta property="og:title" content="MQTT Scope" />
+    <meta property="og:description" content="A desktop MQTT client for busy brokers: live topic tree, large-message inspector, plots and a publisher with saved messages." />
+    <meta property="og:image" content="screenshots/inspector.png" />
+    <meta name="color-scheme" content="dark light" />
+    <link rel="icon" type="image/svg+xml" href="icon.svg" />
+    <link rel="stylesheet" href="style.css" />
+    <script src="download.js" defer></script>
+  </head>
+  <body>
+    <header class="nav">
+      <a class="brand" href="#top"><img src="icon.svg" alt="" width="28" height="28" /> MQTT Scope</a>
+      <nav>
+        <a href="#features">Features</a>
+        <a href="#download">Download</a>
+        <a href="https://github.com/ToRexZ/mqtt-scope">GitHub</a>
+      </nav>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <h1>See everything on your MQTT broker.</h1>
+        <p class="lead">
+          A desktop MQTT client for busy brokers: every topic in a live tree, large JSON messages you can actually read,
+          live plots of any value, and a publisher that remembers the messages you send most.
+        </p>
+        <div class="cta">
+          <a class="button primary" id="primary-download" href="https://github.com/ToRexZ/mqtt-scope/releases/latest">Download</a>
+          <a class="button" href="#download">All platforms</a>
+        </div>
+        <p class="meta" id="release-meta">Free and open source (MIT) · Linux, Windows, macOS</p>
+        <a class="shot-link" href="screenshots/inspector.png"><img class="shot hero-shot" src="screenshots/inspector.png" alt="MQTT Scope showing the topic tree and a VDA5050 state message in the inspector" width="1600" height="1000" /></a>
+      </section>
+
+      <section id="features" class="features">
+        <h2>Built for brokers with real traffic</h2>
+
+        <article class="feature">
+          <div class="text">
+            <h3>Auto-subscribed topic tree</h3>
+            <p>
+              Connect and the tree fills itself. Every topic level shows live message and topic counts, and changed
+              topics flash. It stays smooth with tens of thousands of topics. Filter by text or MQTT wildcard, even
+              inside payloads.
+            </p>
+          </div>
+          <a class="shot-link" href="screenshots/tree.png"><img class="shot" src="screenshots/tree.png" alt="Topic tree with live values, and the latest values of a branch in the inspector" loading="lazy" width="1600" height="1000" /></a>
+        </article>
+
+        <article class="feature reverse">
+          <div class="text">
+            <h3>Read large messages comfortably</h3>
+            <p>
+              A collapsible JSON tree that highlights what changed since the last message, syntax-highlighted text,
+              raw and hex views, history, and a <em>Held</em> mode that stops the view from jumping while you read.
+              Search filters a multi-megabyte document down to the matching branches.
+            </p>
+          </div>
+          <a class="shot-link" href="screenshots/search-large-message.png"><img class="shot" src="screenshots/search-large-message.png" alt="Searching a 470 KB JSON message" loading="lazy" width="1600" height="1000" /></a>
+        </article>
+
+        <article class="feature">
+          <div class="text">
+            <h3>See exactly what changed</h3>
+            <p>A structural diff lists every added, removed and changed field between two messages, path by path.</p>
+          </div>
+          <a class="shot-link" href="screenshots/diff.png"><img class="shot" src="screenshots/diff.png" alt="Structural diff between two robot state messages" loading="lazy" width="1600" height="1000" /></a>
+        </article>
+
+        <article class="feature reverse">
+          <div class="text">
+            <h3>Plot any value, live</h3>
+            <p>
+              Pick numbers from any topic or JSON field, from several topics at once, and give each series a readable
+              alias. Up to eight series per plot, a live time window, hover values, and CSV export.
+            </p>
+          </div>
+          <a class="shot-link" href="screenshots/plot-picker.png"><img class="shot" src="screenshots/plot-picker.png" alt="Picking values to plot from a message's structure" loading="lazy" width="1600" height="1000" /></a>
+        </article>
+
+        <article class="feature">
+          <div class="text">
+            <h3>Publish safely, again and again</h3>
+            <p>
+              Save the messages you send most and fire them with one click. The publish target never silently follows
+              your clicks once you have edited a message, retained publishes ask first, and double clicks never send
+              twice.
+            </p>
+          </div>
+          <a class="shot-link" href="screenshots/publisher-saved.png"><img class="shot" src="screenshots/publisher-saved.png" alt="Publisher with a library of saved messages" loading="lazy" width="1600" height="1000" /></a>
+        </article>
+
+        <ul class="grid">
+          <li><strong>Every transport</strong> TCP, TLS with client certificates, WebSocket; MQTT 3.1.1 and 5.0.</li>
+          <li><strong>Several brokers</strong> One connection per window; saved connections and messages are shared.</li>
+          <li><strong>Live subscriptions</strong> Add or remove topic filters without reconnecting.</li>
+          <li><strong>Exact numbers</strong> 64-bit ids and nanosecond timestamps are shown and re-sent exactly.</li>
+          <li><strong>Pop-out windows</strong> Keep a topic open in its own window, or maximise the inspector.</li>
+          <li><strong>Secure by default</strong> Sandboxed UI, payloads never executed, passwords in the OS keychain.</li>
+        </ul>
+      </section>
+
+      <section id="download" class="download">
+        <h2>Download</h2>
+        <p class="meta" id="version-line">The latest release, straight from GitHub.</p>
+        <div class="platforms" id="platforms">
+          <div class="platform">
+            <h3>Linux</h3>
+            <a class="button" data-asset="linux-x86_64.AppImage" href="https://github.com/ToRexZ/mqtt-scope/releases/latest">AppImage</a>
+            <a class="button" data-asset="linux-x64.tar.gz" href="https://github.com/ToRexZ/mqtt-scope/releases/latest">tar.gz</a>
+            <p class="note">Arch: build the <code>mqtt-scope-bin</code> package with <code>makepkg -si</code> from <a href="https://github.com/ToRexZ/mqtt-scope/tree/main/packaging/aur">packaging/aur</a>. The AppImage needs FUSE&nbsp;2.</p>
+          </div>
+          <div class="platform">
+            <h3>Windows</h3>
+            <a class="button" data-asset="win-x64-setup.exe" href="https://github.com/ToRexZ/mqtt-scope/releases/latest">Installer</a>
+            <a class="button" data-asset="win-x64-portable.exe" href="https://github.com/ToRexZ/mqtt-scope/releases/latest">Portable</a>
+            <p class="note">Not code-signed yet: choose <em>More info → Run anyway</em> the first time.</p>
+          </div>
+          <div class="platform">
+            <h3>macOS</h3>
+            <a class="button" data-asset="mac-arm64.dmg" href="https://github.com/ToRexZ/mqtt-scope/releases/latest">Apple silicon (.dmg)</a>
+            <a class="button" data-asset="mac-arm64.zip" href="https://github.com/ToRexZ/mqtt-scope/releases/latest">.zip</a>
+            <p class="note">Not notarised yet: right-click the app and choose <em>Open</em> the first time.</p>
+          </div>
+        </div>
+        <p class="meta">
+          All releases and notes are on <a href="https://github.com/ToRexZ/mqtt-scope/releases">GitHub Releases</a>. Prefer to build it
+          yourself? See the <a href="https://github.com/ToRexZ/mqtt-scope#development">README</a>.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <span>MQTT Scope · <a href="https://github.com/ToRexZ/mqtt-scope/blob/main/LICENSE">MIT License</a> · © 2026 Victor Risager</span>
+      <a href="https://github.com/ToRexZ/mqtt-scope">Source on GitHub</a>
+    </footer>
+  </body>
+</html>

@@ -78,6 +78,20 @@ try {
   await page.waitForTimeout(400);
   await shot('diff');
   await page.click('.tab[data-mode="tree"]');
+  await page.evaluate(() => {
+    const { tree, treeView } = window.__mqttscope;
+    tree.setExpandedRecursive(tree.root, false);
+    for (const t of ['factory', 'factory/line-1', 'factory/line-1/machine-01', 'factory/line-1/machine-02', 'factory/line-1/machine-03', 'factory/line-2', 'sensors', 'sensors/hall-1']) tree.find(t).expanded = true;
+    treeView.refresh();
+    treeView.select(tree.find('factory/line-1'));
+  });
+  await page.waitForTimeout(1500);
+  await shot('tree');
+  await page.evaluate(() => {
+    const { tree, treeView } = window.__mqttscope;
+    tree.setExpandedRecursive(tree.root, false);
+    treeView.refresh();
+  });
   await select('maps/hall-1/graph');
   await page.fill('.viewer .search', 'charging');
   await page.waitForTimeout(800);

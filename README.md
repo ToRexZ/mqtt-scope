@@ -105,6 +105,13 @@ Download the file for your platform from the
 | Windows | `MQTT-Scope-<version>-win-x64-setup.exe` (installer) or `…-win-x64-portable.exe` |
 | macOS | `MQTT-Scope-<version>-mac-arm64.dmg` (Apple silicon) or `.zip` |
 
+**Arch Linux**: `yay -S mqtt-scope-bin` once the AUR package is published; until
+then build the same package from this repository:
+
+```sh
+git clone https://github.com/ToRexZ/mqtt-scope && cd mqtt-scope/packaging/aur && makepkg -si
+```
+
 The AppImage needs FUSE 2 (`sudo pacman -S fuse2` on Arch, `sudo apt install
 libfuse2` on Ubuntu 22.04+); without it run it with
 `APPIMAGE_EXTRACT_AND_RUN=1`, or use the `.tar.gz`.

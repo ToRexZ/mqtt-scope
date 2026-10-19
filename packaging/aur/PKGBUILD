@@ -1,0 +1,37 @@
+# Maintainer: Victor Risager <54134767+ToRexZ@users.noreply.github.com>
+
+pkgname=mqtt-scope-bin
+_pkgname=mqtt-scope
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Desktop MQTT client: live topic tree, large-message inspector, live plots and a publisher with saved messages'
+arch=('x86_64')
+url='https://github.com/ToRexZ/mqtt-scope'
+license=('MIT')
+# Libraries the Electron binary links directly (readelf -d … NEEDED).
+depends=('alsa-lib' 'at-spi2-core' 'cairo' 'dbus' 'expat' 'glib2' 'glibc' 'gtk3' 'libcups' 'libgcc'
+         'libx11' 'libxcb' 'libxcomposite' 'libxdamage' 'libxext' 'libxfixes' 'libxkbcommon' 'libxrandr'
+         'mesa' 'nspr' 'nss' 'pango' 'systemd-libs')
+optdepends=('libsecret: encrypt saved connection passwords with the system keyring'
+            'xdg-utils: open the data folder and log file from the menu')
+provides=("${_pkgname}")
+conflicts=("${_pkgname}")
+options=('!strip' '!debug')
+source=("${_pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/MQTT-Scope-${pkgver}-linux-x64.tar.gz"
+        "${_pkgname}-${pkgver}-LICENSE::https://raw.githubusercontent.com/ToRexZ/${_pkgname}/v${pkgver}/LICENSE"
+        "${_pkgname}-${pkgver}.svg::https://raw.githubusercontent.com/ToRexZ/${_pkgname}/v${pkgver}/build/icon.svg"
+        "${_pkgname}.desktop")
+sha256sums=('955e97e366caa0ce2f66339a2f8e2302a4d6d26957bb1616b4c0d3bda8ea485d'
+            '8a9981afb4c8c93a6b584b40b91da32122f3a65580d966e9524b872df6496e46'
+            '2c7dd412db9a70e1d4cc91a463e5bc8f0dd34f87717d301514ad806943129cb2'
+            '083d88fc07076f171f19a98d2bd584f083aed1229b7a8ab2e96b2609d11c309f')
+
+package() {
+  install -d "${pkgdir}/opt/${_pkgname}" "${pkgdir}/usr/bin"
+  cp -a "MQTT-Scope-${pkgver}-linux-x64/." "${pkgdir}/opt/${_pkgname}/"
+  ln -s "/opt/${_pkgname}/${_pkgname}" "${pkgdir}/usr/bin/${_pkgname}"
+
+  install -Dm644 "${_pkgname}.desktop" "${pkgdir}/usr/share/applications/${_pkgname}.desktop"
+  install -Dm644 "${_pkgname}-${pkgver}.svg" "${pkgdir}/usr/share/icons/hicolor/scalable/apps/${_pkgname}.svg"
+  install -Dm644 "${_pkgname}-${pkgver}-LICENSE" "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

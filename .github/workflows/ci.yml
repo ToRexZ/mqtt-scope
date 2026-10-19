@@ -83,3 +83,46 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+
+  # Publishes packaging/aur to the AUR package mqtt-scope-bin for the new tag.
+  # Does nothing until the repository secret AUR_SSH_PRIVATE_KEY is set (the
+  # private half of an SSH key registered on the AUR account).
+  aur:
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    env:
+      AUR_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+    steps:
+      - name: Check for an AUR key
+        id: gate
+        run: |
+          if [ -n "$AUR_KEY" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else echo "No AUR_SSH_PRIVATE_KEY secret: skipping"; fi
+      - name: Install tools
+        if: steps.gate.outputs.enabled == 'true'
+        run: pacman -Syu --noconfirm --needed git openssh pacman-contrib
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.enabled == 'true'
+      - name: Update PKGBUILD for this release
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          useradd -m builder
+          cp -r packaging/aur /home/builder/pkg && chown -R builder /home/builder/pkg
+          cd /home/builder/pkg
+          sed -i -e "s/^pkgver=.*/pkgver=${version}/" -e "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          su builder -c "cd /home/builder/pkg && updpkgsums && makepkg --printsrcinfo > .SRCINFO"
+      - name: Push to the AUR
+        if: steps.gate.outputs.enabled == 'true'
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$AUR_KEY" > ~/.ssh/aur && chmod 600 ~/.ssh/aur
+          ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
+          printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile ~/.ssh/aur\n' > ~/.ssh/config
+          git clone ssh://aur@aur.archlinux.org/mqtt-scope-bin.git aur
+          cp /home/builder/pkg/PKGBUILD /home/builder/pkg/.SRCINFO /home/builder/pkg/mqtt-scope.desktop aur/
+          cd aur
+          git add PKGBUILD .SRCINFO mqtt-scope.desktop
+          if git diff --cached --quiet; then echo "AUR package already up to date"; exit 0; fi
+          git -c user.name="Victor Risager" -c user.email="54134767+ToRexZ@users.noreply.github.com" commit -m "Update to ${GITHUB_REF_NAME#v}"
+          git push origin HEAD:master

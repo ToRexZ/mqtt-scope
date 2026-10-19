@@ -1,0 +1,270 @@
+:root {
+  --bg: #0f1115;
+  --panel: #161a20;
+  --panel-2: #1c2129;
+  --border: #2a313b;
+  --text: #d7dce3;
+  --muted: #8b95a3;
+  --accent: #3987e5;
+  --accent-text: #ffffff;
+  --sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'JetBrains Mono', 'Cascadia Code', Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #f6f7f9;
+    --panel: #ffffff;
+    --panel-2: #eef0f3;
+    --border: #d9dde3;
+    --text: #1d232b;
+    --muted: #5e6873;
+    --accent: #2a78d6;
+    color-scheme: light;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+html {
+  scroll-behavior: smooth;
+}
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.6 var(--sans);
+}
+a {
+  color: var(--accent);
+}
+code {
+  font-family: var(--mono);
+  font-size: 0.9em;
+  background: var(--panel-2);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
+
+/* ------------------------------------------------------------ nav */
+
+.nav {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px max(16px, calc((100vw - 1120px) / 2));
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--border);
+}
+.brand {
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text);
+  font-weight: 700;
+  text-decoration: none;
+}
+.nav nav {
+  display: flex;
+  gap: 20px;
+}
+.nav nav a {
+  color: var(--muted);
+  text-decoration: none;
+}
+.nav nav a:hover {
+  color: var(--text);
+}
+
+/* ------------------------------------------------------------ layout */
+
+main section {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 72px 16px;
+}
+h1 {
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  line-height: 1.1;
+  margin: 0 0 16px;
+  letter-spacing: -0.02em;
+}
+h2 {
+  font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+  margin: 0 0 32px;
+  letter-spacing: -0.01em;
+}
+h3 {
+  margin: 0 0 8px;
+  font-size: 1.25rem;
+}
+.lead {
+  font-size: 1.2rem;
+  color: var(--muted);
+  max-width: 720px;
+  margin: 0 0 28px;
+}
+.meta {
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+.hero {
+  text-align: center;
+}
+.hero .lead {
+  margin-left: auto;
+  margin-right: auto;
+}
+.cta {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 600;
+}
+.button:hover {
+  border-color: var(--accent);
+}
+.button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  padding: 12px 24px;
+  font-size: 1.05rem;
+}
+.button.primary:hover {
+  filter: brightness(1.1);
+}
+.button .size {
+  font-weight: 400;
+  font-size: 0.85em;
+  opacity: 0.75;
+}
+.shot {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+}
+.hero-shot {
+  margin-top: 48px;
+}
+.shot-link {
+  display: block;
+  cursor: zoom-in;
+}
+
+/* ------------------------------------------------------------ features */
+
+.feature {
+  display: grid;
+  grid-template-columns: 1fr 1.6fr;
+  gap: 40px;
+  align-items: center;
+  margin-bottom: 72px;
+}
+.feature.reverse .text {
+  order: 2;
+}
+.feature p {
+  color: var(--muted);
+  margin: 0;
+}
+.grid {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+}
+.grid li {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px;
+  color: var(--muted);
+}
+.grid strong {
+  display: block;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+
+/* ------------------------------------------------------------ download */
+
+.platforms {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.platform {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.platform .note {
+  color: var(--muted);
+  font-size: 0.9rem;
+  margin: 4px 0 0;
+}
+
+footer {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 32px 16px 48px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+@media (max-width: 860px) {
+  .feature,
+  .platforms,
+  .grid {
+    grid-template-columns: 1fr;
+  }
+  .feature.reverse .text {
+    order: 0;
+  }
+  main section {
+    padding: 48px 16px;
+  }
+  .nav nav {
+    gap: 14px;
+  }
+  .nav nav a[href="#features"] {
+    display: none;
+  }
+}
