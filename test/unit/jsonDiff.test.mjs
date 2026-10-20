@@ -244,10 +244,10 @@ describe('diffLines', () => {
 });
 
 test('diffLines refuses tables over the cell cap instead of allocating them', async () => {
-  const { diffLines } = await import('../../renderer/jsonDiff.js');
+  const jsonDiff = await import('../../renderer/jsonDiff.js');
   const a = Array.from({ length: 2500 }, (_, i) => `a${i}`).join('\n');
   const b = Array.from({ length: 2500 }, (_, i) => `b${i}`).join('\n');
-  assert.equal(diffLines(a, b), null);
+  assert.equal(jsonDiff.diffLines(a, b), null);
   // A small changed middle inside long identical texts is still diffed.
   const base = Array.from({ length: 3900 }, (_, i) => `l${i}`);
   const changed = [...base];

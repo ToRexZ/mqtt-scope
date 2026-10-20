@@ -51,14 +51,49 @@ export function windowRange(series, windowSec, now) {
   return { t0, t1: now };
 }
 
+// Index of the first point with time > t (points.length when none): a
+// binary search over time-sorted points.
+export function firstAfter(points, t) {
+  let lo = 0;
+  let hi = points.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].t <= t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+// Index of the first point with time >= t (points.length when none).
+export function firstAtOrAfter(points, t) {
+  let lo = 0;
+  let hi = points.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid].t < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+// The points with t0 <= t <= t1 (a slice; no copy of the points themselves).
+export function pointsBetween(points, t0, t1) {
+  return points.slice(firstAtOrAfter(points, t0), firstAfter(points, t1));
+}
+
+// The last point at or before time t, or null.
+export function pointAtOrBefore(points, t) {
+  const i = firstAfter(points, t);
+  return i > 0 ? points[i - 1] : null;
+}
+
 // Spans of constant state for a state-bar series, clipped to [t0, t1]. The
 // value in force at t0 comes from the last point before it, and the last
 // state lasts until t1. Non-zero values are "on".
 export function stateSegments(points, t0, t1) {
   const out = [];
   if (!points.length || !(t1 > t0)) return out;
-  let i = 0;
-  while (i < points.length && points[i].t <= t0) i++;
+  let i = firstAfter(points, t0);
   let from = i > 0 ? t0 : points[0].t;
   let value = i > 0 ? points[i - 1].v : points[0].v;
   if (i === 0) i = 1;
@@ -73,5 +108,47 @@ export function stateSegments(points, t0, t1) {
   return out.filter((s) => s.to > t0 && s.from < t1);
 }
 
-// True when every value is 0 or 1 (booleans are plotted as 0/1).
-export const isBinary = (points) => points.length > 0 && points.every((p) => p.v === 0 || p.v === 1);
+// True when every value is 0 or 1 (booleans are plotted as 0/1). Points
+// arrays only grow at the end (or lose their oldest points), so the answer
+// is cached per array and only new points are checked.
+const binaryCache = new WeakMap(); // points -> { first, checked, binary }
+export function isBinary(points) {
+  if (!points.length) return false;
+  let c = binaryCache.get(points);
+  // Points dropped from the front (or the array was cleared): start over.
+  if (!c || c.first !== points[0] || c.checked > points.length) c = { first: points[0], checked: 0, binary: true };
+  for (let i = c.checked; c.binary && i < points.length; i++) c.binary = points[i].v === 0 || points[i].v === 1;
+  c.checked = points.length;
+  binaryCache.set(points, c);
+  return c.binary;
+}
+
+// Thins time-sorted points for drawing `buckets` pixel columns between t0
+// and t1: per column it keeps the first, lowest, highest and last point, so
+// the line looks the same while drawing at most ~4 points per pixel. Points
+// outside [t0, t1] are dropped except the nearest one on each side (so lines
+// run to the edges).
+export function decimate(points, t0, t1, buckets) {
+  const from = Math.max(0, firstAfter(points, t0) - 1);
+  const to = Math.min(points.length, firstAfter(points, t1) + 1);
+  if (to - from <= buckets * 4 || !(t1 > t0) || buckets < 1) return points.slice(from, to);
+  const out = [];
+  const width = (t1 - t0) / buckets;
+  let i = from;
+  while (i < to) {
+    const b = Math.floor((points[i].t - t0) / width);
+    const first = points[i];
+    let min = first;
+    let max = first;
+    let last = first;
+    for (i++; i < to && Math.floor((points[i].t - t0) / width) === b; i++) {
+      const p = points[i];
+      if (p.v < min.v) min = p;
+      if (p.v > max.v) max = p;
+      last = p;
+    }
+    const keep = [first, min, max, last].filter((p, k, all) => all.indexOf(p) === k).sort((a, z) => a.t - z.t);
+    out.push(...keep);
+  }
+  return out;
+}

@@ -17,7 +17,7 @@ const MAX_FILE_BYTES = 256 * 1024 * 1024; // the MQTT payload limit
 // One process owns the data files; launching the app again opens another
 // window in it. Each main window has its own broker connection.
 const windows = new Map(); // webContents.id -> { win, session }
-const popouts = new Map(); // webContents.id -> { win, topic, ownerId, init }
+const childWindows = new Map(); // webContents.id -> { win, ownerId, topics: Set, init } (see openChildWindow)
 let profiles;
 let stores;
 let quitting = false;
@@ -42,8 +42,8 @@ function hardenWindow(win) {
 function ownerOf(sender) {
   const own = windows.get(sender.id);
   if (own) return own;
-  const pop = popouts.get(sender.id);
-  return pop ? windows.get(pop.ownerId) || null : null;
+  const child = childWindows.get(sender.id);
+  return child ? windows.get(child.ownerId) || null : null;
 }
 
 function sessionOf(e) {
@@ -83,10 +83,10 @@ function createMainWindow() {
   session.on('warning', (message) => send('mqtt:warning', message));
   session.on('batch', (batch) => {
     send('mqtt:messages', batch);
-    for (const pop of popouts.values()) {
-      if (pop.ownerId !== id || pop.win.isDestroyed()) continue;
-      const mine = batch.messages.filter((m) => m.topic === pop.topic);
-      if (mine.length) pop.win.webContents.send('mqtt:messages', { messages: mine, dropped: 0 });
+    for (const child of childWindows.values()) {
+      if (child.ownerId !== id || child.win.isDestroyed()) continue;
+      const mine = batch.messages.filter((m) => child.topics.has(m.topic));
+      if (mine.length) child.win.webContents.send('mqtt:messages', { messages: mine, dropped: 0 });
     }
   });
 
@@ -112,7 +112,6 @@ function createMainWindow() {
     if (flushed) return;
     e.preventDefault();
     flushed = true;
-    let timer;
     const done = () => {
       clearTimeout(timer);
       ipcMain.off('app:flushed', onFlushed);
@@ -120,13 +119,13 @@ function createMainWindow() {
     };
     const onFlushed = (ev) => ev.sender.id === id && done();
     ipcMain.on('app:flushed', onFlushed);
-    timer = setTimeout(done, 1500);
+    const timer = setTimeout(done, 1500);
     win.webContents.send('app:flush');
   });
   win.on('closed', () => {
     windows.delete(id);
     session.disconnect();
-    for (const pop of popouts.values()) if (pop.ownerId === id && !pop.win.isDestroyed()) pop.win.close();
+    for (const child of childWindows.values()) if (child.ownerId === id && !child.win.isDestroyed()) child.win.close();
     // A quit (e.g. Cmd+Q) was paused by the flush above; resume it.
     if (quitting) app.quit();
   });
@@ -216,33 +215,68 @@ function registerIpc() {
     return { name: path.basename(file), bytes: new Uint8Array(fs.readFileSync(file)) };
   });
 
+  // An inspector pop-out: one topic, with the history the main window kept.
   ipcMain.handle('popout:open', (e, { topic, history } = {}) => {
     const owner = ownerOf(e.sender);
     if (!owner || typeof topic !== 'string') return;
-    const win = new BrowserWindow({
-      width: 1200,
-      height: 900,
+    openChildWindow(owner, {
+      page: 'popout.html',
       title: topic,
-      backgroundColor: '#0f1115',
-      autoHideMenuBar: true,
-      icon: ICON,
-      show: !process.env.MQTTSCOPE_HIDDEN,
-      webPreferences: webPreferences(),
+      size: { width: 1200, height: 900 },
+      topics: [topic],
+      init: { topic, history: Array.isArray(history) ? history : [] },
     });
-    hardenWindow(win);
-    const id = win.webContents.id;
-    popouts.set(id, { win, topic, ownerId: owner.win.webContents.id, init: { topic, history: Array.isArray(history) ? history : [] } });
-    win.on('closed', () => popouts.delete(id));
-    win.loadFile(path.join(__dirname, '..', 'renderer', 'popout.html'));
   });
 
-  ipcMain.handle('popout:init', (e) => {
-    const entry = popouts.get(e.sender.id);
+  // A plot in its own window: the plot and the points collected so far.
+  ipcMain.handle('plotwin:open', (e, init = {}) => {
+    const owner = ownerOf(e.sender);
+    const plot = init?.plot;
+    if (!owner || !plot || !Array.isArray(plot.series)) return;
+    openChildWindow(owner, {
+      page: 'plotWindow.html',
+      title: String(plot.title || 'Plot'),
+      size: { width: 1100, height: 650, minWidth: 360, minHeight: 240 },
+      topics: plot.series.map((s) => s && s.topic),
+      init,
+    });
+  });
+
+  // Reload (Ctrl+R) in a main window: its child windows start over too.
+  ipcMain.on('children:reset', (e) => {
+    const owner = windows.get(e.sender.id);
+    if (!owner) return;
+    for (const child of childWindows.values()) if (child.ownerId === e.sender.id && !child.win.isDestroyed()) child.win.webContents.send('app:reset');
+  });
+
+  // A child window asks once for what it was opened with.
+  ipcMain.handle('child:init', (e) => {
+    const entry = childWindows.get(e.sender.id);
     if (!entry) return null;
     const { init } = entry;
     entry.init = null; // the window keeps its own copy; free this one
     return init;
   });
+}
+
+// Windows opened from a main window (inspector pop-outs, pop-out plots). Each
+// gets its init data once, then the messages of its topics; it closes with
+// its main window.
+function openChildWindow(owner, { page, title, size, topics, init }) {
+  const win = new BrowserWindow({
+    ...size,
+    title,
+    backgroundColor: '#0f1115',
+    autoHideMenuBar: true,
+    icon: ICON,
+    show: !process.env.MQTTSCOPE_HIDDEN,
+    webPreferences: webPreferences(),
+  });
+  hardenWindow(win);
+  const id = win.webContents.id;
+  childWindows.set(id, { win, ownerId: owner.win.webContents.id, topics: new Set(topics.filter((t) => typeof t === 'string')), init });
+  win.on('closed', () => childWindows.delete(id));
+  win.loadFile(path.join(__dirname, '..', 'renderer', page));
 }
 
 function buildMenu() {
@@ -279,6 +313,8 @@ function buildMenu() {
         { label: 'Maximize Inspector', click: toRenderer('maximize'), ...keys('maximize') },
         { type: 'separator' },
         { label: 'Pause / Resume Updates', click: toRenderer('pause'), ...keys('pause') },
+        { label: 'Hold / Follow (Freeze Plots)', click: toRenderer('hold'), ...keys('hold') },
+        { label: 'Reload: Clear Messages and Restart Plots', click: toRenderer('reset'), ...keys('reset') },
         { label: 'Clear Topics', click: toRenderer('clear'), ...keys('clear') },
         { type: 'separator' },
         { role: 'resetZoom' },
@@ -323,9 +359,10 @@ function start() {
   const userData = app.getPath('userData');
   log.init(path.join(userData, 'logs'));
   log.info(`start ${app.getVersion()} electron ${process.versions.electron} ${process.platform}`);
-  // The UI needs no web permissions (camera, notifications, …).
-  electronSession.defaultSession.setPermissionRequestHandler((_wc, _permission, cb) => cb(false));
-  electronSession.defaultSession.setPermissionCheckHandler(() => false);
+  // The UI needs no web permissions (camera, notifications, …) except full
+  // screen, for showing a plot on its own.
+  electronSession.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => cb(permission === 'fullscreen'));
+  electronSession.defaultSession.setPermissionCheckHandler((_wc, permission) => permission === 'fullscreen');
   buildMenu();
   profiles = createProfileStore({
     file: path.join(userData, 'profiles.json'),

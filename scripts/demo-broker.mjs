@@ -172,6 +172,13 @@ setInterval(() => {
   publish('camera/dock-1/thumbnail', img);
 }, 5000);
 
+// Safety signals: booleans that flip now and then (try a State transitions plot).
+const safety = { front_brake_manual_release: false, rear_brake_manual_release: false, bumper_bar: true, is_standing_still: false, encoders_ok: true, radar_obstacle_not_detected: true };
+setInterval(() => {
+  for (const k of Object.keys(safety)) if (Math.random() < 0.08) safety[k] = !safety[k];
+  json('robot/status/safety/hardware', safety);
+}, 500);
+
 setInterval(() => publish('logs/gateway', `${new Date().toISOString()} INFO gateway: forwarded ${Math.floor(rnd(10, 400))} frames`), 1500);
 
 // Edge cases: leading slash, empty levels, empty payload, unicode.

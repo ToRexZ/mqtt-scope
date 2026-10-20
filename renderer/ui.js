@@ -7,6 +7,10 @@ export function el(tag, className, text) {
   return e;
 }
 
+// Where overlays (menus, dialogs, toasts) go: inside the element shown full
+// screen, if any, since nothing outside it is visible then.
+export const overlayHost = () => document.fullscreenElement || document.body;
+
 export function button(label, title, onClick, className = 'btn') {
   const b = el('button', className, label);
   b.type = 'button'; // never the implicit submit button of a surrounding form
@@ -42,7 +46,7 @@ export function showMenu(x, y, items) {
     }
     menu.append(row);
   }
-  document.body.append(menu);
+  overlayHost().append(menu);
   const r = menu.getBoundingClientRect();
   menu.style.left = `${Math.min(x, window.innerWidth - r.width - 4)}px`;
   menu.style.top = `${Math.min(y, window.innerHeight - r.height - 4)}px`;
@@ -64,7 +68,7 @@ if (typeof document !== 'undefined') {
 
 export function toast(message, kind = 'info') {
   const t = el('div', `toast ${kind}`, message);
-  document.body.append(t);
+  overlayHost().append(t);
   setTimeout(() => t.classList.add('fade'), 2600);
   setTimeout(() => t.remove(), 3200);
 }
@@ -186,7 +190,7 @@ export function promptText({ title, label, value = '', okLabel = 'OK', allowEmpt
     });
     overlay.addEventListener('mousedown', (e) => e.target === overlay && done(null));
     overlay.append(box);
-    document.body.append(overlay);
+    overlayHost().append(overlay);
     input.focus();
     input.select();
   });

@@ -10,6 +10,7 @@ import {
   displayCombo,
   toAccelerator,
   isPlainKey,
+  keyBelongsToTarget,
   isTypingTarget,
 } from '../../renderer/keys.js';
 
@@ -54,6 +55,14 @@ describe('bindings', () => {
   test('Enter connects by default', () => {
     assert.equal(resolveBindings({}).connectSelected, 'Enter');
   });
+  test('Space holds, Ctrl/Cmd+R reloads', () => {
+    const b = resolveBindings({});
+    assert.equal(b.hold, 'Space');
+    assert.equal(b.reset, 'Mod+R');
+    assert.equal(isPlainKey(b.hold), true, 'Space must still type in text fields');
+    assert.equal(toAccelerator(b.hold), 'Space');
+    assert.equal(toAccelerator(b.reset), 'CmdOrCtrl+R');
+  });
   test('normalizeOverrides keeps only real changes to known actions', () => {
     assert.deepEqual(normalizeOverrides({ connections: 'Mod+J', settings: 'Mod+,', nope: 'X', find: 3, clear: 'Mod+L' }), { connections: 'Mod+J', clear: 'Mod+L' });
     assert.deepEqual(normalizeOverrides(null), {});
@@ -97,5 +106,32 @@ describe('typing guards', () => {
     assert.equal(isTypingTarget(at('input')), true);
     assert.equal(isTypingTarget({ closest: () => null }), false);
     assert.equal(isTypingTarget(null), false);
+  });
+});
+
+describe('keys the focused element uses itself', () => {
+  // A stand-in for a DOM element: closest() matches by tag or role.
+  const elem = (tag, role = '') => ({
+    closest: (selector) => (selector.split(',').some((sel) => sel.trim() === tag || sel.trim().startsWith(`${tag}[`) || (role && sel.includes(`role="${role}"`))) ? {} : null),
+  });
+  test('plain keys type into text fields', () => {
+    assert.equal(keyBelongsToTarget('H', elem('input')), true);
+    assert.equal(keyBelongsToTarget('Space', elem('textarea')), true);
+    assert.equal(keyBelongsToTarget('Mod+R', elem('input')), false, 'modified shortcuts still work');
+  });
+  test('Space and Enter press a focused button, link, disclosure or tab', () => {
+    for (const target of [elem('button'), elem('summary'), elem('div', 'button'), elem('div', 'tab')]) {
+      assert.equal(keyBelongsToTarget('Space', target), true);
+      assert.equal(keyBelongsToTarget('Enter', target), true);
+    }
+    assert.equal(keyBelongsToTarget('H', elem('button')), false, 'other plain keys are free');
+  });
+  test('a button that was clicked (focused by the mouse) leaves Space to the shortcut', () => {
+    assert.equal(keyBelongsToTarget('Space', elem('button'), true), false);
+    assert.equal(keyBelongsToTarget('Space', elem('input'), true), true, 'text fields always keep their keys');
+  });
+  test('anywhere else the shortcut gets the key', () => {
+    assert.equal(keyBelongsToTarget('Space', elem('div')), false);
+    assert.equal(keyBelongsToTarget('Space', null), false);
   });
 });

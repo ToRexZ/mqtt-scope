@@ -2,10 +2,10 @@
 // selected topic's latest message with a checkbox per plottable value, and
 // the selection with optional aliases.
 
-import { el, button } from './ui.js';
+import { el, button, overlayHost } from './ui.js';
 import { preview, topicMatches } from './payload.js';
 import { messageFields, visibleFields, hasNumbers } from './fields.js';
-import { pathFromSegments } from './jsonPath.js';
+import { sourceLabel } from './plotView.js';
 import { seriesKey } from './plotMath.js';
 
 const MAX_TOPIC_ROWS = 2000;
@@ -13,7 +13,6 @@ const MAX_FIELD_ROWS = 3000;
 const COLLAPSE_ARRAYS_OVER = 10; // longer arrays start collapsed
 
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
-export const sourceLabel = (topic, segs) => (segs && segs.length ? `${topic} › ${pathFromSegments(segs)}` : topic);
 
 function formatLeaf(r) {
   if (r.kind === 'string') return JSON.stringify(r.value).slice(0, 80);
@@ -251,7 +250,7 @@ export function openPlotPicker(opts) {
     });
     onlyNumbersBox.addEventListener('change', renderFields);
 
-    document.body.append(overlay);
+    overlayHost().append(overlay);
     renderTopics();
     renderFields();
     renderSelection();

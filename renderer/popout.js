@@ -24,6 +24,12 @@ if (init) {
     }
   });
   let dirty = false;
+  // Reload (Ctrl+R) in the main window: start over with no messages.
+  api.onReset(() => {
+    source.history.length = 0;
+    source.messageCount = 0;
+    viewer.show(source);
+  });
   api.onMessages(({ messages }) => {
     for (const m of messages) {
       source.history.push(m);

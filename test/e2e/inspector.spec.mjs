@@ -239,7 +239,7 @@ test('inspector search: matching branches in Tree, marks in Text, Enter/Shift+En
   await expect(hitCount).toHaveText('1/3');
   await search.press('Shift+Enter');
   await expect(hitCount).toHaveText('3/3');
-  await page.locator('#viewer-host .search-box').getByRole('button', { name: '↑' }).click();
+  await page.locator('#viewer-host .search-box').getByRole('button', { name: 'Previous match' }).click();
   await expect(hitCount).toHaveText('2/3');
 
   // No match.
@@ -284,7 +284,7 @@ test('inspector actions: copy topic/payload, save payload, maximize via button, 
   await openTopic(page, 'act/json');
 
   // Copy topic / payload.
-  await page.locator('#viewer-host').getByRole('button', { name: '⧉' }).click();
+  await page.locator('#viewer-host').getByRole('button', { name: 'Copy topic' }).click();
   await expect(toast(page).filter({ hasText: 'Topic copied' })).toBeVisible();
   await expect.poll(() => clipboard(app)).toBe('act/json');
   await viewerButton(page, 'Copy').click();

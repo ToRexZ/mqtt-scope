@@ -88,11 +88,11 @@ test('flood: 20k messages on 5k topics, the UI stays responsive and counts are r
   }
   await flood;
 
-  await expect(page.locator('#stat-topics')).toHaveText(/^5[,.  ]?002 topics$/, { timeout: 20_000 });
-  await expect(page.locator('#stat-msgs')).toHaveText(/^20[,.  ]?002 messages$/);
+  await expect(page.locator('#stat-topics')).toHaveText(/^5[,.\u00a0\u202f]?002 topics$/, { timeout: 20_000 });
+  await expect(page.locator('#stat-msgs')).toHaveText(/^20[,.\u00a0\u202f]?002 messages$/);
   expect(await page.evaluate(() => [window.__mqttscope.tree.topicCount, window.__mqttscope.tree.messageCount])).toEqual([TOPICS + 2, MESSAGES + 2]);
   await expect(page.locator('#status-dropped')).toBeHidden();
-  await expect(row(page, 'flood').locator('.badge')).toHaveText(/^5[,.  ]?000 topics · 20[,.  ]?000 msgs$|^5000 topics · 20000 msgs$/);
+  await expect(row(page, 'flood').locator('.badge')).toHaveText(/^5[,.\u00a0\u202f]?000 topics · 20[,.\u00a0\u202f]?000 msgs$|^5000 topics · 20000 msgs$/);
 
   // Clicks after the flood, including into the big branch.
   const after = [await clickLatency('a', 'probe/a')];

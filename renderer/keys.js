@@ -15,6 +15,8 @@ export const ACTIONS = [
   { id: 'tabPlots', label: 'Show the Plots', default: 'Mod+2' },
   { id: 'newPlot', label: 'Add data to a new plot', default: 'Mod+Shift+A' },
   { id: 'pause', label: 'Pause or resume updates', default: 'Mod+Shift+P' },
+  { id: 'hold', label: 'Hold or follow the message in the inspector (on the Plots tab: freeze or resume)', default: 'Space' },
+  { id: 'reset', label: 'Reload: clear received messages and restart the plot timelines', default: 'Mod+R' },
   { id: 'clear', label: 'Clear all topics', default: '' },
 ];
 
@@ -106,4 +108,29 @@ export function isPlainKey(combo) {
 export function isTypingTarget(el) {
   if (!el || !el.closest) return false;
   return !!el.closest('input, textarea, select, [contenteditable="true"]');
+}
+
+const PRESSABLE = 'button, a[href], summary, [role="button"], [role="tab"]';
+
+// Whether the focused element uses this key itself, so a shortcut must not
+// take it: plain keys type into text fields, and Space or Enter press a
+// button, link or disclosure reached with the keyboard. A button that was
+// just clicked keeps focus too, but then Space is still the shortcut:
+// byPointer says the element got focus from a mouse press (see pointerFocus).
+export function keyBelongsToTarget(combo, el, byPointer = false) {
+  if (!isPlainKey(combo) || !el || !el.closest) return false;
+  if (isTypingTarget(el)) return true;
+  if (combo !== 'Space' && combo !== 'Enter') return false;
+  return !!el.closest(PRESSABLE) && !byPointer;
+}
+
+// Tracks which pressable element got focus from a mouse press (browsers keep
+// focus on a clicked button). Returns isPointerFocused(element).
+export function pointerFocus(doc) {
+  let pressed = null;
+  doc.addEventListener('mousedown', (e) => (pressed = e.target.closest?.(PRESSABLE) || null), true);
+  doc.addEventListener('focusin', (e) => {
+    if (e.target !== pressed) pressed = null; // focus moved some other way (e.g. Tab)
+  });
+  return (el) => !!el?.closest && el.closest(PRESSABLE) === pressed && pressed !== null;
 }

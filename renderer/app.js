@@ -12,7 +12,7 @@ import { decode, extractNumber, hexDump } from './payload.js';
 import { DEFAULT_SETTINGS, normalizeSettings, openSettings } from './settings.js';
 import { hasNumbers } from './fields.js';
 import { openSubscriptions } from './subscriptionsDialog.js';
-import { ACTIONS, bindingIndex, comboFromEvent, isPlainKey, isTypingTarget, resolveBindings, toAccelerator } from './keys.js';
+import { ACTIONS, bindingIndex, comboFromEvent, keyBelongsToTarget, pointerFocus, resolveBindings, toAccelerator } from './keys.js';
 
 const api = window.api;
 const $ = (sel) => document.querySelector(sel);
@@ -184,6 +184,19 @@ function updateStats() {
   dropEl.textContent = `${droppedTotal.toLocaleString()} messages dropped (too fast)`;
 }
 
+// Ctrl+R: start over without reconnecting — forget received messages and
+// restart every plot's timeline.
+function reloadSession() {
+  clearTree();
+  plots.reset();
+  api.resetChildWindows?.(); // pop-out windows start over too
+  droppedTotal = 0;
+  rateCount = 0;
+  rate = 0;
+  updateStats();
+  toast('Cleared received messages and restarted the plots');
+}
+
 function clearTree() {
   tree.clear();
   selected = null;
@@ -327,7 +340,7 @@ api.onMenu((action) => {
 api.onStoreChanged(async (name) => {
   if (name === 'profiles') await connections.reload();
   else if (name === 'savedMessages') await publisher.load();
-  else if (name === 'plots') await plots.reload();
+  else if (name === 'plotTabs') await plots.reload();
   else if (name === 'settings') applySettings(normalizeSettings(await api.storeGet('settings')));
 });
 
@@ -389,7 +402,9 @@ $('#filter-values').addEventListener('change', applyFilter);
 for (const tab of document.querySelectorAll('.right-tabs .tab')) {
   tab.addEventListener('click', () => showTab(tab.dataset.tab));
 }
+let currentTab = 'inspector';
 function showTab(name) {
+  currentTab = name;
   for (const t of document.querySelectorAll('.right-tabs .tab')) t.classList.toggle('active', t.dataset.tab === name);
   $('#viewer-host').hidden = name !== 'inspector';
   $('#plots-host').hidden = name !== 'plots';
@@ -424,17 +439,26 @@ const ACTION_HANDLERS = {
     plots.openPicker();
   },
   pause: () => $('#btn-pause').click(),
+  // Space: the Plots tab freezes its time axis, the inspector holds its message.
+  hold: (e) => {
+    if (e?.repeat) return;
+    if (currentTab === 'plots') plots.toggleFreeze();
+    else viewer.toggleLive();
+  },
+  reset: (e) => !e?.repeat && reloadSession(),
   clear: () => $('#btn-clear').click(),
   keyboardSettings: () => showSettings('keyboard'),
 };
 
+const isPointerFocused = pointerFocus(document);
 document.addEventListener('keydown', (e) => {
   if (document.querySelector('.modal-overlay')) return; // dialogs handle their own keys
   if (e.key === 'Escape' && $('#layout').classList.contains('max-viewer')) return toggleMaximize(false);
+  if (e.key === 'Escape' && currentTab === 'plots' && plots.handleEscape()) return;
   const combo = comboFromEvent(e);
   const action = combo && keyIndex.get(combo);
   if (!action || !ACTION_HANDLERS[action]) return;
-  if (isPlainKey(combo) && isTypingTarget(e.target)) return; // let plain keys type
+  if (keyBelongsToTarget(combo, e.target, isPointerFocused(e.target))) return; // e.g. typing, or Space pressing a focused button
   if (action === 'publish' && !e.target.closest?.('.publisher')) return;
   e.preventDefault();
   ACTION_HANDLERS[action](e);

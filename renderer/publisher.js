@@ -2,6 +2,7 @@
 // (named topic + payload + options) and a list of recent publishes.
 
 import { el, button, toast, promptText } from './ui.js';
+import { iconButton, setIcon } from './icons.js';
 import { decode, parseHex, formatTime, unsafeJson, hasUnsafeIntegers } from './payload.js';
 
 const RECENT_LIMIT = 50;
@@ -24,7 +25,7 @@ export class Publisher {
   build(host) {
     this.root = el('div', 'publisher');
     const head = el('div', 'pane-head pub-head');
-    this.collapseBtn = button('▾', 'Collapse publisher', () => this.toggleCollapsed(), 'btn icon');
+    this.collapseBtn = iconButton('chevron-down', 'Collapse publisher', () => this.toggleCollapsed());
     head.append(el('span', 'pane-title', 'Publish'), el('span', 'spacer'), this.collapseBtn);
 
     const row1 = el('div', 'pub-row');
@@ -144,7 +145,9 @@ export class Publisher {
   toggleCollapsed(force) {
     const collapsed = force ?? !this.root.classList.contains('collapsed');
     this.root.classList.toggle('collapsed', collapsed);
-    this.collapseBtn.textContent = collapsed ? '▴' : '▾';
+    setIcon(this.collapseBtn, collapsed ? 'chevron-up' : 'chevron-down');
+    this.collapseBtn.title = collapsed ? 'Expand publisher' : 'Collapse publisher';
+    this.collapseBtn.setAttribute('aria-label', this.collapseBtn.title);
     this.opts.onToggle?.(collapsed);
   }
 
@@ -404,7 +407,7 @@ export class Publisher {
               this.renderList();
             }
           }, 'btn icon'),
-          button('🗑', 'Delete', async () => {
+          iconButton('trash', 'Delete', async () => {
             if (!(await this.api.confirm({ message: `Delete saved message “${item.name}”?`, okLabel: 'Delete' }))) return;
             this.saved = this.saved.filter((s) => s !== item);
             this.persist();

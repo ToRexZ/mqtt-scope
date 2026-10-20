@@ -12,7 +12,13 @@ async function expectClean(page, where) {
   const state = await page.evaluate(() => ({
     pwned: window.__pwned,
     imgs: document.querySelectorAll('img').length,
-    svgs: document.querySelectorAll('svg').length,
+    // The app's own icons (icons.js) are the only SVGs allowed: a fixed shape
+    // directly inside an .icon span, with no attributes beyond drawing ones.
+    svgs: [...document.querySelectorAll('svg')].filter(
+      (e) =>
+        !e.parentElement?.matches('span.icon[aria-hidden="true"]') ||
+        [...e.attributes].some((a) => !['width', 'height', 'viewBox', 'fill', 'stroke', 'stroke-width', 'stroke-linecap', 'stroke-linejoin'].includes(a.name)),
+    ).length,
     scripts: [...document.querySelectorAll('script')].map((s) => s.getAttribute('src')),
     handlers: [...document.querySelectorAll('*')].filter((e) => [...e.attributes].some((a) => a.name.startsWith('on'))).length,
   }));

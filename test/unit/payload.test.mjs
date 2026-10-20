@@ -208,7 +208,7 @@ describe('preview', () => {
     assert.equal(preview(msg), '<binary 3 B>');
   });
 
-  test('a huge payload is neither fully decoded nor JSON-parsed', (t) => {
+  test('a huge payload is neither fully decoded nor JSON-parsed', () => {
     const big = enc('{"data":"' + 'x'.repeat(8 * 1024 * 1024) + '"}');
     const msg = msgOf(big);
     const decodeLens = [];
@@ -682,11 +682,11 @@ describe('hasUnsafeIntegers / unsafeJson / searchableText', () => {
     for (const t of no) assert.equal(hasUnsafeIntegers(t), false, t);
   });
   test('unsafeJson is cached and false for non-JSON', async () => {
-    const { decode, unsafeJson } = await P();
-    const d = decode({ payload: new TextEncoder().encode('{"id":18446744073709551615}') });
-    assert.equal(unsafeJson(d), true);
+    const fresh = await P();
+    const d = fresh.decode({ payload: new TextEncoder().encode('{"id":18446744073709551615}') });
+    assert.equal(fresh.unsafeJson(d), true);
     assert.equal(d._unsafe, true);
-    assert.equal(unsafeJson(decode({ payload: new TextEncoder().encode('18446744073709551615') })), false);
+    assert.equal(fresh.unsafeJson(fresh.decode({ payload: new TextEncoder().encode('18446744073709551615') })), false);
   });
   test('searchableText covers the whole payload, lower-cased, and is empty for binary', async () => {
     const { searchableText } = await P();

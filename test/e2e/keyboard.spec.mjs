@@ -62,7 +62,7 @@ test('shortcuts can be rebound in Settings → Keyboard; conflicts block saving;
   await page.keyboard.press(`${MOD}+J`);
   await expect(dlg.locator('.keys-row.conflict')).toHaveCount(2);
   await expect(dlg.getByRole('button', { name: 'Save' })).toBeDisabled();
-  await settingsRow.getByRole('button', { name: '↺' }).click();
+  await settingsRow.getByRole('button', { name: /^Reset to / }).click();
   await expect(dlg.locator('.keys-row.conflict')).toHaveCount(0);
   await dlg.getByRole('button', { name: 'Save' }).click();
   await expect(dlg).toHaveCount(0);
@@ -130,7 +130,7 @@ test('clicking a topic expands it one level; keyboard navigation does not; the s
   const { page, errors } = await env.launch({ userData });
   await connect(page);
   await waitForTopic(page, 'robot/c');
-  const expanded = (t) => page.evaluate((t) => window.__mqttscope.tree.find(t).expanded, t);
+  const expanded = (t) => page.evaluate((topic) => window.__mqttscope.tree.find(topic).expanded, t);
 
   await page.locator('#tree-scroll .tree-row', { hasText: 'robot' }).first().click();
   await expect.poll(() => expanded('robot')).toBe(true);

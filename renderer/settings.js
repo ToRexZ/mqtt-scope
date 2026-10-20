@@ -1,7 +1,8 @@
 // App settings: defaults, validation and the settings dialog (General and
 // Keyboard tabs).
 
-import { el, button, toast } from './ui.js';
+import { el, button, toast, overlayHost } from './ui.js';
+import { iconButton } from './icons.js';
 import { ACTIONS, comboFromEvent, conflicts, displayCombo, normalizeOverrides, resolveBindings } from './keys.js';
 
 export const DEFAULT_SETTINGS = {
@@ -73,7 +74,7 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
           recording = recording === a.id ? null : a.id;
           renderKeys();
         }, 'btn key-combo' + (recording === a.id ? ' on' : ''));
-        const reset = button('↺', `Reset to ${displayCombo(a.default)}`, () => {
+        const reset = iconButton('reset', `Reset to ${displayCombo(a.default)}`, () => {
           bindings[a.id] = a.default;
           recording = null;
           renderKeys();
@@ -153,7 +154,7 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
     form.addEventListener('keydown', (e) => e.key === 'Escape' && !recording && done(null));
     document.addEventListener('keydown', onRecord, true);
     overlay.append(form);
-    document.body.append(overlay);
+    overlayHost().append(overlay);
     renderKeys();
     showTab(tab);
     if (tab === 'general') fields.historyLimit.focus();

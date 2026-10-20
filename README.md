@@ -8,7 +8,7 @@ Desktop MQTT client for inspecting busy brokers: an auto-subscribed live topic
 tree, a large message inspector, live plots, and a publisher with a library of
 saved messages. Runs on Linux, Windows and macOS.
 
-**[Website](https://torexz.github.io/mqtt-scope/)** · **[Download the latest release](https://github.com/ToRexZ/mqtt-scope/releases/latest)**
+**[Website](https://torexz.github.io/mqtt-scope/)** · **[Download the latest release](https://github.com/ToRexZ/mqtt-scope/releases/latest)** · **[Changelog](CHANGELOG.md)**
 
 ![Inspector](docs/screenshots/inspector.png)
 
@@ -46,8 +46,9 @@ saved messages. Runs on Linux, Windows and macOS.
   **Raw**, **Hex**, structural **Diff** against the previous message, and
   **Chart** of a numeric payload or JSON field.
 - Live updates keep your scroll position and expanded nodes. **Held** freezes
-  the view on one message while new ones keep arriving; pick any message from
-  the history list (it holds still while the mouse is over it).
+  the view on one message while new ones keep arriving (press **Space** to hold
+  and release); pick any message from the history list (it holds still while
+  the mouse is over it).
 - Integers larger than 2^53 (64-bit ids, nanosecond timestamps) are shown
   exactly in Text and Raw and kept exact when re-publishing; the Tree view warns
   that it rounds them.
@@ -65,22 +66,48 @@ saved messages. Runs on Linux, Windows and macOS.
   values to plot…*) opens a picker: a scrollable, filterable list of topics on
   the left; the structure of the selected message on the right with a checkbox
   next to every number. Pick values from several topics at once.
+- **Tabs**: organise plots in named tabs (e.g. *Safety*, *Motion*), each with
+  its own plots and layout. Data is collected for every tab, so switching shows
+  the full timeline. Double-click a tab to rename it; right-click (or **⋯**) to
+  duplicate, delete, or export/import it as a `.json` file to share.
+- Plots **fill the tab** and are arranged like Lichtblick's panels: **drag a
+  plot by its title** onto the edge of another plot to put it beside, above or
+  below it, onto its middle to swap the two, or onto another tab to move it
+  there (Esc cancels). Drag the gaps between plots to **resize** them
+  (double-click a gap to even them out); a plot never gets so small that its
+  lanes overlap — below that the tab scrolls. **Arrange** lays them out in rows
+  again (a few stacked, or 1–4 per row).
+- **Pop out** a plot into its own window (move it to another screen, resize
+  it); it keeps plotting live and has its own plot type, time window, freeze
+  (**Space**) and zoom. **Ctrl+R** in the main window restarts it too.
+  **Full screen** shows one plot on its own (Esc leaves).
+- **State transitions**: switch a plot from *Lines* to *States* and every
+  series becomes a labelled lane that changes colour when its value changes
+  (true/false, or shades with the value written in), with the current value
+  next to the label. Plots of booleans start in this mode. In a *Lines* plot,
+  single series can still be drawn as a state lane below the y-axis.
+- **Zoom**: drag across a plot to zoom into that time range (all plots in the
+  tab follow) and, when you drag a box, that value range. Double-click, Esc or
+  **Reset view** (on each zoomed plot, and in the toolbar) returns to the live
+  view.
+- **Vertical lines at timestamps** (like Lichtblick's time grid) run through
+  the data and the state lanes; turn them off per plot in the settings panel
+  (X axis).
 - A **settings panel** for the selected plot, laid out like Lichtblick's:
-  title (rename), time window, legend on/off and values, fixed or automatic
-  y-axis range, and per series: visibility, label (alias), **colour picker**
-  or palette colour, display style and line width.
-- **Booleans as state bars**: true/false values show as a horizontal bar that
-  changes colour (each series can be a line, line with points, steps or a state
-  bar; booleans default to a state bar).
+  title (rename), plot type, time window, legend on/off and values, fixed or
+  automatic y-axis range, timestamp lines, and per series: visibility, label
+  (alias), **colour picker** or palette colour, display style (line, line and
+  points, steps, state lane) and line width. Hide it with « (» brings it back)
+  and resize it by dragging its edge.
 - **Synced time bar**: hovering one plot moves the time bar on every plot and
   shows the values at that moment in each legend.
-- **Layouts**: save the plots as named layouts, switch between them, and export
-  or import a layout as a `.json` file to share with colleagues.
 - Quick add: right-click a numeric topic, or a number in the inspector's Tree
   view, → *Add to new plot* / *Add to plot “…”*. Up to 8 series per plot,
-  freeze, CSV export (time, series alias, topic, path, value).
+  freeze (**Space**), CSV export (time, series alias, topic, path, value).
 
 ![Plots](docs/screenshots/plots.png)
+
+![State transitions plot of safety signals](docs/screenshots/plot-states.png)
 
 ![Plot picker](docs/screenshots/plot-picker.png)
 
@@ -141,7 +168,12 @@ new keys; clashes are flagged). Defaults (Ctrl is Cmd on macOS):
 | Ctrl+1 / Ctrl+2 | Inspector / Plots |
 | Ctrl+Shift+A | Add data to a new plot |
 | Ctrl+Shift+P | Pause / resume |
+| Space | Hold / follow the inspector's message (on the Plots tab: freeze / resume) |
+| Ctrl+R | Reload: clear received messages and restart the plot timelines (stays connected) |
+| Esc | Leave a full-screen plot, reset plot zoom, restore the inspector |
 | ↑ ↓ ← → Enter | Navigate / expand the topic tree |
+| Drag across / double-click a plot | Zoom / back to live |
+| Drag a plot's title | Move the plot (Esc cancels) |
 | Enter / Shift+Enter | Next / previous search match |
 
 ## Settings and data
@@ -151,7 +183,9 @@ topic (default 64 MB; the latest message is always kept), and whether clicking
 a topic in the tree also expands it one level (default on).
 
 Data lives in the app data folder (File → Open Data Folder):
-`profiles.json` (connections), `savedMessages.json`, `plots.json`,
+`profiles.json` (connections), `savedMessages.json`, `plotTabs.json` (plot
+tabs; `plots.json` keeps the tab on screen in the 0.1 format for older
+versions),
 `settings.json`, `logs/main.log`. Set `MQTTSCOPE_USER_DATA=/some/dir` to use a
 different folder (e.g. a portable install).
 
@@ -171,6 +205,7 @@ npm start             # run the app
 npm run test:unit          # pure logic (node:test)
 npm run test:integration   # MQTT session against an in-process broker: TCP, TLS, WebSocket, auth, reconnects
 npm run test:e2e           # drives the real Electron app with Playwright (headless)
+npm run lint               # ESLint
 npm test                   # all of the above
 ```
 
@@ -186,9 +221,13 @@ npm run dist:mac     # dmg + zip (build on macOS)
 npm run verify:package   # launch the packaged app and check it connects
 ```
 
-CI (`.github/workflows/ci.yml`) runs all tests on every push and pull request.
+CI (`.github/workflows/ci.yml`) runs the linter and all tests on every push and
+pull request.
 
 ### Releasing
+
+Add a section for the new version to [CHANGELOG.md](CHANGELOG.md) (move the
+entries under *Unreleased* there, if any), then:
 
 ```sh
 npm version patch        # or minor / major: bumps package.json and creates a v* tag
@@ -196,7 +235,11 @@ git push --follow-tags
 ```
 
 The tag makes CI build installers on Linux, Windows and macOS, smoke-test each
-packaged app, and attach them to a GitHub Release with generated notes.
+packaged app, and attach them to a GitHub Release whose notes are the version's
+CHANGELOG section (`scripts/release-notes.mjs`) plus the generated list of
+changes. Update `pkgver` and `sha256sums` in `packaging/aur/PKGBUILD` once the
+release is out (CI publishes it to the AUR itself when the
+`AUR_SSH_PRIVATE_KEY` secret is set).
 
 `node scripts/screenshots.mjs` regenerates the screenshots in `docs/`.
 
@@ -204,14 +247,22 @@ packaged app, and attach them to a GitHub Release with generated notes.
 
 ```
 main/          Electron main process (CommonJS)
-  main.js        windows (one MQTT session each), menu, IPC
+  main.js        windows (one MQTT session each; child windows for pop-outs), menu, IPC
   mqttSession.js an MQTT connection; batches messages every 50 ms for the UI
   profileStore.js, jsonStore.js   persisted data (atomic writes)
   preload.js     the only API the UI can call (contextIsolation + sandbox)
 renderer/      UI (plain ES modules, no framework or build step)
   app.js         wiring; topicTree.js data model; treeView.js virtual list
   viewer.js      inspector; jsonTree.js, jsonDiff.js, payload.js
-  plots.js, plotPicker.js, plotLayouts.js, fields.js, chart.js, plotMath.js   plots
+  plots.js       Plots tab: wires the modules below and draws tabs and plot cards
+    plotModel.js   tabs, plots and their arrangement: every rule, and the saved document (no DOM)
+    plotData.js    points collected for each plotted series (no DOM)
+    plotView.js    what a chart and legend show for a plot; plot sizes (no DOM)
+    plotLayouts.js validation, migration, split-layout tree and tab file format (no DOM)
+    mosaic.js      split layout on screen: resizing gaps, dragging plots around
+    plotSettings.js  settings panel; plotPicker.js, fields.js  choosing values to plot
+    chart.js, plotMath.js  drawing a plot; plotWindow.js  a plot in its own window
+  icons.js       monochrome line icons
   keys.js        keyboard shortcuts (defaults, rebinding, matching)
   publisher.js, connectionDialog.js, subscriptionsDialog.js, settings.js
 test/          unit, integration, e2e (+ helpers: in-process broker, app launcher)

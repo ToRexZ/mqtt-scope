@@ -1,24 +1,33 @@
-// Plots tab: live charts of numeric topics or JSON fields, a settings panel
-// for the selected plot (modelled on Lichtblick's plot panel) and named
-// layouts that can be shared as files. Plot definitions and layouts are
-// saved; data points are collected while the app runs.
+// Plots tab: named tabs of live plots, arranged like Lichtblick's panels,
+// with a settings panel for the selected plot. This module wires the pieces
+// together and draws the tab strip and the plot cards:
+//
+//   plotModel.js     tabs, plots and their arrangement (all the rules; saved)
+//   plotData.js      the points collected for every plotted series
+//   plotView.js      what a chart and a legend show for a plot
+//   plotCard.js      legend and controls shared with pop-out plot windows
+//   mosaic.js        the split layout: resizing gaps, dragging plots around
+//   plotSettings.js  the settings panel
+//   chart.js         drawing one plot
+//
+// Zoom, freeze and full screen are view state here; they are not saved.
 
-import { el, button, toast, promptText, showMenu } from './ui.js';
-import { decode, extractNumber, formatDateTime } from './payload.js';
-import { getAt } from './jsonPath.js';
-import { LineChart, MAX_SERIES, DISPLAYS } from './chart.js';
-import { seriesKey, windowRange, nearest, formatValue } from './plotMath.js';
-import { openPlotPicker, sourceLabel } from './plotPicker.js';
-import { WINDOWS, sanitizePlot, sanitizePlots, sanitizeLayouts, clonePlots, samePlots, layoutFile, parseLayoutFile } from './plotLayouts.js';
+import { el, button, toast, promptText, showMenu, splitter } from './ui.js';
+import { icon, iconButton } from './icons.js';
+import { LineChart } from './chart.js';
+import { MAX_SERIES } from './plotLayouts.js';
+import { PlotModel } from './plotModel.js';
+import { PlotData, pointsFromMessages } from './plotData.js';
+import { renderMosaic } from './mosaic.js';
+import { renderPlotSettings } from './plotSettings.js';
+import { renderLegend, updateLegend, kindToggle, windowSelect, resetViewButton } from './plotCard.js';
+import { openPlotPicker } from './plotPicker.js';
+import { seriesKey } from './plotMath.js';
+import { MIN_PLOT_WIDTH, labelOf, sourceLabel, defaultDisplay, layoutWeight, minPlotHeight, chartSeries, chartRange, chartAxis } from './plotView.js';
 
-const MAX_POINTS = 100000; // per series: 1 h at ~25 Hz
-const WINDOW_LABELS = { 60: '1 min', 300: '5 min', 900: '15 min', 3600: '1 h', 0: 'All' };
-
-// A series shows its alias when it has one, else where its data comes from.
-const labelOf = (s) => s.alias || sourceLabel(s.topic, s.segs);
-const newId = () => Math.random().toString(36).slice(2, 10);
-const paletteColor = (slot) => getComputedStyle(document.documentElement).getPropertyValue(`--series-${(slot % MAX_SERIES) + 1}`).trim();
-const colorOf = (s) => s.color || paletteColor(s.slot);
+const SAVE_DELAY_MS = 300;
+const REDRAW_MS = 500;
+const FULLSCREEN_WAIT_MS = 600;
 
 function loadPref(key, fallback) {
   try {
@@ -35,150 +44,131 @@ function savePref(key, value) {
 }
 
 export class PlotsPanel {
-  // opts: api, getHistory(topic) -> messages[], getTopicNodes() -> iterable of topic nodes,
-  //       onCountChange(n), onAdded()
+  // opts: api, getHistory(topic) -> messages[], getTopicNodes() -> iterable of
+  //       topic nodes, onCountChange(n), onAdded()
   constructor(host, opts) {
     this.opts = opts;
     this.api = opts.api;
-    this.plots = [];
-    this.layouts = [];
-    this.activeLayoutId = null;
-    this.selectedId = null;
-    this.data = new Map(); // seriesKey -> points[]
-    this.byTopic = new Map(); // topic -> Set of series keys
-    this.charts = new Map(); // plot id -> LineChart
+    this.model = new PlotModel(null, {
+      weightOf: layoutWeight,
+      onChange: () => {
+        this.trackSeries();
+        this.persist();
+      },
+    });
+    this.data = new PlotData();
+    this.charts = new Map(); // plot id -> LineChart (the tab on screen)
+    this.cards = new Map(); // plot id -> card element (the tab on screen)
     this.openSeries = new Set(); // series ids expanded in the settings panel
+    this.zoomByTab = new Map(); // tab id -> { t0, t1 }
+    this.yZoom = new Map(); // plot id -> { yMin, yMax }
+    this.soloId = null; // plot shown full screen
     this.hoverTime = null;
     this.frozenAt = null;
     this.visible = false;
     this.build(host);
-    setInterval(() => this.visible && !this.frozenAt && this.redraw(), 500);
+    this.trackSeries();
+    setInterval(() => this.visible && !this.frozenAt && this.redraw(), REDRAW_MS);
+    document.addEventListener('fullscreenchange', () => this.onFullscreenChange());
   }
 
-  build(host) {
-    this.root = el('div', 'plots' + (loadPref('settings', true) ? '' : ' no-settings'));
-    const bar = el('div', 'plots-toolbar');
-    this.layoutSelect = el('select', 'select layout-select');
-    this.layoutSelect.title = 'Saved plot layouts';
-    this.layoutSelect.addEventListener('change', () => this.switchLayout(this.layoutSelect.value));
-    this.saveBtn = button('Save', 'Save the plots to the current layout', () => this.saveLayout());
-    this.freezeBtn = button('Freeze', 'Stop the time axis so you can inspect', () => this.toggleFreeze());
-    this.settingsBtn = button('Settings', 'Show or hide the plot settings panel', () => this.toggleSettings(), 'btn' + (loadPref('settings', true) ? ' on' : ''));
-    bar.append(
-      el('span', 'field-label', 'Layout'),
-      this.layoutSelect,
-      this.saveBtn,
-      button('Save as…', 'Save the plots as a new layout', () => this.saveLayoutAs()),
-      button('⋯', 'More layout actions', (e) => this.layoutMenu(e), 'btn icon layout-more'),
-      el('span', 'toolbar-sep'),
-      button('+ New plot', 'Pick topics and values to plot', () => this.openPicker()),
-      this.freezeBtn,
-      this.settingsBtn,
-      el('span', 'muted small plots-hint', 'Right-click a numeric topic or value to plot it. Hover a plot to compare all plots at that moment.'),
-    );
-    const main = el('div', 'plots-main');
-    this.side = el('div', 'plot-settings');
-    this.grid = el('div', 'plots-grid');
-    main.append(this.side, this.grid);
-    this.root.append(bar, main);
-    host.append(this.root);
+  // ------------------------------------------------------------ reading
+
+  get tab() {
+    return this.model.tab;
+  }
+
+  // Plots of the tab on screen.
+  get plots() {
+    return this.model.plots;
+  }
+
+  get selectedId() {
+    return this.model.selectedId;
+  }
+
+  set selectedId(id) {
+    this.model.select(id);
+  }
+
+  // Points collected for a series: [{ t, v }], oldest first.
+  points(topic, segs) {
+    return this.data.points(topic, segs);
   }
 
   // ------------------------------------------------------------ persistence
 
-  async load() {
+  // keepActive: another window saved; stay on the tab shown here.
+  async load({ keepActive = false } = {}) {
     try {
-      const doc = await this.api.storeGet('plots');
-      this.plots = sanitizePlots(doc?.plots);
-      this.layouts = sanitizeLayouts(doc?.layouts);
-      this.activeLayoutId = this.layouts.some((l) => l.id === doc?.activeLayoutId) ? doc.activeLayoutId : null;
+      const [tabs, legacy] = await Promise.all([this.api.storeGet('plotTabs'), this.api.storeGet('plots')]);
+      this.model.load(tabs, { legacy, keepActive });
+      if (this.model.newer && !this.warnedNewer) {
+        this.warnedNewer = true;
+        toast('These plots were saved by a newer MQTT Scope. Changes made here are not saved, so nothing it added is lost.', 'error');
+      }
     } catch (err) {
       toast(`Could not load plots: ${err.message}`, 'error');
     }
-    if (!this.plots.some((p) => p.id === this.selectedId)) this.selectedId = this.plots[0]?.id ?? null;
-    this.reindex();
-    for (const p of this.plots) for (const s of p.series) this.backfill(s);
+    this.trackSeries();
     this.renderAll();
   }
 
   // Picks up plot definitions saved by another window (collected data stays).
   async reload() {
     if (this.saveTimer) return; // this window has changes about to be saved
-    await this.load();
+    await this.load({ keepActive: true });
   }
 
   persist() {
     clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => this.flushSave(), 300);
-    this.renderLayoutBar();
+    this.saveTimer = setTimeout(() => this.flushSave(), SAVE_DELAY_MS);
   }
 
-  flushSave() {
+  // Saves the tabs, and the tab on screen in the 0.1 format for older versions.
+  async flushSave() {
     clearTimeout(this.saveTimer);
     this.saveTimer = null;
-    return this.api
-      .storeSet('plots', { plots: this.plots, layouts: this.layouts, activeLayoutId: this.activeLayoutId })
-      .catch((err) => toast(`Could not save plots: ${err.message}`, 'error'));
-  }
-
-  reindex() {
-    this.byTopic.clear();
-    const live = new Set();
-    for (const p of this.plots) {
-      for (const s of p.series) {
-        const key = seriesKey(s.topic, s.segs);
-        if (!this.byTopic.has(s.topic)) this.byTopic.set(s.topic, new Set());
-        this.byTopic.get(s.topic).add(key);
-        live.add(key);
-        if (!this.data.has(key)) this.data.set(key, []);
-      }
+    if (this.model.newer) return;
+    try {
+      // The 0.1 copy first: other windows reload when plotTabs changes.
+      await this.api.storeSet('plots', this.model.legacyDoc());
+      await this.api.storeSet('plotTabs', this.model.toDoc());
+    } catch (err) {
+      toast(`Could not save plots: ${err.message}`, 'error');
     }
-    // Free the points of series that are no longer plotted anywhere.
-    for (const key of this.data.keys()) if (!live.has(key)) this.data.delete(key);
-    this.opts.onCountChange?.(this.plots.length);
   }
 
-  setVisible(v) {
-    this.visible = v;
-    if (v) this.redraw();
+  // Collect data for exactly the plotted series; new ones start from the
+  // messages the topic tree has kept.
+  trackSeries() {
+    this.data.track(this.model.allSeries(), (s) => pointsFromMessages(this.opts.getHistory(s.topic), s.segs));
+    this.opts.onCountChange?.(this.model.allPlots().length);
   }
 
   // ------------------------------------------------------------ data
 
   ingest(msg) {
-    const keys = this.byTopic.get(msg.topic);
-    if (!keys) return;
-    for (const key of keys) {
-      const segs = JSON.parse(key.split('\u0000')[1]);
-      const v = extractNumber(msg, segs);
-      if (v === undefined) continue;
-      const pts = this.data.get(key);
-      if (pts.length && msg.ts < pts[pts.length - 1].t) continue; // keep points ordered
-      pts.push({ t: msg.ts, v });
-      if (pts.length > MAX_POINTS) pts.splice(0, pts.length - MAX_POINTS);
-    }
+    this.data.ingest(msg);
   }
 
-  backfill(series) {
-    const key = seriesKey(series.topic, series.segs);
-    const pts = this.data.get(key);
-    if (!pts || pts.length) return;
-    for (const m of this.opts.getHistory(series.topic) || []) {
-      const v = extractNumber(m, series.segs);
-      if (v !== undefined) pts.push({ t: m.ts, v });
-    }
-  }
-
-  clearData() {
-    for (const pts of this.data.values()) pts.length = 0;
+  // Restarts every timeline: forgets collected points, zoom and freeze.
+  reset() {
+    this.data.clear();
+    this.zoomByTab.clear();
+    this.yZoom.clear();
+    if (this.frozenAt) this.toggleFreeze();
+    this.updateZoomUi();
     this.redraw();
   }
 
-  // ------------------------------------------------------------ editing
-
-  get selected() {
-    return this.plots.find((p) => p.id === this.selectedId) || null;
+  setVisible(v) {
+    this.visible = v;
+    if (v) this.redraw();
+    else if (this.soloId) this.exitFullscreen(); // the Plots tab was hidden
   }
+
+  // ------------------------------------------------------------ editing plots
 
   // Context-menu entries for adding a topic/field to a new or existing plot.
   menuItems(topic, segs) {
@@ -196,44 +186,25 @@ export class PlotsPanel {
     return items;
   }
 
-  // Booleans default to a state bar, everything else to a line.
-  defaultDisplay(topic, segs) {
-    const h = this.opts.getHistory(topic) || [];
-    const msg = h[h.length - 1];
-    if (!msg) return 'line';
-    const d = decode(msg);
-    const v = segs && segs.length ? (d.kind === 'json' ? getAt(d.value, segs) : undefined) : d.value;
-    return typeof v === 'boolean' ? 'state' : 'line';
+  // The model's addSeries, with the display style the latest message suggests.
+  add(plotId, topic, segs, alias = '') {
+    const history = this.opts.getHistory(topic) || [];
+    return this.model.addSeries(plotId, { topic, segs, alias, display: defaultDisplay(history[history.length - 1], segs) });
   }
 
-  // Adds one series; creates the plot when plotId is null. Returns the plot id,
-  // or null when nothing was added.
+  // Adds one series; creates the plot (in the tab on screen) when plotId is
+  // null. Returns the plot id, or null when nothing was added.
   addSeries(plotId, topic, segs, { alias = '', quiet = false } = {}) {
-    segs = segs && segs.length ? segs : null;
-    let plot = this.plots.find((p) => p.id === plotId);
-    if (!plot) {
-      plot = sanitizePlot({ id: newId(), title: alias || sourceLabel(topic, segs), windowSec: 300, series: [] });
-      this.plots.push(plot);
-      this.selectedId = plot.id;
-    }
-    if (plot.series.length >= MAX_SERIES) {
+    const res = this.add(plotId, topic, segs, alias);
+    if (res.full) {
       toast(`A plot holds at most ${MAX_SERIES} series`, 'error');
       return null;
     }
-    if (plot.series.some((s) => seriesKey(s.topic, s.segs) === seriesKey(topic, segs))) return plot.id;
-    const used = new Set(plot.series.map((s) => s.slot));
-    let slot = 0;
-    while (used.has(slot)) slot++;
-    const series = { id: newId(), topic, segs, slot, display: this.defaultDisplay(topic, segs), width: 2, visible: true, ...(alias ? { alias } : {}) };
-    plot.series.push(series);
-    this.reindex();
-    this.backfill(series);
-    if (!quiet) {
+    if (!quiet && res.series) {
       this.renderAll();
-      this.persist();
-      toast(`Plotting ${labelOf(series)}`);
+      toast(`Plotting ${labelOf(res.series)}`);
     }
-    return plot.id;
+    return res.plot?.id ?? null;
   }
 
   async openPicker(plotId = null, initialTopic = null) {
@@ -246,61 +217,51 @@ export class PlotsPanel {
     });
     if (!result || !result.items.length) return;
     let id = result.plotId;
-    let added = 0;
+    const count = { added: 0, already: 0, full: 0 };
     for (const item of result.items) {
-      const before = this.plots.find((p) => p.id === id)?.series.length ?? 0;
-      id = this.addSeries(id, item.topic, item.segs, { alias: item.alias, quiet: true }) ?? id;
-      if ((this.plots.find((p) => p.id === id)?.series.length ?? 0) > before) added++;
+      const res = this.add(id, item.topic, item.segs, item.alias);
+      if (res.full) count.full++;
+      else if (res.series) count.added++;
+      else if (res.plot) count.already++;
+      id = res.plot?.id ?? id;
     }
-    this.selectedId = id;
+    if (!result.plotId && id) this.model.settleKind(id);
+    if (id) this.model.select(id);
     this.renderAll();
-    this.persist();
-    toast(`Added ${added} series`);
+    const notes = [count.already && `${count.already} already plotted`, count.full && `${count.full} did not fit (at most ${MAX_SERIES} per plot)`].filter(Boolean);
+    toast(`${count.added ? `Added ${count.added} series` : 'Nothing added'}${notes.length ? `; ${notes.join(', ')}` : ''}`, count.full && !count.added ? 'error' : 'info');
     this.opts.onAdded?.();
   }
 
-  async renameSeries(series) {
+  async renameSeries(plot, series) {
     const alias = await promptText({
       title: 'Series alias',
       label: `Name shown in the legend for ${sourceLabel(series.topic, series.segs)} (leave empty to use the topic)`,
       value: series.alias || '',
       allowEmpty: true,
     });
-    if (alias === null) return;
-    if (alias.trim()) series.alias = alias.trim();
-    else delete series.alias;
-    this.renderAll();
-    this.persist();
+    if (alias !== null && this.model.updateSeries(plot.id, series.id, { alias })) this.renderAll();
   }
 
   async renamePlot(plot) {
-    const name = await promptText({ title: 'Rename plot', label: 'Title', value: plot.title });
-    if (!name || !name.trim()) return;
-    plot.title = name.trim();
-    this.renderAll();
-    this.persist();
-  }
-
-  removeSeries(plot, series) {
-    plot.series = plot.series.filter((s) => s !== series);
-    this.reindex();
-    this.renderAll();
-    this.persist();
+    const title = await promptText({ title: 'Rename plot', label: 'Title', value: plot.title });
+    if (title !== null && this.model.updatePlot(plot.id, { title })) this.renderAll();
   }
 
   removePlot(plot) {
-    const i = this.plots.indexOf(plot);
-    this.plots = this.plots.filter((p) => p !== plot);
-    if (this.selectedId === plot.id) this.selectedId = (this.plots[i] || this.plots[i - 1])?.id ?? null;
-    this.reindex();
+    this.yZoom.delete(plot.id);
+    if (this.model.removePlot(plot.id)) this.renderAll();
+  }
+
+  setKind(plot, kind) {
+    if (!this.model.updatePlot(plot.id, { kind })) return;
+    this.yZoom.delete(plot.id);
     this.renderAll();
-    this.persist();
   }
 
   select(plotId) {
-    if (this.selectedId === plotId) return;
-    this.selectedId = plotId;
-    for (const card of this.grid.querySelectorAll('.plot-card')) card.classList.toggle('selected', card.dataset.plotId === plotId);
+    if (!this.model.select(plotId)) return;
+    for (const [id, card] of this.cards) card.classList.toggle('selected', id === plotId);
     this.renderSettings();
   }
 
@@ -325,110 +286,154 @@ export class PlotsPanel {
     const rows = ['time_iso,epoch_ms,series,topic,path,value'];
     for (const s of plot.series) {
       const path = s.segs && s.segs.length ? sourceLabel('', s.segs).replace(/^ › /, '') : '';
-      for (const p of this.data.get(seriesKey(s.topic, s.segs)) || []) {
+      for (const p of this.data.points(s.topic, s.segs)) {
         rows.push(`${new Date(p.t).toISOString()},${p.t},${q(labelOf(s))},${q(s.topic)},${q(path)},${p.v}`);
       }
     }
     this.api.saveFile(`${plot.title.replace(/[^\w.-]+/g, '_')}.csv`, rows.join('\n')).then((f) => f && toast(`Saved ${f}`));
   }
 
-  // ------------------------------------------------------------ layouts
-
-  get activeLayout() {
-    return this.layouts.find((l) => l.id === this.activeLayoutId) || null;
+  // Opens the plot live in its own window (it stays in the tab as well).
+  popOut(plot) {
+    const data = {};
+    for (const s of plot.series) data[seriesKey(s.topic, s.segs)] = this.data.points(s.topic, s.segs);
+    this.api.openPlotWindow({ plot: JSON.parse(JSON.stringify(plot)), data, tabName: this.tab.name });
   }
 
-  get layoutDirty() {
-    const l = this.activeLayout;
-    return l ? !samePlots(l.plots, this.plots) : this.plots.length > 0;
+  // ------------------------------------------------------------ zoom
+
+  isZoomed() {
+    return this.zoomByTab.has(this.tab.id) || this.plots.some((p) => this.yZoom.has(p.id));
   }
 
-  renderLayoutBar() {
-    const sel = this.layoutSelect;
-    sel.textContent = '';
-    if (!this.activeLayout) sel.append(Object.assign(el('option', '', this.plots.length ? 'Unsaved layout' : 'No layout'), { value: '' }));
-    for (const l of this.layouts) {
-      const dirty = l.id === this.activeLayoutId && this.layoutDirty;
-      sel.append(Object.assign(el('option', '', `${l.name}${dirty ? ' •' : ''}`), { value: l.id }));
+  // The time range zooms every plot of the tab (they share one timeline); the
+  // value range only the plot it was selected in.
+  zoom(plot, z) {
+    if (!(z.t1 > z.t0)) return;
+    this.zoomByTab.set(this.tab.id, { t0: z.t0, t1: z.t1 });
+    if (Number.isFinite(z.yMin) && Number.isFinite(z.yMax) && z.yMax > z.yMin) this.yZoom.set(plot.id, { yMin: z.yMin, yMax: z.yMax });
+    this.updateZoomUi();
+    this.redraw();
+  }
+
+  resetZoom() {
+    this.zoomByTab.delete(this.tab.id);
+    for (const p of this.plots) this.yZoom.delete(p.id);
+    this.updateZoomUi();
+    this.redraw();
+  }
+
+  // Shows "Reset view" in the toolbar and on every zoomed plot (a time zoom
+  // applies to the whole tab, a value zoom to one plot).
+  updateZoomUi() {
+    this.zoomBtn.hidden = !this.isZoomed();
+    const timeZoomed = this.zoomByTab.has(this.tab.id);
+    for (const [id, card] of this.cards) {
+      const b = card.querySelector('.reset-view');
+      if (b) b.hidden = !(timeZoomed || this.yZoom.has(id));
     }
-    sel.value = this.activeLayoutId || '';
-    this.saveBtn.classList.toggle('on', this.layoutDirty && !!this.activeLayout);
-    this.saveBtn.title = this.activeLayout ? `Save the plots to “${this.activeLayout.name}”` : 'Save the plots as a new layout';
   }
 
-  async confirmDiscard() {
-    if (!this.layoutDirty || !this.plots.length) return true;
-    return this.api.confirm({
-      message: 'Discard changes to the current plots?',
-      detail: this.activeLayout ? `They are not saved to “${this.activeLayout.name}”.` : 'They are not saved in any layout.',
-      okLabel: 'Discard',
-    });
+  // Esc: leave full screen first, then reset the zoom. Returns whether there
+  // was something to undo.
+  handleEscape() {
+    if (this.soloId) {
+      this.exitFullscreen();
+      return true;
+    }
+    if (this.isZoomed()) {
+      this.resetZoom();
+      return true;
+    }
+    return false;
   }
 
-  applyPlots(plots, layoutId) {
-    this.plots = clonePlots(plots);
-    this.activeLayoutId = layoutId;
-    this.selectedId = this.plots[0]?.id ?? null;
-    this.reindex();
-    for (const p of this.plots) for (const s of p.series) this.backfill(s);
+  // ------------------------------------------------------------ full screen
+
+  // One plot fills the Plots panel, and the panel goes full screen (or, when
+  // the system does not allow it, covers the window). The plot is remembered
+  // by id, so it stays full screen while its card is drawn again (after an
+  // edit, or when another window saves).
+  async toggleFullscreen(plotId) {
+    if (this.soloId === plotId) return this.exitFullscreen();
+    this.soloId = plotId;
+    this.root.classList.add('solo');
+    this.renderGrid();
+    if (document.fullscreenElement === this.root) return;
+    const request = (this.fullscreenRequest = {});
+    const fallback = () => {
+      if (this.fullscreenRequest !== request || document.fullscreenElement === this.root) return;
+      this.fullscreenRequest = null;
+      if (this.soloId) this.root.classList.add('fill-window');
+    };
+    const timer = setTimeout(fallback, FULLSCREEN_WAIT_MS);
+    try {
+      await this.root.requestFullscreen();
+    } catch {
+      fallback();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  exitFullscreen() {
+    this.leaveSolo();
+    this.renderGrid();
+  }
+
+  // Leaves full screen without drawing anything.
+  leaveSolo() {
+    this.soloId = null;
+    this.fullscreenRequest = null;
+    this.root.classList.remove('solo', 'fill-window');
+    if (document.fullscreenElement === this.root) document.exitFullscreen().catch(() => {});
+  }
+
+  onFullscreenChange() {
+    if (document.fullscreenElement === this.root) {
+      this.root.classList.remove('fill-window');
+      if (!this.soloId) document.exitFullscreen().catch(() => {}); // cancelled while waiting
+    } else if (this.soloId && !this.root.classList.contains('fill-window')) {
+      this.exitFullscreen(); // left with the system's Esc
+    }
+  }
+
+  // ------------------------------------------------------------ tabs
+
+  switchTab(id) {
+    if (this.model.switchTab(id)) this.renderAll();
+  }
+
+  async addTab() {
+    const name = await promptText({ title: 'New tab', label: 'Tab name', value: this.model.nextTabName(), okLabel: 'Create' });
+    if (name === null || !name.trim()) return;
+    this.model.addTab(name);
     this.renderAll();
-    this.persist();
   }
 
-  async switchLayout(id) {
-    const layout = this.layouts.find((l) => l.id === id);
-    if (!layout || id === this.activeLayoutId) return this.renderLayoutBar();
-    if (!(await this.confirmDiscard())) return this.renderLayoutBar();
-    this.applyPlots(layout.plots, layout.id);
-    toast(`Layout “${layout.name}”`);
+  async renameTab(tab) {
+    const name = await promptText({ title: 'Rename tab', label: 'Tab name', value: tab.name });
+    if (name !== null && this.model.renameTab(tab.id, name)) this.renderTabs();
   }
 
-  saveLayout() {
-    const l = this.activeLayout;
-    if (!l) return this.saveLayoutAs();
-    l.plots = clonePlots(this.plots);
-    this.persist();
-    toast(`Saved layout “${l.name}”`);
+  duplicateTab(tab) {
+    if (this.model.duplicateTab(tab.id)) this.renderAll();
   }
 
-  async saveLayoutAs() {
-    const name = (await promptText({ title: 'Save layout', label: 'Layout name', value: this.activeLayout ? `${this.activeLayout.name} copy` : 'My layout', okLabel: 'Save' }))?.trim();
-    if (!name) return;
-    const existing = this.layouts.find((l) => l.name === name);
-    if (existing && !(await this.api.confirm({ message: `Replace the layout “${name}”?`, okLabel: 'Replace' }))) return;
-    const layout = existing || { id: newId(), name, plots: [] };
-    layout.plots = clonePlots(this.plots);
-    if (!existing) this.layouts.push(layout);
-    this.activeLayoutId = layout.id;
-    this.persist();
-    toast(`Saved layout “${name}”`);
+  async deleteTab(tab) {
+    const n = tab.plots.length;
+    if (n && !(await this.api.confirm({ message: `Delete the tab “${tab.name}”?`, detail: `Its ${n} plot${n === 1 ? '' : 's'} will be removed.`, okLabel: 'Delete' }))) return;
+    this.zoomByTab.delete(tab.id);
+    if (this.model.deleteTab(tab.id)) this.renderAll();
   }
 
-  async renameLayout() {
-    const l = this.activeLayout;
-    if (!l) return;
-    const name = (await promptText({ title: 'Rename layout', label: 'Layout name', value: l.name }))?.trim();
-    if (!name) return;
-    l.name = name;
-    this.persist();
+  async exportTab(tab) {
+    const file = this.model.exportTab(tab.id);
+    const saved = file && (await this.api.saveFile(file.name, file.text));
+    if (saved) toast(`Saved ${saved}`);
   }
 
-  async deleteLayout() {
-    const l = this.activeLayout;
-    if (!l) return;
-    if (!(await this.api.confirm({ message: `Delete the layout “${l.name}”?`, detail: 'The plots on screen stay until you change them.', okLabel: 'Delete' }))) return;
-    this.layouts = this.layouts.filter((x) => x !== l);
-    this.activeLayoutId = null;
-    this.persist();
-  }
-
-  async exportLayout() {
-    const name = this.activeLayout?.name || 'Plots';
-    const file = await this.api.saveFile(`${name.replace(/[^\w.-]+/g, '_')}.mqtt-scope-layout.json`, layoutFile(name, this.plots));
-    if (file) toast(`Saved ${file}`);
-  }
-
-  async importLayout() {
+  async importTab() {
     let file;
     try {
       file = await this.api.readFileBytes();
@@ -436,106 +441,272 @@ export class PlotsPanel {
       return toast(err.message, 'error');
     }
     if (!file) return;
-    let layout;
     try {
-      layout = parseLayoutFile(new TextDecoder().decode(file.bytes), file.name.replace(/(\.mqtt-scope-layout)?\.json$/i, ''));
+      const tab = this.model.importTab(new TextDecoder().decode(file.bytes), file.name.replace(/(\.mqtt-scope-layout)?\.json$/i, ''));
+      this.renderAll();
+      toast(`Imported “${tab.name}”`);
     } catch (err) {
-      return toast(`Could not import ${file.name}: ${err.message}`, 'error');
+      toast(`Could not import ${file.name}: ${err.message}`, 'error');
     }
-    if (!(await this.confirmDiscard())) return;
-    let name = layout.name;
-    for (let n = 2; this.layouts.some((l) => l.name === name); n++) name = `${layout.name} (${n})`;
-    const saved = { id: newId(), name, plots: clonePlots(layout.plots) };
-    this.layouts.push(saved);
-    this.applyPlots(saved.plots, saved.id);
-    toast(`Imported layout “${name}”`);
   }
 
-  layoutMenu(e) {
-    const r = e.target.getBoundingClientRect();
-    const has = !!this.activeLayout;
-    showMenu(r.left, r.bottom + 4, [
-      { label: 'Rename layout…', disabled: !has, action: () => this.renameLayout() },
-      { label: 'Delete layout…', disabled: !has, action: () => this.deleteLayout() },
+  tabMenu(tab, at) {
+    showMenu(at.left, at.bottom + 4, [
+      { label: 'Rename tab…', action: () => this.renameTab(tab) },
+      { label: 'Duplicate tab', action: () => this.duplicateTab(tab) },
       'separator',
-      { label: 'Export layout to a file…', disabled: !this.plots.length, action: () => this.exportLayout() },
-      { label: 'Import layout from a file…', action: () => this.importLayout() },
+      { label: 'Export tab to a file…', disabled: !tab.plots.length, action: () => this.exportTab(tab) },
+      { label: 'Import tab from a file…', action: () => this.importTab() },
+      'separator',
+      { label: 'Delete tab…', action: () => this.deleteTab(tab) },
     ]);
+  }
+
+  arrangeMenu(at) {
+    const choose = (columns) => () => {
+      this.model.arrange(columns);
+      this.renderGrid();
+    };
+    showMenu(at.left, at.bottom + 4, [
+      { label: 'Automatic (stack a few, then columns)', action: choose(0) },
+      { label: 'Stack: one per row', action: choose(1) },
+      ...[2, 3, 4].map((c) => ({ label: `${c} per row`, action: choose(c) })),
+    ]);
+  }
+
+  // A plot dropped somewhere: next to another plot, or on another tab.
+  movePlot(id, target) {
+    if (target.type === 'leaf') {
+      if (this.model.movePlot(id, target.id, target.edge)) this.renderGrid();
+      return;
+    }
+    const plot = this.model.plot(id);
+    const dest = this.model.tabs.find((t) => t.id === target.tabId);
+    if (!plot || !dest || !this.model.movePlotToTab(id, dest.id)) return;
+    this.yZoom.delete(id);
+    this.renderAll();
+    toast(`Moved “${plot.title}” to “${dest.name}”`);
   }
 
   // ------------------------------------------------------------ rendering
 
+  build(host) {
+    const settingsShown = loadPref('settings', true);
+    this.root = el('div', 'plots' + (settingsShown ? '' : ' no-settings'));
+    const bar = el('div', 'plots-toolbar');
+    this.tabStrip = el('div', 'plot-tabs');
+    this.freezeBtn = button('Freeze', 'Stop the time axis so you can inspect (Space)', () => this.toggleFreeze());
+    this.zoomBtn = button('', 'Back to the live view for every plot in this tab (double-click a plot, or Esc)', () => this.resetZoom(), 'btn zoom-reset');
+    this.zoomBtn.append(icon('zoom-out'), document.createTextNode(' Reset view'));
+    this.zoomBtn.hidden = true;
+    this.settingsBtn = button('Settings', 'Show or hide the plot settings panel', () => this.toggleSettings(), 'btn' + (settingsShown ? ' on' : ''));
+    bar.append(
+      this.tabStrip,
+      iconButton('plus', 'New tab', () => this.addTab(), 'btn icon tab-add'),
+      iconButton('more', 'Tab actions', (e) => this.tabMenu(this.tab, e.currentTarget.getBoundingClientRect()), 'btn icon tab-more'),
+      el('span', 'toolbar-sep'),
+      button('+ New plot', 'Pick topics and values to plot', () => this.openPicker()),
+      button('Arrange', 'Lay the plots out in rows (replaces your own arrangement)', (e) => this.arrangeMenu(e.currentTarget.getBoundingClientRect()), 'btn arrange-btn'),
+      this.freezeBtn,
+      this.zoomBtn,
+      this.settingsBtn,
+      el('span', 'muted small plots-hint', 'Drag a plot by its title to move it. Drag across a plot to zoom.'),
+    );
+    const main = el('div', 'plots-main');
+    this.side = el('div', 'plot-settings');
+    const sideSplit = el('div', 'splitter x ps-splitter');
+    sideSplit.title = 'Drag to resize the settings panel';
+    // While the panel is hidden, a slim rail brings it back.
+    const rail = el('div', 'ps-rail');
+    rail.append(iconButton('chevrons-right', 'Show the settings panel', () => this.toggleSettings(true), 'btn icon small'));
+    this.grid = el('div', 'plots-grid');
+    main.append(this.side, sideSplit, rail, this.grid);
+    this.root.append(bar, main);
+    host.append(this.root);
+    splitter(sideSplit, {
+      axis: 'x',
+      storageKey: 'mqttscope.plotSettingsWidth',
+      initial: 300,
+      min: 200,
+      max: () => Math.max(220, Math.min(700, this.root.clientWidth - 360)),
+      apply: (px) => this.root.style.setProperty('--ps-w', `${px}px`),
+    });
+  }
+
   renderAll() {
+    this.renderTabs();
+    this.renderGrid();
+    this.renderSettings();
+    this.updateZoomUi();
+  }
+
+  renderTabs() {
+    this.tabStrip.textContent = '';
+    for (const tab of this.model.tabs) {
+      const t = el('button', 'plot-tab' + (tab.id === this.model.activeTabId ? ' active' : ''));
+      t.type = 'button';
+      t.dataset.tabId = tab.id;
+      t.title = `${tab.name} — double-click to rename, right-click for more`;
+      t.append(el('span', 'plot-tab-name', tab.name), el('span', 'count', tab.plots.length ? String(tab.plots.length) : ''));
+      t.addEventListener('click', () => this.switchTab(tab.id));
+      t.addEventListener('dblclick', () => this.renameTab(tab));
+      t.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        this.tabMenu(tab, { left: e.clientX, bottom: e.clientY });
+      });
+      this.tabStrip.append(t);
+    }
+  }
+
+  disposeCharts() {
     for (const c of this.charts.values()) c.dispose();
     this.charts.clear();
+    this.cards.clear();
+  }
+
+  renderGrid() {
+    this.disposeCharts();
     this.grid.textContent = '';
+    this.renderTabs();
+    if (this.soloId && !this.plots.some((p) => p.id === this.soloId)) this.leaveSolo(); // its plot was removed or moved
     if (!this.plots.length) {
+      this.grid.classList.add('empty');
       this.grid.append(
-        el('div', 'placeholder', 'No plots yet. Click “+ New plot”, or right-click a numeric topic in the tree (or a number in the inspector’s Tree view) and choose “Add to plot”.'),
+        el('div', 'placeholder', 'No plots in this tab yet. Click “+ New plot”, or right-click a numeric topic in the tree (or a number in the inspector’s Tree view) and choose “Add to plot”.'),
       );
+      return;
     }
-    for (const plot of this.plots) this.grid.append(this.renderCard(plot));
-    this.renderSettings();
-    this.renderLayoutBar();
+    this.grid.classList.remove('empty');
+    // Full screen shows just one plot, as the whole layout.
+    const layout = this.soloId || this.model.layout();
+    this.grid.append(
+      renderMosaic(layout, {
+        leaf: (id) => this.renderCard(this.model.plot(id)),
+        dragHandle: this.soloId ? null : '.plot-head',
+        noDrag: 'button, select, input, .seg',
+        label: (id) => this.model.plot(id)?.title ?? '',
+        externalTarget: (under) => {
+          const tabEl = under.closest('.plot-tab');
+          return tabEl && tabEl.dataset.tabId !== this.model.activeTabId ? { type: 'tab', tabId: tabEl.dataset.tabId, element: tabEl } : null;
+        },
+        onResize: (split, sizes) => this.model.setSplitSizes(split, sizes),
+        onMove: (id, target) => this.movePlot(id, target),
+      }),
+    );
+    this.redraw();
+  }
+
+  // Draws one plot's card again in place (after a change to its series or
+  // settings) without rebuilding the others.
+  rerenderCard(plotId) {
+    const old = this.cards.get(plotId);
+    const plot = this.model.plot(plotId);
+    if (!old || !plot) return this.renderGrid();
+    this.charts.get(plotId)?.dispose();
+    const card = this.renderCard(plot);
+    const leaf = old.parentElement;
+    leaf.style.minWidth = card.style.minWidth;
+    leaf.style.minHeight = card.style.minHeight;
+    old.replaceWith(card);
     this.redraw();
   }
 
   renderCard(plot) {
-    const card = el('div', 'plot-card' + (plot.id === this.selectedId ? ' selected' : ''));
+    const solo = this.soloId === plot.id;
+    const card = el('div', 'plot-card' + (plot.id === this.model.selectedId ? ' selected' : '') + (plot.kind === 'states' ? ' kind-states' : ''));
     card.dataset.plotId = plot.id;
+    card.style.minWidth = `${MIN_PLOT_WIDTH}px`;
+    card.style.minHeight = `${minPlotHeight(plot)}px`;
     card.addEventListener('mousedown', () => this.select(plot.id));
+
     const head = el('div', 'plot-head');
+    const grip = el('span', 'plot-grip');
+    grip.title = 'Drag to move this plot';
+    grip.append(icon('move', 13));
     const title = el('span', 'plot-title', plot.title);
-    title.title = 'Double-click to rename';
+    title.title = 'Drag to move, double-click to rename';
     title.addEventListener('dblclick', () => this.renamePlot(plot));
-    const win = el('select', 'select small');
-    for (const sec of WINDOWS) win.append(Object.assign(el('option', '', WINDOW_LABELS[sec]), { value: String(sec), selected: sec === plot.windowSec }));
-    win.addEventListener('change', () => {
-      plot.windowSec = Number(win.value);
-      this.renderSettings();
-      this.persist();
-      this.redraw();
-    });
+    const full = iconButton(solo ? 'minimize' : 'maximize', solo ? 'Exit full screen (Esc)' : 'Show this plot full screen', () => this.toggleFullscreen(plot.id), 'btn icon small fullscreen-btn');
     head.append(
+      grip,
       title,
-      win,
-      button('+ Series', 'Add more values to this plot', () => this.openPicker(plot.id), 'btn small'),
-      button('CSV', 'Export collected points as CSV', () => this.exportCsv(plot), 'btn small'),
-      button('⚙', 'Plot settings', () => {
+      kindToggle(plot, (kind) => this.setKind(plot, kind)),
+      windowSelect(plot, (windowSec) => {
+        if (!this.model.updatePlot(plot.id, { windowSec })) return;
+        this.renderSettings();
+        this.redraw();
+      }),
+      // In a narrow plot these move into the ⋯ menu (see styles.css).
+      button('+ Series', 'Add more values to this plot', () => this.openPicker(plot.id), 'btn small wide-only'),
+      button('CSV', 'Export collected points as CSV', () => this.exportCsv(plot), 'btn small wide-only'),
+      iconButton('settings', 'Plot settings', () => {
         this.select(plot.id);
         this.toggleSettings(true);
       }, 'btn icon small'),
-      button('×', 'Remove plot', () => this.removePlot(plot), 'btn icon small'),
+      iconButton('external-link', 'Open this plot in its own window', () => this.popOut(plot), 'btn icon small popout-btn wide-only'),
+      full,
+      iconButton('more', 'More', (e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        showMenu(r.left, r.bottom + 4, [
+          { label: 'Add series…', action: () => this.openPicker(plot.id) },
+          { label: 'Export CSV…', action: () => this.exportCsv(plot) },
+          { label: 'Open in its own window', action: () => this.popOut(plot) },
+          'separator',
+          { label: plot.kind === 'states' ? 'Show as lines' : 'Show as state transitions', action: () => this.setKind(plot, plot.kind === 'states' ? 'timeseries' : 'states') },
+        ]);
+      }, 'btn icon small narrow-only plot-more'),
+      iconButton('x', 'Remove plot', () => this.removePlot(plot), 'btn icon small'),
     );
-    const legend = el('div', 'plot-legend');
-    legend.hidden = !plot.legend;
-    for (const s of plot.series) {
-      const chip = el('span', 'legend-chip' + (s.visible ? '' : ' off'));
-      const sw = button('', s.visible ? 'Hide this series' : 'Show this series', () => {
-        s.visible = !s.visible;
-        this.renderAll();
-        this.persist();
-      }, 'swatch swatch-toggle');
-      sw.style.background = colorOf(s);
-      const label = el('span', 'legend-label' + (s.alias ? ' aliased' : ''), labelOf(s));
-      label.title = `${sourceLabel(s.topic, s.segs)}\nDouble-click to ${s.alias ? 'change the' : 'set an'} alias`;
-      label.addEventListener('dblclick', () => this.renameSeries(s));
-      const last = el('span', 'legend-value');
-      last.dataset.key = seriesKey(s.topic, s.segs);
-      last.hidden = !plot.legendValues;
-      chip.append(
-        sw,
-        label,
-        last,
-        button('✎', 'Set alias', () => this.renameSeries(s), 'chip-edit'),
-        button('×', 'Remove series', () => this.removeSeries(plot, s), 'chip-x'),
-      );
-      legend.append(chip);
-    }
+
+    const legend = renderLegend(plot, {
+      onToggle: (s) => {
+        if (!this.model.updateSeries(plot.id, s.id, { visible: !s.visible })) return;
+        this.rerenderCard(plot.id);
+        if (plot.id === this.model.selectedId) this.renderSettings();
+      },
+      onRename: (s) => this.renameSeries(plot, s),
+      onRemove: (s) => this.model.removeSeries(plot.id, s.id) && this.renderAll(),
+    });
     const host = el('div', 'plot-canvas');
+    const reset = resetViewButton(() => this.resetZoom());
+    reset.hidden = !(this.zoomByTab.has(this.tab.id) || this.yZoom.has(plot.id));
     card.append(head, legend, host);
-    this.charts.set(plot.id, new LineChart(host, { onHover: (t) => this.syncHover(plot.id, t) }));
+    this.cards.set(plot.id, card);
+    this.charts.set(
+      plot.id,
+      new LineChart(host, {
+        onHover: (t) => this.syncHover(plot.id, t),
+        onZoom: (z) => this.zoom(plot, z),
+        onResetZoom: () => this.resetZoom(),
+      }),
+    );
+    host.append(reset); // over the chart
     return card;
+  }
+
+  renderSettings() {
+    renderPlotSettings(this.side, {
+      model: this.model,
+      plot: this.model.selected,
+      openSeries: this.openSeries,
+      onAddSeries: () => this.openPicker(this.model.selectedId),
+      onHide: () => this.toggleSettings(false),
+      onChanged: (what) => {
+        const plot = this.model.selected;
+        if (!plot) return;
+        if (what === 'title') {
+          const t = this.cards.get(plot.id)?.querySelector('.plot-title');
+          if (t) t.textContent = plot.title;
+        } else if (what === 'redraw') {
+          this.redraw();
+        } else if (what === 'card') {
+          this.rerenderCard(plot.id); // the settings panel stays, so its inputs keep focus
+        } else {
+          this.yZoom.delete(plot.id);
+          this.renderAll();
+        }
+      },
+    });
   }
 
   // Hovering one plot moves the time bar on every plot and shows the values
@@ -543,233 +714,28 @@ export class PlotsPanel {
   syncHover(fromId, t) {
     this.hoverTime = t;
     for (const [id, chart] of this.charts) if (id !== fromId) chart.setHoverTime(t);
-    this.updateLegendValues();
+    this.updateLegends();
   }
 
-  updateLegendValues() {
+  updateLegends() {
+    const pointsOf = (topic, segs) => this.data.points(topic, segs);
     for (const plot of this.plots) {
-      const card = this.grid.querySelector(`.plot-card[data-plot-id="${plot.id}"]`);
-      if (!card) continue;
-      for (const span of card.querySelectorAll('.legend-value')) {
-        const pts = this.data.get(span.dataset.key) || [];
-        const p = this.hoverTime !== null ? nearest(pts, this.hoverTime) : pts[pts.length - 1];
-        const series = plot.series.find((s) => seriesKey(s.topic, s.segs) === span.dataset.key);
-        span.textContent = !p ? '–' : series?.display === 'state' && (p.v === 0 || p.v === 1) ? String(p.v === 1) : String(Number(p.v.toPrecision(6)));
-        span.title = p ? formatDateTime(p.t) : 'No data yet';
-        span.classList.toggle('at-hover', this.hoverTime !== null);
-      }
+      const legend = this.cards.get(plot.id)?.querySelector('.plot-legend');
+      if (legend && !legend.hidden) updateLegend(legend, plot, pointsOf, { hoverTime: this.hoverTime, frozenAt: this.frozenAt });
     }
   }
 
   redraw() {
     if (!this.visible) return;
-    const now = this.frozenAt || Date.now();
+    const zoom = this.zoomByTab.get(this.tab.id) || null;
+    const now = Date.now();
+    const pointsOf = (topic, segs) => this.data.points(topic, segs);
     for (const plot of this.plots) {
       const chart = this.charts.get(plot.id);
       if (!chart) continue;
-      const series = plot.series
-        .filter((s) => s.visible)
-        .map((s) => ({
-          label: labelOf(s),
-          slot: s.slot,
-          color: s.color,
-          display: s.display,
-          width: s.width,
-          points: this.data.get(seriesKey(s.topic, s.segs)) || [],
-        }));
-      chart.setData(series, plot.windowSec ? windowRange(series, plot.windowSec, now) : null, { yMin: plot.yMin, yMax: plot.yMax });
+      const series = chartSeries(plot, pointsOf);
+      chart.setData(series, chartRange(plot, series, { zoom, frozenAt: this.frozenAt, now }), chartAxis(plot, this.yZoom.get(plot.id)));
     }
-    this.updateLegendValues();
-  }
-
-  // The settings panel for the selected plot (cf. Lichtblick's plot panel).
-  renderSettings() {
-    const side = this.side;
-    side.textContent = '';
-    const plot = this.selected;
-    if (!plot) {
-      side.append(el('div', 'placeholder small', this.plots.length ? 'Select a plot to change its settings.' : 'Add a plot to configure it here.'));
-      return;
-    }
-    side.append(el('div', 'ps-heading', 'Plot settings'));
-    const section = (name, ...children) => {
-      const d = el('details', 'ps-section');
-      d.open = true;
-      d.append(el('summary', '', name), ...children);
-      return d;
-    };
-    const row = (label, control) => {
-      const r = el('label', 'ps-row');
-      r.append(el('span', 'ps-label', label), control);
-      return r;
-    };
-    const commit = (redrawCards = false) => {
-      if (redrawCards) this.renderCardsOnly();
-      else this.redraw();
-      this.persist();
-    };
-
-    // General
-    const titleInput = Object.assign(el('input', 'input'), { value: plot.title, name: 'plot-title', spellcheck: false });
-    titleInput.addEventListener('input', () => {
-      if (!titleInput.value.trim()) return;
-      plot.title = titleInput.value.trim();
-      const t = this.grid.querySelector(`.plot-card[data-plot-id="${plot.id}"] .plot-title`);
-      if (t) t.textContent = plot.title;
-      this.persist();
-    });
-    const win = el('select', 'select');
-    win.name = 'plot-window';
-    for (const sec of WINDOWS) win.append(Object.assign(el('option', '', WINDOW_LABELS[sec]), { value: String(sec), selected: sec === plot.windowSec }));
-    win.addEventListener('change', () => {
-      plot.windowSec = Number(win.value);
-      const cardSel = this.grid.querySelector(`.plot-card[data-plot-id="${plot.id}"] select`);
-      if (cardSel) cardSel.value = win.value;
-      commit();
-    });
-
-    // Legend
-    const check = (label, key) => {
-      const c = Object.assign(el('input'), { type: 'checkbox', checked: plot[key], name: `plot-${key}` });
-      c.addEventListener('change', () => {
-        plot[key] = c.checked;
-        commit(true);
-      });
-      const l = el('label', 'check');
-      l.append(c, document.createTextNode(` ${label}`));
-      return l;
-    };
-
-    // Y axis
-    const axisInput = (key) => {
-      const i = Object.assign(el('input', 'input'), { type: 'number', placeholder: 'Auto', name: `plot-${key}`, value: plot[key] ?? '' });
-      i.step = 'any';
-      i.addEventListener('change', () => {
-        const v = i.value.trim() === '' ? null : Number(i.value);
-        plot[key] = Number.isFinite(v) ? v : null;
-        commit();
-      });
-      return i;
-    };
-
-    // Series
-    const seriesHead = el('div', 'ps-series-head');
-    const add = button('+ Add series', 'Pick more values for this plot', () => this.openPicker(plot.id), 'btn small');
-    add.disabled = plot.series.length >= MAX_SERIES;
-    seriesHead.append(el('span', 'muted small', `${plot.series.length} of ${MAX_SERIES}`), add);
-    const list = el('div', 'ps-series');
-    for (const s of plot.series) list.append(this.renderSeriesSettings(plot, s));
-
-    side.append(
-      section('General', row('Title', titleInput), row('Time window', win)),
-      section('Legend', check('Show legend', 'legend'), check('Show values', 'legendValues')),
-      section('Y axis', row('Min', axisInput('yMin')), row('Max', axisInput('yMax'))),
-      section('Series', seriesHead, list),
-    );
-  }
-
-  renderSeriesSettings(plot, s) {
-    const item = el('details', 'ps-series-item' + (s.visible ? '' : ' off'));
-    item.dataset.seriesId = s.id;
-    item.open = this.openSeries.has(s.id);
-    item.addEventListener('toggle', () => (item.open ? this.openSeries.add(s.id) : this.openSeries.delete(s.id)));
-    const save = (cards = true) => {
-      if (cards) this.renderCardsOnly();
-      else this.redraw();
-      this.persist();
-    };
-
-    const summary = el('summary', 'ps-series-summary');
-    const eye = button(s.visible ? '👁' : '◌', s.visible ? 'Hide' : 'Show', (e) => {
-      e.preventDefault();
-      s.visible = !s.visible;
-      eye.textContent = s.visible ? '👁' : '◌';
-      item.classList.toggle('off', !s.visible);
-      save();
-    }, 'btn icon small ps-eye');
-    const sw = el('span', 'swatch');
-    sw.style.background = colorOf(s);
-    const name = el('span', 'ps-series-name', labelOf(s));
-    name.title = sourceLabel(s.topic, s.segs);
-    const remove = button('×', 'Remove series', (e) => {
-      e.preventDefault();
-      this.removeSeries(plot, s);
-    }, 'btn icon small');
-    summary.append(eye, sw, name, remove);
-
-    const body = el('div', 'ps-series-body');
-    const row = (label, control) => {
-      const r = el('label', 'ps-row');
-      r.append(el('span', 'ps-label', label), control);
-      return r;
-    };
-    body.append(row('Source', el('code', 'ps-source', sourceLabel(s.topic, s.segs))));
-
-    const alias = Object.assign(el('input', 'input'), { value: s.alias || '', placeholder: sourceLabel(s.topic, s.segs), name: 'series-alias', spellcheck: false });
-    alias.addEventListener('input', () => {
-      if (alias.value.trim()) s.alias = alias.value.trim();
-      else delete s.alias;
-      name.textContent = labelOf(s);
-      save();
-    });
-    body.append(row('Label', alias));
-
-    // Colour: any colour from the picker, or one of the palette colours.
-    const colors = el('div', 'ps-colors');
-    const picker = Object.assign(el('input', 'ps-color'), { type: 'color', value: colorOf(s), name: 'series-color', title: 'Pick any colour' });
-    const setColor = () => {
-      sw.style.background = colorOf(s);
-      picker.value = colorOf(s);
-      for (const b of colors.querySelectorAll('.ps-palette')) b.classList.toggle('on', !s.color && Number(b.dataset.slot) === s.slot);
-      save();
-    };
-    picker.addEventListener('input', () => {
-      s.color = picker.value.toLowerCase();
-      setColor();
-    });
-    colors.append(picker);
-    for (let slot = 0; slot < MAX_SERIES; slot++) {
-      const b = button('', `Palette colour ${slot + 1}`, () => {
-        s.slot = slot;
-        delete s.color;
-        setColor();
-      }, 'ps-palette' + (!s.color && s.slot === slot ? ' on' : ''));
-      b.dataset.slot = String(slot);
-      b.style.background = `var(--series-${slot + 1})`;
-      colors.append(b);
-    }
-    body.append(row('Colour', colors));
-
-    const display = el('select', 'select');
-    display.name = 'series-display';
-    for (const [v, l] of DISPLAYS) display.append(Object.assign(el('option', '', l), { value: v, selected: v === s.display }));
-    const width = el('select', 'select');
-    width.name = 'series-width';
-    for (const w of [1, 2, 3, 4]) width.append(Object.assign(el('option', '', `${w} px`), { value: String(w), selected: w === s.width }));
-    const widthRow = row('Line width', width);
-    widthRow.hidden = s.display === 'state';
-    display.addEventListener('change', () => {
-      s.display = display.value;
-      widthRow.hidden = s.display === 'state';
-      save(false);
-    });
-    width.addEventListener('change', () => {
-      s.width = Number(width.value);
-      save(false);
-    });
-    body.append(row('Display', display), widthRow);
-    item.append(summary, body);
-    return item;
-  }
-
-  // Rebuilds the plot cards (legend changes) without touching the settings
-  // panel, so its inputs keep focus while typing.
-  renderCardsOnly() {
-    for (const c of this.charts.values()) c.dispose();
-    this.charts.clear();
-    this.grid.textContent = '';
-    for (const plot of this.plots) this.grid.append(this.renderCard(plot));
-    this.renderLayoutBar();
-    this.redraw();
+    this.updateLegends();
   }
 }

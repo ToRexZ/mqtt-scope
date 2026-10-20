@@ -196,8 +196,7 @@ export class TreeView {
         if (node?.children.size && node.expanded) return this.toggle(node, false), e.preventDefault();
         if (node?.parent?.parent) i = this.rows.findIndex((r) => r.node === node.parent);
         break;
-      case 'Enter':
-      case ' ':
+      case 'Enter': // (Space is the global Hold shortcut)
         if (node?.children.size) this.toggle(node);
         e.preventDefault();
         return;

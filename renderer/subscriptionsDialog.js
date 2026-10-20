@@ -1,7 +1,7 @@
 // Subscriptions of the live connection: add or remove topic filters without
 // reconnecting, optionally saving the change to the connection profile.
 
-import { el, button, toast } from './ui.js';
+import { el, button, toast, overlayHost } from './ui.js';
 
 // opts: api, profileName, onSaved(subscriptions) — called with the new list
 // when "Save to connection" is ticked.
@@ -89,7 +89,7 @@ export async function openSubscriptions(opts) {
     actions,
   );
   overlay.append(box);
-  document.body.append(overlay);
+  overlayHost().append(overlay);
   await render();
   filter.focus();
 }

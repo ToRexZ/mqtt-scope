@@ -10,6 +10,7 @@ const DECIMAL = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
 export const isDecimal = (s) => typeof s === 'string' && DECIMAL.test(s.trim());
 
 // Control characters other than tab/newline/carriage return mark binary data.
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
 const BINARY_CHARS = /[\u0000-\u0008\u000B\u000C\u000E-\u001F]/;
 
 // Returns { kind: 'empty'|'json'|'number'|'text'|'binary', text, value, size }.

@@ -224,6 +224,7 @@ test('edits made right before the window is closed are not lost (connections, pl
   const file = path.join(userData, 'profiles.json');
   const profiles = existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : [];
   expect.soft(profiles[0]?.name, 'connection renamed just before closing').toBe('Renamed just before closing');
-  const plots = JSON.parse(readFileSync(path.join(userData, 'plots.json'), 'utf8'));
-  expect.soft(plots.plots[0].windowSec, 'plot time window changed just before closing').toBe(60);
+  const plots = JSON.parse(readFileSync(path.join(userData, 'plotTabs.json'), 'utf8'));
+  // Seeded in the older format: saved back as tabs.
+  expect.soft(plots.tabs?.[0]?.plots[0]?.windowSec, 'plot time window changed just before closing').toBe(60);
 });

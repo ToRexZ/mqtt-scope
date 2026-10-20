@@ -108,11 +108,11 @@ test('saved messages: save, send, order, filter, rename, delete, recent, persist
 
   // Delete: cancelled, then confirmed.
   await mockDialogs(app, { confirm: false });
-  await pub.item('Gamma renamed').getByRole('button', { name: '🗑' }).click();
+  await pub.item('Gamma renamed').getByRole('button', { name: 'Delete' }).click();
   await expect.poll(() => dialogCalls(app)).toContainEqual(expect.objectContaining({ message: 'Delete saved message “Gamma renamed”?' }));
   await expect(pub.items).toHaveCount(3);
   await mockDialogs(app, { confirm: true });
-  await pub.item('Gamma renamed').getByRole('button', { name: '🗑' }).click();
+  await pub.item('Gamma renamed').getByRole('button', { name: 'Delete' }).click();
   await expect(pub.items).toHaveCount(2);
   await expect(pub.item('Gamma renamed')).toHaveCount(0);
 

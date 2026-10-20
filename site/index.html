@@ -6,7 +6,7 @@
     <title>MQTT Scope: free MQTT client for Linux, Windows and macOS</title>
     <meta
       name="description"
-      content="MQTT Scope is a free, open-source desktop MQTT client and MQTT Explorer alternative: live topic tree, large JSON message inspector with diff, live plots and a publisher with saved messages. MQTT 3.1.1 and 5, TLS and WebSocket."
+      content="MQTT Scope is a free, open-source desktop MQTT client and MQTT Explorer alternative: live topic tree, large JSON message inspector with diff, live plots and state transitions, and a publisher with saved messages. MQTT 3.1.1 and 5, TLS and WebSocket."
     />
     <link rel="canonical" href="https://torexz.github.io/mqtt-scope/" />
     <meta name="google-site-verification" content="04lkoTWeNOICjEmIJTZwgEglYKk_W6CWlT2H-uoos2o" />
@@ -72,7 +72,7 @@
       "name": "Is MQTT Scope an alternative to MQTT Explorer?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes. Like MQTT Explorer it subscribes to everything and shows the broker as a live topic tree. It adds a large-message inspector with a structural diff, live plots of any JSON field with aliases, a library of saved messages, several brokers at once (one per window) and safety guards for publishing to live systems."
+        "text": "Yes. Like MQTT Explorer it subscribes to everything and shows the broker as a live topic tree. It adds a large-message inspector with a structural diff, live plots and state transitions of any JSON field, a library of saved messages, several brokers at once (one per window) and safety guards for publishing to live systems."
       }
     },
     {
@@ -96,7 +96,7 @@
       "name": "Can I plot MQTT values?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Yes. Pick numbers from any topic or JSON field, from several topics at once, give each series an alias and a colour, and show booleans as state bars. Plots update live, share a synced time bar, can be saved as layouts and exported as CSV."
+        "text": "Yes. Pick numbers from any topic or JSON field, from several topics at once, and give each series an alias and a colour. Show true/false and status values as state transitions, organise plots in named tabs, drag and resize them like panels, zoom into any time range, pop a plot out to another screen, and export the data as CSV."
       }
     },
     {
@@ -187,15 +187,28 @@
           <div class="text">
             <h3>Plot any value, live</h3>
             <p>
-              Pick numbers from any topic or JSON field, from several topics at once. A settings panel lets you rename
-              plots, pick colours, fix the y-axis and show true/false values as state bars. Hovering one plot syncs the
-              time bar across all of them, and layouts can be saved and shared as files.
+              Pick numbers from any topic or JSON field, from several topics at once, and organise plots in named tabs.
+              Plots fill the window and move like panels: drag one by its title to put it beside or below another, drag
+              the gaps to resize, pop a plot out to another screen or show it full screen. Drag across a plot to zoom
+              into a time range; Reset view takes you back to live.
             </p>
           </div>
-          <a class="shot-link" href="screenshots/plots.png"><picture><source type="image/webp" srcset="screenshots/plots.webp" /><img class="shot" src="screenshots/plots.png" alt="Plots with a settings panel, a state bar for a boolean and a synced time bar" loading="lazy" width="1600" height="1000" /></picture></a>
+          <a class="shot-link" href="screenshots/plots.png"><picture><source type="image/webp" srcset="screenshots/plots.webp" /><img class="shot" src="screenshots/plots.png" alt="Two plots in a tab with a settings panel, a state lane for a boolean and a synced time bar" loading="lazy" width="1600" height="1000" /></picture></a>
         </article>
 
         <article class="feature">
+          <div class="text">
+            <h3>Follow state transitions</h3>
+            <p>
+              Switch a plot to States and every signal becomes a labelled lane that changes colour when its value
+              changes, with the value written in. Safety signals, modes and flags read at a glance; vertical lines at
+              timestamps and a time bar synced across plots show what happened when.
+            </p>
+          </div>
+          <a class="shot-link" href="screenshots/plot-states.png"><picture><source type="image/webp" srcset="screenshots/plot-states.webp" /><img class="shot" src="screenshots/plot-states.png" alt="State transitions plot of six safety signals above a speed plot" loading="lazy" width="1600" height="1000" /></picture></a>
+        </article>
+
+        <article class="feature reverse">
           <div class="text">
             <h3>Publish safely, again and again</h3>
             <p>
@@ -214,6 +227,9 @@
           <li><strong>Exact numbers</strong> 64-bit ids and nanosecond timestamps are shown and re-sent exactly.</li>
           <li><strong>Your shortcuts</strong> Every keyboard shortcut can be changed; Enter connects to the selected broker.</li>
           <li><strong>Secure by default</strong> Sandboxed UI, payloads never executed, passwords in the OS keychain.</li>
+          <li><strong>Hold and reload</strong> Space holds the message (or freezes the plots); Ctrl+R starts the timeline over without disconnecting.</li>
+          <li><strong>Shareable plot tabs</strong> Export a tab of plots to a file and import it on another machine.</li>
+          <li><strong>Light on resources</strong> Plotting costs microseconds per message; 100,000-point histories redraw in a few milliseconds.</li>
         </ul>
       </section>
 
@@ -225,7 +241,7 @@
         </details>
         <details>
           <summary>Is MQTT Scope an alternative to MQTT Explorer?</summary>
-          <p>Yes. Like MQTT Explorer it subscribes to everything and shows the broker as a live topic tree. It adds a large-message inspector with a structural diff, live plots of any JSON field with aliases, a library of saved messages, several brokers at once (one per window) and safety guards for publishing to live systems.</p>
+          <p>Yes. Like MQTT Explorer it subscribes to everything and shows the broker as a live topic tree. It adds a large-message inspector with a structural diff, live plots and state transitions of any JSON field, a library of saved messages, several brokers at once (one per window) and safety guards for publishing to live systems.</p>
         </details>
         <details>
           <summary>Which MQTT versions and transports does it support?</summary>
@@ -237,7 +253,7 @@
         </details>
         <details>
           <summary>Can I plot MQTT values?</summary>
-          <p>Yes. Pick numbers from any topic or JSON field, from several topics at once, give each series an alias and a colour, and show booleans as state bars. Plots update live, share a synced time bar, can be saved as layouts and exported as CSV.</p>
+          <p>Yes. Pick numbers from any topic or JSON field, from several topics at once, and give each series an alias and a colour. Show true/false and status values as state transitions, organise plots in named tabs, drag and resize them like panels, zoom into any time range, pop a plot out to another screen, and export the data as CSV.</p>
         </details>
         <details>
           <summary>Does it work with VDA5050 and robot fleets?</summary>
@@ -273,7 +289,7 @@
           </div>
         </div>
         <p class="meta">
-          All releases and notes are on <a href="https://github.com/ToRexZ/mqtt-scope/releases">GitHub Releases</a>. Prefer to build it
+          All releases and notes are on <a href="https://github.com/ToRexZ/mqtt-scope/releases">GitHub Releases</a>; see what changed in the <a href="https://github.com/ToRexZ/mqtt-scope/blob/main/CHANGELOG.md">changelog</a>. Prefer to build it
           yourself? See the <a href="https://github.com/ToRexZ/mqtt-scope#development">README</a>.
         </p>
       </section>

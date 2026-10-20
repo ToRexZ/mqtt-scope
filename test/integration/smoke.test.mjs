@@ -1,5 +1,4 @@
 import { test } from 'node:test';
-import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { startBroker, makeCerts, testClient, until } from '../helpers/broker.mjs';
 

@@ -17,6 +17,8 @@ export { selectTopic } from '../helpers/app.mjs';
 export { makeCerts, until } from '../helpers/broker.mjs';
 
 export const test = base.extend({
+  // Playwright requires the destructuring form for a fixture with no dependencies.
+  // eslint-disable-next-line no-empty-pattern
   env: async ({}, use) => {
     const apps = [];
     const clients = [];
@@ -95,13 +97,23 @@ export function row(page, name) {
 
 // The visible tree row for a full topic path (names can repeat across
 // branches). Collapsed ancestors are expanded by clicking their carets.
+// Each row is scrolled to the middle of the tree first: the tree reuses row
+// elements while scrolling, so a row Playwright scrolled to itself could show
+// another topic by the time it is clicked.
 export async function rowByPath(page, topic) {
   const index = (t) => page.evaluate((p) => window.__mqttscope.treeView.rows.findIndex((r) => r.node.path === p), t);
   const parts = topic.split('/');
   for (let n = 1; n <= parts.length; n++) {
     const p = parts.slice(0, n).join('/');
     await expect.poll(() => index(p), { message: `tree row for ${p}` }).toBeGreaterThanOrEqual(0);
-    const r = page.locator(`#tree-scroll .tree-row[data-index="${await index(p)}"]:not([hidden])`);
+    const i = await index(p);
+    await page.evaluate((x) => {
+      const { treeView } = window.__mqttscope;
+      const rowHeight = treeView.inner.offsetHeight / treeView.rows.length;
+      treeView.scrollEl.scrollTop = x * rowHeight - (treeView.scrollEl.clientHeight - rowHeight) / 2;
+    }, i);
+    const r = page.locator(`#tree-scroll .tree-row[data-index="${i}"]:not([hidden])`);
+    await expect(r).toBeInViewport({ ratio: 1 });
     if (n === parts.length) return r;
     if ((await r.locator('.caret').textContent()) === '▸') {
       await r.locator('.caret').click();

@@ -644,8 +644,8 @@ describe('property: random add/remove/removeTopic sequences keep all counts cons
 });
 
 test('trimHistories applies lowered limits to existing histories and keeps sizes consistent', async () => {
-  const { TopicTree } = await import('../../renderer/topicTree.js');
-  const tree = new TopicTree({ historyLimit: 50, historyBytes: 1e9 });
+  const fresh = await import('../../renderer/topicTree.js');
+  const tree = new fresh.TopicTree({ historyLimit: 50, historyBytes: 1e9 });
   for (let i = 0; i < 40; i++) {
     tree.addMessage({ topic: 'a/b', payload: new Uint8Array(10), qos: 0, retain: false, ts: i });
     tree.addMessage({ topic: 'a/c', payload: new Uint8Array(100), qos: 0, retain: false, ts: i });
@@ -664,8 +664,8 @@ test('trimHistories applies lowered limits to existing histories and keeps sizes
 });
 
 test('retained flag: set by retained messages, cleared by an empty payload, reset by removeTopic', async () => {
-  const { TopicTree } = await import('../../renderer/topicTree.js');
-  const tree = new TopicTree();
+  const fresh = await import('../../renderer/topicTree.js');
+  const tree = new fresh.TopicTree();
   const add = (topic, payload, retain) => tree.addMessage({ topic, payload: new TextEncoder().encode(payload), qos: 0, retain, ts: 1 });
   add('x', 'live', false);
   assert.equal(tree.find('x').retained, false);

@@ -156,7 +156,7 @@ test('publisher: filled from tree selection, Edit & publish, context menu and Lo
   await expect(pub.payload).toHaveValue('');
 
   // Collapse the publisher; Edit & publish brings it back with the message loaded.
-  await pub.root.locator('.pub-head').getByRole('button', { name: '▾' }).click();
+  await pub.root.locator('.pub-head').getByRole('button', { name: 'Collapse publisher' }).click();
   await expect(pub.root).toHaveClass(/collapsed/);
   await (await rowByPath(page, 'dev/cfg')).click();
   await viewerButton(page, 'Edit & publish').click();

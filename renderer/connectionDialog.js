@@ -1,7 +1,7 @@
 // Connection manager: a list of saved broker profiles and an editor for the
 // selected one. Edits are saved automatically.
 
-import { el, button, toast } from './ui.js';
+import { el, button, toast, overlayHost } from './ui.js';
 import { comboFromEvent, isTypingTarget } from './keys.js';
 import { DEFAULT_PORTS, blankProfile, parseSubscriptions, formatSubscriptions, newId } from './profiles.js';
 
@@ -70,7 +70,7 @@ export class ConnectionDialog {
     this.overlay = el('div', 'modal-overlay');
     this.box = el('div', 'modal conn-dialog');
     this.overlay.append(this.box);
-    document.body.append(this.overlay);
+    overlayHost().append(this.overlay);
     this.overlay.addEventListener('keydown', (e) => this.handleKey(e));
     this.render();
   }

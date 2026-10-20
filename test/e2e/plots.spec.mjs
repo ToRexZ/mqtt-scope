@@ -183,9 +183,10 @@ test('plots: add from tree and inspector, live values, window, freeze, remove, C
   ]);
 
   // Plot definitions persist.
-  await waitForFile(path.join(userData, 'plots.json'), (b) => {
+  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => {
     const d = JSON.parse(b);
-    return d.plots.length === 2 && d.plots[0].title === 'Climate' && d.plots[0].windowSec === 60 && d.plots[0].series.length === 1;
+    const plots = d.tabs?.[0]?.plots || [];
+    return plots.length === 2 && plots[0].title === 'Climate' && plots[0].windowSec === 60 && plots[0].series.length === 1;
   });
   expect(first.errors).toEqual([]);
   await env.closeApp(first);

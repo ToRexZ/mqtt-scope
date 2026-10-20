@@ -23,7 +23,7 @@ function readTlsFile(readFile, file, label) {
   try {
     return readFile(file);
   } catch (err) {
-    throw new Error(`Cannot read ${label} "${file}": ${err.code || err.message}`);
+    throw new Error(`Cannot read ${label} "${file}": ${err.code || err.message}`, { cause: err });
   }
 }
 

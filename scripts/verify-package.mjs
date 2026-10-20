@@ -41,7 +41,7 @@ try {
   await broker.publish('verify/package', '{"ok":true}', { retain: true });
   await page.waitForFunction(() => !!window.__mqttscope.tree.find('verify/package'), null, { timeout: 15000 });
   if (errors.length) throw new Error(`Renderer errors: ${errors.join('\n')}`);
-  console.log(`OK: ${exe} connected and received a message (v${await app.evaluate(({ app }) => app.getVersion())})`);
+  console.log(`OK: ${exe} connected and received a message (v${await app.evaluate(({ app: electronApp }) => electronApp.getVersion())})`);
 } finally {
   await app.close();
   await broker.close();

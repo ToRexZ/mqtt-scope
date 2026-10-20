@@ -6,7 +6,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const NAMES = new Set(['savedMessages', 'plots', 'settings']);
+// plotTabs: the plot tabs; plots: the tab on screen in the 0.1 format.
+const NAMES = new Set(['savedMessages', 'plots', 'plotTabs', 'settings']);
 
 function createJsonStore(dir) {
   const fileFor = (name) => {

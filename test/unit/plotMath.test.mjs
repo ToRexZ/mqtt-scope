@@ -275,3 +275,59 @@ describe('seriesKey', () => {
     }
   });
 });
+
+describe('time search', async () => {
+  const { firstAfter, firstAtOrAfter, pointsBetween, pointAtOrBefore } = await import('../../renderer/plotMath.js');
+  const pts = [{ t: 0 }, { t: 10 }, { t: 10 }, { t: 20 }, { t: 30 }];
+  test('first after / at or after a time', () => {
+    assert.deepEqual([-1, 0, 10, 15, 30, 31].map((t) => firstAfter(pts, t)), [0, 1, 3, 3, 5, 5]);
+    assert.deepEqual([-1, 0, 10, 15, 30, 31].map((t) => firstAtOrAfter(pts, t)), [0, 0, 1, 3, 4, 5]);
+    assert.equal(firstAfter([], 5), 0);
+  });
+  test('points in a range (inclusive) and the point in force at a time', () => {
+    assert.deepEqual(pointsBetween(pts, 10, 20).map((p) => p.t), [10, 10, 20]);
+    assert.deepEqual(pointsBetween(pts, 31, 40), []);
+    assert.equal(pointAtOrBefore(pts, 25).t, 20);
+    assert.equal(pointAtOrBefore(pts, 10).t, 10);
+    assert.equal(pointAtOrBefore(pts, -1), null);
+  });
+});
+
+describe('decimate', async () => {
+  const { decimate } = await import('../../renderer/plotMath.js');
+  const wave = Array.from({ length: 100_000 }, (_, i) => ({ t: i, v: Math.sin(i / 50) * 10 + (i % 997 === 0 ? 50 : 0) }));
+  test('keeps at most ~4 points per pixel column, in time order, with every extreme', () => {
+    const out = decimate(wave, 0, 99_999, 500);
+    assert.ok(out.length <= 4 * 500 + 2, `${out.length} points`);
+    assert.ok(out.every((p, i) => i === 0 || p.t >= out[i - 1].t));
+    // Spikes survive: every bucket keeps its highest point.
+    assert.equal(Math.max(...out.map((p) => p.v)), Math.max(...wave.map((p) => p.v)));
+    assert.equal(Math.min(...out.map((p) => p.v)), Math.min(...wave.map((p) => p.v)));
+  });
+  test('small inputs pass through, with one point beyond each edge so lines reach them', () => {
+    const few = [{ t: 0, v: 1 }, { t: 10, v: 2 }, { t: 20, v: 3 }, { t: 30, v: 4 }];
+    assert.deepEqual(decimate(few, 12, 18, 100).map((p) => p.t), [10, 20]);
+    assert.deepEqual(decimate(few, 0, 30, 100).map((p) => p.t), [0, 10, 20, 30]);
+  });
+  test('fast enough to run on every redraw', () => {
+    const t = performance.now();
+    for (let i = 0; i < 10; i++) decimate(wave, 0, 99_999, 1200);
+    assert.ok((performance.now() - t) / 10 < 40, 'well under a frame budget per 100k-point series');
+  });
+});
+
+describe('isBinary caching', async () => {
+  const { isBinary } = await import('../../renderer/plotMath.js');
+  test('stays correct as points are added, removed from the front, or cleared', () => {
+    const pts = [{ t: 1, v: 1 }, { t: 2, v: 0 }];
+    assert.equal(isBinary(pts), true);
+    pts.push({ t: 3, v: 2 });
+    assert.equal(isBinary(pts), false);
+    pts.splice(0, 3, { t: 4, v: 1 });
+    assert.equal(isBinary(pts), true, 'the non-binary point was dropped');
+    pts.length = 0;
+    assert.equal(isBinary(pts), false);
+    pts.push({ t: 5, v: 0 });
+    assert.equal(isBinary(pts), true);
+  });
+});

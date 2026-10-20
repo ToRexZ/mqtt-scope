@@ -33,5 +33,9 @@ contextBridge.exposeInMainWorld('api', {
   readFileBytes: () => ipcRenderer.invoke('file:readBytes'),
 
   openPopout: (topic, history) => ipcRenderer.invoke('popout:open', { topic, history }),
-  popoutInit: () => ipcRenderer.invoke('popout:init'),
+  popoutInit: () => ipcRenderer.invoke('child:init'),
+  openPlotWindow: (init) => ipcRenderer.invoke('plotwin:open', init),
+  plotWindowInit: () => ipcRenderer.invoke('child:init'),
+  resetChildWindows: () => ipcRenderer.send('children:reset'),
+  onReset: (cb) => ipcRenderer.on('app:reset', () => cb()),
 });

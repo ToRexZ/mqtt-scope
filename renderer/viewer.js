@@ -3,6 +3,7 @@
 // and JSON expansion state so live updates do not move what you are reading.
 
 import { el, button, showMenu, markMatches, toast } from './ui.js';
+import { iconButton } from './icons.js';
 import {
   decode,
   preview,
@@ -83,7 +84,7 @@ export class MessageViewer {
     const topicRow = el('div', 'viewer-topic-row');
     topicRow.append(
       this.topicEl,
-      button('⧉', 'Copy topic', () => this.source && this.copy(this.source.path, 'Topic copied'), 'btn icon'),
+      iconButton('copy', 'Copy topic', () => this.source && this.copy(this.source.path, 'Topic copied')),
     );
     head.append(topicRow, this.metaEl);
     const actions = el('div', 'viewer-actions');
@@ -152,8 +153,8 @@ export class MessageViewer {
     searchBox.append(
       this.search,
       this.hitCount,
-      button('↑', 'Previous match (Shift+Enter)', () => this.stepHit(-1), 'btn icon'),
-      button('↓', 'Next match (Enter)', () => this.stepHit(1), 'btn icon'),
+      iconButton('arrow-up', 'Previous match (Shift+Enter)', () => this.stepHit(-1)),
+      iconButton('arrow-down', 'Next match (Enter)', () => this.stepHit(1)),
     );
     bar.append(this.tabs, this.liveBtn, this.expandBtn, this.collapseBtn, this.wrapBtn, searchBox);
 

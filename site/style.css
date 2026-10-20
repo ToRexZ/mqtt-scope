@@ -184,6 +184,9 @@ h3 {
   align-items: center;
   margin-bottom: 72px;
 }
+.feature.reverse {
+  grid-template-columns: 1.6fr 1fr;
+}
 .feature.reverse .text {
   order: 2;
 }
@@ -251,6 +254,7 @@ footer {
 
 @media (max-width: 860px) {
   .feature,
+  .feature.reverse,
   .platforms,
   .grid {
     grid-template-columns: 1fr;

@@ -1,4 +1,10 @@
 :root {
+  /* Stacking: overlays (menus, dialogs, toasts) always above a plot that
+     fills the window. */
+  --z-fill-window: 500;
+  --z-modal: 1000;
+  --z-menu: 1100; /* above dialogs, for menus opened from one */
+  --z-toast: 1200;
   color-scheme: dark;
   --bg: #0f1115;
   --panel: #161a20;
@@ -156,6 +162,17 @@ body.resizing-y {
 .btn.icon {
   padding: 4px 7px;
   min-width: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+span.icon {
+  display: inline-flex;
+  line-height: 0;
+}
+.btn.icon.small {
+  padding: 3px 5px;
+  min-width: 24px;
 }
 .btn.small {
   padding: 2px 8px;
@@ -305,12 +322,40 @@ body.resizing-y {
   border-bottom: 1px solid var(--border);
 }
 .right-tabs .tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border-radius: 6px 6px 0 0;
   border-bottom: none;
 }
+/* A small count beside a tab name (e.g. how many plots): a pill centred on
+   the name, so it does not sit low on the name's baseline. */
 .count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 16px;
+  /* Optical centring: the name's capitals sit above the middle of its line,
+     and digits sit high in their box. */
+  position: relative;
+  top: -1px;
+  padding: 2px 5px 0;
+  border-radius: 8px;
+  background: var(--panel-3);
   color: var(--muted);
-  font-size: 11px;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.tab.active .count,
+.plot-tab.active .count {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+.count:empty {
+  display: none;
 }
 .right-body {
   flex: 1;
@@ -796,7 +841,11 @@ mark.hit.current {
 .mode-chart .chart-box {
   height: calc(100% - 40px);
 }
+/* Positioned so the canvas's pixel buffer (2× on HiDPI screens) never counts
+   as the chart's natural size: the box decides the size, the canvas follows. */
 canvas.chart {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: block;
@@ -859,8 +908,39 @@ canvas.chart {
   padding: 6px 8px;
   border-bottom: 1px solid var(--border);
 }
-.layout-select {
-  max-width: 220px;
+/* named plot tabs */
+.plot-tabs {
+  display: flex;
+  gap: 2px;
+  overflow-x: auto;
+  max-width: 55%;
+  scrollbar-width: thin;
+}
+.plot-tab {
+  font: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.plot-tab:hover {
+  background: var(--panel-3);
+}
+.plot-tab.active {
+  color: var(--text);
+  background: var(--panel-3);
+  border-color: var(--border);
+}
+.zoom-reset {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
 }
 .toolbar-sep {
   width: 1px;
@@ -874,35 +954,138 @@ canvas.chart {
 .plots-main {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: 300px 1fr;
+  display: flex;
 }
-.plots.no-settings .plots-main {
-  grid-template-columns: 1fr;
+.plots-main > .ps-splitter {
+  flex: none;
+  width: 5px;
 }
-.plots.no-settings .plot-settings {
+/* Shown instead of the settings panel while it is hidden. */
+.ps-rail {
+  display: none;
+  flex: none;
+  width: 32px;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 8px;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+}
+.plots.no-settings .plot-settings,
+.plots.no-settings .ps-splitter {
   display: none;
 }
+.plots.no-settings .ps-rail {
+  display: flex;
+}
+/* Plots fill the tab as a split layout (plots.js sets each child's flex
+   weight); the area scrolls only when plots reach their minimum size. */
 .plots-grid {
+  flex: 1;
   overflow: auto;
-  padding: 10px;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(480px, 1fr));
-  grid-auto-rows: 340px;
-  gap: 10px;
-  min-width: 0;
-}
-.plots-grid > .placeholder {
-  grid-column: 1 / -1;
-}
-.plot-card {
+  padding: 8px;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
+}
+.plots-grid.empty {
+  display: block;
+}
+.mosaic-root {
+  flex: 1 0 auto;
+}
+.mosaic-split,
+.mosaic-leaf {
+  display: flex;
+}
+.mosaic-leaf > .plot-card {
+  flex: 1;
+}
+.mosaic-split.row {
+  flex-direction: row;
+}
+.mosaic-split.col {
+  flex-direction: column;
+}
+.mosaic-handle {
+  flex: none;
+  border-radius: 3px;
+  transition: background-color 0.15s;
+}
+.mosaic-handle.row {
+  width: 6px;
+  cursor: col-resize;
+}
+.mosaic-handle.col {
+  height: 6px;
+  cursor: row-resize;
+}
+.mosaic-handle:hover {
+  background: var(--accent);
+}
+/* Moving a plot: a label follows the mouse, the drop zone is highlighted. */
+.drag-ghost {
+  position: fixed;
+  z-index: 300;
+  pointer-events: none;
+  background: var(--panel-3);
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+}
+.drop-marker {
+  position: fixed;
+  z-index: 290;
+  pointer-events: none;
+  background: var(--accent-soft);
+  border: 2px solid var(--accent);
+  border-radius: 6px;
+}
+.drop-marker.center {
+  border-style: dashed;
+}
+.plot-card.dragging {
+  opacity: 0.45;
+}
+body.moving-plot,
+body.moving-plot * {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.plot-tab.drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.plot-card {
+  /* Narrow plots tuck some header buttons into a menu (container query below). */
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  min-height: 130px;
+  min-width: 220px;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--panel-2);
   padding: 8px 10px;
+}
+/* Full screen: the Plots panel shows one plot, filling the screen (or, when
+   the system refuses full screen, the window). */
+.plots.solo .plots-toolbar,
+.plots.solo .plot-settings,
+.plots.solo .ps-splitter,
+.plots.solo .ps-rail {
+  display: none;
+}
+.plots:fullscreen {
+  background: var(--bg);
+}
+.plots.fill-window {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-fill-window);
 }
 .plot-card.selected {
   border-color: var(--accent);
@@ -911,15 +1094,45 @@ canvas.chart {
 .plot-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  cursor: grab;
+}
+.plot-head button,
+.plot-head select {
+  cursor: pointer;
+}
+.plot-grip {
+  display: inline-flex;
+  color: var(--faint);
+}
+.plot-head .narrow-only {
+  display: none;
+}
+@container (max-width: 640px) {
+  .plot-head .wide-only {
+    display: none;
+  }
+  .plot-head .narrow-only {
+    display: inline-flex;
+  }
+}
+@container (max-width: 430px) {
+  .plot-card:not(.plot-window-card) .plot-head .kind-toggle {
+    display: none;
+  }
+}
+.plot-head:hover .plot-grip {
+  color: var(--muted);
 }
 .plot-title {
+  flex: 1 1 120px;
+  min-width: 0;
   font-weight: 600;
   margin-right: auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: text;
 }
 .plot-legend {
   display: flex;
@@ -927,6 +1140,35 @@ canvas.chart {
   gap: 4px 12px;
   margin: 6px 0;
   font-size: 12px;
+  /* Many series must not push the chart out of its card. */
+  flex: none;
+  max-height: 30%;
+  overflow: auto;
+}
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.seg-btn {
+  font: inherit;
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--panel-2);
+  border: none;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.seg-btn + .seg-btn {
+  border-left: 1px solid var(--border);
+}
+.seg-btn:hover {
+  background: var(--panel-3);
+}
+.seg-btn.on {
+  color: var(--text);
+  background: var(--accent-soft);
 }
 .legend-chip {
   display: inline-flex;
@@ -971,12 +1213,44 @@ canvas.chart {
   color: var(--accent);
 }
 .plot-canvas {
+  position: relative;
   flex: 1;
+  min-height: 60px;
+}
+/* On a zoomed plot, bottom right above the time axis (like Lichtblick). */
+.reset-view {
+  position: absolute;
+  right: 18px;
+  bottom: 32px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+.reset-view:hover {
+  background: var(--accent);
+  filter: brightness(1.15);
+}
+.plot-canvas .chart-box {
   min-height: 0;
+  user-select: none;
+}
+.chart-sel {
+  position: absolute;
+  pointer-events: none;
+  background: var(--accent-soft);
+  border: 1px solid var(--accent);
+  border-radius: 2px;
 }
 
 /* plot settings panel (left) */
 .plot-settings {
+  flex: none;
+  width: var(--ps-w, 300px);
   border-right: 1px solid var(--border);
   overflow: auto;
   padding: 8px 10px 16px;
@@ -984,8 +1258,11 @@ canvas.chart {
   font-size: 12.5px;
 }
 .ps-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-weight: 600;
-  margin: 2px 0 8px;
+  margin: 0 0 8px;
 }
 .ps-section {
   border-bottom: 1px solid var(--grid);
@@ -1237,7 +1514,7 @@ canvas.chart {
 
 .ctx-menu {
   position: fixed;
-  z-index: 100;
+  z-index: var(--z-menu);
   min-width: 220px;
   background: var(--panel-3);
   border: 1px solid var(--border);
@@ -1272,7 +1549,7 @@ canvas.chart {
   position: fixed;
   right: 16px;
   bottom: 36px;
-  z-index: 200;
+  z-index: var(--z-toast);
   max-width: 520px;
   background: var(--panel-3);
   border: 1px solid var(--border);
@@ -1294,7 +1571,7 @@ canvas.chart {
 .modal-overlay {
   position: fixed;
   inset: 0;
-  z-index: 150;
+  z-index: var(--z-modal);
   background: rgba(0, 0, 0, 0.45);
   display: flex;
   align-items: center;
@@ -1729,4 +2006,17 @@ body.popout .viewer-host {
   min-width: 130px;
   font-family: var(--mono);
   font-size: 12px;
+}
+
+/* ------------------------------------------------------------ plot window */
+
+body.plot-window {
+  padding: 8px;
+}
+.plot-window-card {
+  flex: 1;
+  min-height: 0;
+}
+.plot-window .plot-head {
+  cursor: default;
 }

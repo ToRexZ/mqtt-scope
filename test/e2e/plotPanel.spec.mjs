@@ -1,5 +1,5 @@
 // Plot settings panel (Lichtblick-style), colours, boolean state bars,
-// synced time bar across plots, and saved layouts with export/import.
+// synced time bar across plots, and plot tabs with export/import.
 
 import path from 'node:path';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { test, expect, makeUserData, profile, connect, waitForTopic, mockDialogs
 
 const plotsTab = (page) => page.locator('.right-tabs .tab[data-tab="plots"]');
 const panel = (page) => page.locator('.plot-settings');
-const chartSeries = (page, i = 0) => page.evaluate((i) => [...window.__mqttscope.plots.charts.values()][i].series.map((s) => ({ label: s.label, display: s.display, color: s.color, width: s.width })), i);
+const chartSeries = (page, i = 0) => page.evaluate((n) => [...window.__mqttscope.plots.charts.values()][n].series.map((s) => ({ label: s.label, display: s.display, color: s.color, width: s.width })), i);
 
 async function setup(env) {
   const broker = await env.broker();
@@ -53,7 +53,7 @@ test('settings panel: rename, window, legend, y axis, series label, colour, disp
   await panel(page).locator('input[name="plot-yMin"]').press('Tab');
   await panel(page).locator('input[name="plot-yMax"]').fill('100');
   await panel(page).locator('input[name="plot-yMax"]').press('Tab');
-  await expect.poll(() => page.evaluate(() => [...window.__mqttscope.plots.charts.values()][0].axis)).toEqual({ yMin: 0, yMax: 100 });
+  await expect.poll(() => page.evaluate(() => [...window.__mqttscope.plots.charts.values()][0].axis)).toEqual({ yMin: 0, yMax: 100, kind: 'timeseries', timeGrid: true });
 
   // Booleans default to a state bar.
   expect(await chartSeries(page)).toEqual([
@@ -81,8 +81,8 @@ test('settings panel: rename, window, legend, y axis, series label, colour, disp
   await expect.poll(async () => (await chartSeries(page)).map((s) => s.label)).toEqual(['Battery %', 'Driving']);
 
   // Everything is saved.
-  await waitForFile(path.join(userData, 'plots.json'), (b) => {
-    const p = JSON.parse(b).plots[0];
+  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => {
+    const p = JSON.parse(b).tabs[0].plots[0];
     return p.title === 'Robot' && p.windowSec === 60 && p.legendValues === false && p.yMax === 100 && p.series[0].display === 'step' && p.series[0].slot === 3;
   });
   // Selecting another plot shows its settings.
@@ -115,74 +115,120 @@ test('hovering one plot moves the time bar on all plots and shows values at that
   expect(errors).toEqual([]);
 });
 
-test('layouts: save, change, switch with confirmation, export and import, rename, delete', async ({ env }) => {
+test('tabs: create, rename, switch, duplicate, export and import, delete; each tab keeps its own plots', async ({ env }) => {
   const { app, page, userData, errors } = await setup(env);
-  const select = page.locator('.layout-select');
-  await expect(select.locator('option:checked')).toHaveText('Unsaved layout');
+  const tabs = page.locator('.plot-tabs .plot-tab');
+  const titles = page.locator('.plot-card .plot-title');
+  await expect(tabs).toHaveCount(1);
+  await expect(tabs.first()).toContainText('Plots');
+  await expect(titles).toHaveText(['Battery', 'hall/temp']);
 
-  // Save as "Robot view".
-  await page.locator('.plots-toolbar').getByRole('button', { name: 'Save as…' }).click();
-  await page.locator('.modal.prompt .input').fill('Robot view');
+  // A new tab starts empty; plots added now go to it.
+  await page.locator('.tab-add').click();
+  await page.locator('.modal.prompt .input').fill('Safety');
   await page.keyboard.press('Enter');
-  await expect(select.locator('option:checked')).toHaveText('Robot view');
+  await expect(tabs).toHaveCount(2);
+  await expect(tabs.nth(1)).toHaveClass(/active/);
+  await expect(page.locator('.plot-card')).toHaveCount(0);
+  await expect(page.locator('.plots-grid .placeholder')).toBeVisible();
+  await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/state', ['driving']));
+  await expect(titles).toHaveText(['robot/state › $.driving']);
+  // Only booleans: a new plot shows state transitions.
+  await expect(page.locator('.plot-card').first()).toHaveClass(/kind-states/);
 
-  // A change marks the layout as modified; Save stores it.
-  await page.locator('.plot-card').nth(1).locator('button[title="Remove plot"]').click();
-  await expect(select.locator('option:checked')).toHaveText('Robot view •');
-  await page.locator('.plots-toolbar').getByRole('button', { name: 'Save', exact: true }).click();
-  await expect(select.locator('option:checked')).toHaveText('Robot view');
+  // Switching shows each tab's own plots.
+  await tabs.first().click();
+  await expect(titles).toHaveText(['Battery', 'hall/temp']);
+  await tabs.nth(1).click();
+  await expect(titles).toHaveText(['robot/state › $.driving']);
 
-  // A second layout, then switch back (unsaved changes ask first).
-  await page.locator('.plots-toolbar').getByRole('button', { name: 'Save as…' }).click();
-  await page.locator('.modal.prompt .input').fill('Second');
+  // Rename by double-click; duplicate from the tab's context menu.
+  await tabs.nth(1).dblclick();
+  await page.locator('.modal.prompt .input').fill('Safety signals');
   await page.keyboard.press('Enter');
-  await panel(page).locator('input[name="plot-title"]').fill('Edited');
-  await expect(select.locator('option:checked')).toHaveText('Second •');
-  await mockDialogs(app, { confirm: false });
-  await select.selectOption({ label: 'Robot view' });
-  await expect.poll(() => dialogCalls(app)).toContainEqual(expect.objectContaining({ message: 'Discard changes to the current plots?' }));
-  await expect(page.locator('.plot-card .plot-title')).toHaveText(['Edited']);
-  await expect(select.locator('option:checked')).toHaveText('Second •');
-  await mockDialogs(app, { confirm: true });
-  await select.selectOption({ label: 'Robot view' });
-  await expect(page.locator('.plot-card .plot-title')).toHaveText(['Battery']);
-  await expect(page.locator('.plot-card .legend-label')).toHaveText(['Battery', 'Driving']);
+  await expect(tabs.nth(1)).toContainText('Safety signals');
+  await tabs.nth(1).click({ button: 'right' });
+  await page.locator('.ctx-menu .ctx-item', { hasText: 'Duplicate tab' }).click();
+  await expect(tabs).toHaveCount(3);
+  await expect(tabs.nth(2)).toContainText('Safety signals copy');
+  await expect(tabs.nth(2)).toHaveClass(/active/);
+  await expect(titles).toHaveText(['robot/state › $.driving']);
 
-  // Export to a file, then import it back as a new layout.
+  // Export a tab, import it back as a new tab; invalid files are refused.
   const dir = tempDir();
-  const file = path.join(dir, 'robot.mqtt-scope-layout.json');
+  const file = path.join(dir, 'safety.mqtt-scope-layout.json');
+  await tabs.nth(1).click();
   await mockDialogs(app, { saveFile: file });
-  await page.locator('.layout-more').click();
-  await page.locator('.ctx-menu .ctx-item', { hasText: 'Export layout to a file…' }).click();
+  await page.locator('.tab-more').click();
+  await page.locator('.ctx-menu .ctx-item', { hasText: 'Export tab to a file…' }).click();
   await waitForFile(file);
   const exported = JSON.parse(readFileSync(file, 'utf8'));
-  expect(exported).toMatchObject({ format: 'mqtt-scope-plot-layout', version: 1, name: 'Robot view' });
-  expect(exported.plots[0].series.map((s) => s.alias)).toEqual(['Battery', 'Driving']);
-  await mockDialogs(app, { openFile: file, confirm: true });
-  await page.locator('.layout-more').click();
-  await page.locator('.ctx-menu .ctx-item', { hasText: 'Import layout from a file…' }).click();
-  await expect(select.locator('option:checked')).toHaveText('Robot view (2)');
-  // An invalid file is refused with a reason.
+  expect(exported).toMatchObject({ format: 'mqtt-scope-plot-layout', version: 1, name: 'Safety signals', columns: 0 });
+  expect(exported.plots[0]).toMatchObject({ kind: 'states', series: [expect.objectContaining({ topic: 'robot/state', segs: ['driving'] })] });
+  await mockDialogs(app, { openFile: file });
+  await page.locator('.tab-more').click();
+  await page.locator('.ctx-menu .ctx-item', { hasText: 'Import tab from a file…' }).click();
+  await expect(tabs).toHaveCount(4);
+  await expect(tabs.nth(3)).toContainText('Safety signals (2)');
+  await expect(tabs.nth(3)).toHaveClass(/active/);
   const bad = path.join(dir, 'bad.json');
   writeFileSync(bad, '{"format":"something-else"}');
   await mockDialogs(app, { openFile: bad });
-  await page.locator('.layout-more').click();
-  await page.locator('.ctx-menu .ctx-item', { hasText: 'Import layout from a file…' }).click();
+  await page.locator('.tab-more').click();
+  await page.locator('.ctx-menu .ctx-item', { hasText: 'Import tab from a file…' }).click();
   await expect(page.locator('.toast.error').filter({ hasText: 'Not an MQTT Scope plot layout' })).toBeVisible();
 
-  // Rename and delete.
-  await page.locator('.layout-more').click();
-  await page.locator('.ctx-menu .ctx-item', { hasText: 'Rename layout…' }).click();
-  await page.locator('.modal.prompt .input').fill('Imported');
-  await page.keyboard.press('Enter');
-  await expect(select.locator('option:checked')).toHaveText('Imported');
+  // Deleting a tab with plots asks first.
+  await mockDialogs(app, { confirm: false });
+  await page.locator('.tab-more').click();
+  await page.locator('.ctx-menu .ctx-item', { hasText: 'Delete tab…' }).click();
+  await expect.poll(() => dialogCalls(app)).toContainEqual(expect.objectContaining({ message: 'Delete the tab “Safety signals (2)”?' }));
+  await expect(tabs).toHaveCount(4);
   await mockDialogs(app, { confirm: true });
-  await page.locator('.layout-more').click();
-  await page.locator('.ctx-menu .ctx-item', { hasText: 'Delete layout…' }).click();
-  await expect(select.locator('option')).toHaveText(['Unsaved layout', 'Robot view', 'Second']);
+  await page.locator('.tab-more').click();
+  await page.locator('.ctx-menu .ctx-item', { hasText: 'Delete tab…' }).click();
+  await expect(tabs).toHaveCount(3);
 
-  // Layouts persist.
-  await waitForFile(path.join(userData, 'plots.json'), (b) => JSON.parse(b).layouts?.length === 2);
-  expect(readJson(path.join(userData, 'plots.json')).layouts.map((l) => l.name)).toEqual(['Robot view', 'Second']);
+  // Tabs persist, with the one on screen.
+  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => JSON.parse(b).tabs?.length === 3);
+  const saved = readJson(path.join(userData, 'plotTabs.json'));
+  expect(saved.tabs.map((t) => [t.name, t.plots.length])).toEqual([
+    ['Plots', 2],
+    ['Safety signals', 1],
+    ['Safety signals copy', 1],
+  ]);
+  expect(saved.tabs.some((t) => t.id === saved.activeTabId)).toBe(true);
+  // The tab on screen is also saved in the 0.1 format, for older versions.
+  const legacy = readJson(path.join(userData, 'plots.json'));
+  expect(legacy).toEqual({ plots: saved.tabs.find((t) => t.id === saved.activeTabId).plots, writtenBy: 2 });
+  expect(saved.legacyMirror).toEqual(legacy.plots);
+  expect(errors).toEqual([]);
+});
+
+test('plot counts: per tab and in total, hidden when there are none, updated when plots move', async ({ env }) => {
+  const { page, errors } = await setup(env);
+  const total = page.locator('#plot-count');
+  const tabCount = (name) => page.locator('.plot-tab', { hasText: name }).locator('.count');
+  await expect(total).toHaveText('2');
+  await expect(tabCount('Plots')).toHaveText('2');
+  await page.locator('.tab-add').click();
+  await page.locator('.modal.prompt .input').fill('Empty');
+  await page.keyboard.press('Enter');
+  await expect(tabCount('Empty')).toBeHidden();
+  await page.locator('.plot-tab', { hasText: 'Plots' }).click();
+  // Move a plot onto the other tab: both counts follow, the total stays.
+  const title = await page.locator('.plot-card').first().locator('.plot-title').boundingBox();
+  const tab = await page.locator('.plot-tab', { hasText: 'Empty' }).boundingBox();
+  await page.mouse.move(title.x + 10, title.y + title.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(tab.x + tab.width / 2, tab.y + tab.height / 2, { steps: 8 });
+  await page.mouse.up();
+  await expect(tabCount('Plots')).toHaveText('1');
+  await expect(tabCount('Empty')).toHaveText('1');
+  await expect(total).toHaveText('2');
+  // Removing the last plot of a tab hides its count.
+  await page.locator('.plot-card').first().locator('button[title="Remove plot"]').click();
+  await expect(tabCount('Plots')).toBeHidden();
+  await expect(total).toHaveText('1');
   expect(errors).toEqual([]);
 });
