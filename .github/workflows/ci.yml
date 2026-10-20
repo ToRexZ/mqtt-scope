@@ -75,6 +75,8 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write # build provenance attestations
+      attestations: write
     steps:
       - uses: actions/checkout@v4
       - name: Release notes from CHANGELOG.md
@@ -83,6 +85,11 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
+      # Signed record that each file was built by this workflow from this
+      # commit; verify with `gh attestation verify <file> --repo ToRexZ/mqtt-scope`.
+      - uses: actions/attest@v4
+        with:
+          subject-path: artifacts/*
       - uses: softprops/action-gh-release@v2
         with:
           files: artifacts/*

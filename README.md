@@ -150,6 +150,14 @@ libfuse2` on Ubuntu 22.04+); without it run it with
 Builds are not code-signed yet: on macOS right-click → Open the first time; on
 Windows choose "More info → Run anyway".
 
+**Verify a download** (releases after 0.2.0): every release file has a signed
+[build attestation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
+showing it was built by this repository's CI from the tagged commit:
+
+```sh
+gh attestation verify MQTT-Scope-<version>-linux-x86_64.AppImage --repo ToRexZ/mqtt-scope
+```
+
 ## Keyboard shortcuts
 
 All shortcuts can be changed in **Settings → Keyboard** (click one and press the

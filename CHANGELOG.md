@@ -4,6 +4,13 @@ All notable changes to MQTT Scope. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Release files come with signed GitHub build attestations: check a download
+  with `gh attestation verify <file> --repo ToRexZ/mqtt-scope`.
+
 ## [0.2.0] - 2026-10-20
 
 ### Added
@@ -87,5 +94,6 @@ First release.
 - Several brokers at once (one window each); installers for Linux, Windows and
   macOS.
 
+[Unreleased]: https://github.com/ToRexZ/mqtt-scope/compare/v0.2.0...HEAD
 [0.2.0]: https://github.com/ToRexZ/mqtt-scope/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ToRexZ/mqtt-scope/releases/tag/v0.1.0
