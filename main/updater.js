@@ -184,6 +184,7 @@ class Updater extends EventEmitter {
       return;
     }
     if (status === 'error' && latest.version === release.version) return;
+    if (latest?.version !== release.version) this._log.info('update', `${release.version} is available`);
     this._set({
       status: 'available',
       latest: { version: release.version, notes: release.notes },

@@ -154,6 +154,7 @@ function createUpdater() {
     !app.isPackaged && !base
       ? 'dev'
       : installKind({ platform: process.platform, env: process.env, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, exists: fs.existsSync });
+  log.info('update', `install kind: ${kind}`);
   const u = new Updater({
     currentVersion: app.getVersion(),
     kind,

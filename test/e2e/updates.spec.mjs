@@ -94,7 +94,7 @@ test('unpackaged run with only MQTTSCOPE_UPDATE_KIND set never contacts anything
 
 test('override: startup check finds a newer release and every window gets it', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9', 'Fixed things'));
-  const { app, page, errors } = await env.launch({ env: overrides(server) });
+  const { app, page, userData, errors } = await env.launch({ env: overrides(server) });
   await waitForStatus(page, 'available');
   const state = await updateState(page);
   expect(state).toEqual({
@@ -121,6 +121,10 @@ test('override: startup check finds a newer release and every window gets it', a
     await expect.poll(async () => (await broadcasts(p)).map((s) => s.latest?.version)).toEqual(['9.9.10']);
   }
   expect(server.requests()).toBe(2);
+
+  // The log says how this build updates, and each version once when found.
+  const logged = readFileSync(path.join(userData, 'logs', 'main.log'), 'utf8');
+  expect(logged.match(/ INFO update .*/g)).toEqual([' INFO update install kind: manual', ' INFO update 9.9.9 is available', ' INFO update 9.9.10 is available']);
   expect(errors).toEqual([]);
 });
 

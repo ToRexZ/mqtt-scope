@@ -129,6 +129,23 @@ describe('check', () => {
     assert.equal(w.events[1].latest.notes, 'Edited notes');
   });
 
+  test('a version is logged when it is first offered, not on every check', async () => {
+    const { u, w } = make();
+    const infos = () => w.logs.filter(([level]) => level === 'info');
+    await u.check();
+    await u.tick();
+    await u.check({ manual: true });
+    w.release = rel('0.3.1', 'Edited notes');
+    await u.check();
+    assert.deepEqual(infos(), [['info', 'update', '0.3.1 is available']]);
+    w.release = rel('0.3.2');
+    await u.check();
+    assert.deepEqual(infos(), [
+      ['info', 'update', '0.3.1 is available'],
+      ['info', 'update', '0.3.2 is available'],
+    ]);
+  });
+
   test('the notice goes away when the latest release is no longer newer', async () => {
     const { u, w } = make();
     await u.check();
@@ -320,9 +337,10 @@ describe('skip', () => {
     });
     await u.tick();
     assert.equal(u.state.status, 'available');
-    assert.equal(w.logs.length, 1);
-    assert.equal(w.logs[0][0], 'warn');
-    assert.match(w.logs[0].join(' '), /EACCES/);
+    assert.deepEqual(w.logs, [
+      ['warn', 'update', 'could not read the skipped version: EACCES'],
+      ['info', 'update', '0.3.1 is available'],
+    ]);
   });
 
   test('a skip that cannot be saved is logged and still holds for this run', async () => {
