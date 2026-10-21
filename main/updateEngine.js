@@ -9,6 +9,13 @@ const { SELF_UPDATING } = require('./updateCheck');
 
 const FAKE_STEP_MS = 150;
 
+// electron-updater sends x-user-staging-id, a random ID it keeps in
+// <userData>/.updaterId, with its feed requests (for staged rollouts, which
+// this app does not use). An update request must not identify the install, so
+// every install sends the same nil UUID: requestHeaders take precedence over
+// electron-updater's own value, on the feed requests and the downloads.
+const NO_INSTALL_ID = { 'x-user-staging-id': '00000000-0000-0000-0000-000000000000' };
+
 // feedUrl: the MQTTSCOPE_UPDATE_URL override as a generic feed, or null for the
 // feed packaged with the app. MQTTSCOPE_UPDATE_FAKE=1 selects a fake for tests.
 function createEngine({ kind, feedUrl, log, env = process.env, loadUpdater = () => require('electron-updater').autoUpdater }) {
@@ -50,6 +57,7 @@ function electronUpdaterEngine({ feedUrl, log, loadUpdater }) {
     updater = loadUpdater();
     updater.autoDownload = false; // nothing downloads until the user asks
     updater.autoInstallOnAppQuit = true; // a downloaded update installs when the user quits
+    updater.requestHeaders = { ...NO_INSTALL_ID };
     updater.logger = {
       info: (m) => log.info('update', m),
       warn: (m) => log.warn('update', m),

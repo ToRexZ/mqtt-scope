@@ -1,13 +1,19 @@
 // The update engine: which builds get one, the test fake, and the
-// electron-updater adapter, run against a stand-in autoUpdater (electron-updater
-// itself needs a packaged Electron app, so it is never loaded here).
+// electron-updater adapter, run against a stand-in autoUpdater. The last part
+// runs the real electron-updater too, with stand-ins for the app and its HTTP
+// client (so nothing leaves the process), for what its requests send.
 
 import { test, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { requireFromRoot } from './_util.mjs';
 
 const { createEngine } = requireFromRoot('./main/updateEngine.js');
+
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
 const flush = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -222,6 +228,7 @@ describe('electron-updater engine', () => {
     assert.equal(loads(), 1);
     assert.equal(updater.autoDownload, false);
     assert.equal(updater.autoInstallOnAppQuit, true);
+    assert.deepEqual(updater.requestHeaders, { 'x-user-staging-id': NIL_UUID }, 'update requests carry no install ID');
     assert.deepEqual(
       updater.calls.filter(([name]) => name === 'setFeedURL'),
       [],
@@ -329,5 +336,91 @@ describe('electron-updater engine', () => {
     assert.deepEqual(updater.listeners_(), before);
     updater.onInstall = () => {};
     assert.doesNotThrow(() => engine.quitAndInstall());
+  });
+});
+
+// electron-updater's AppImage updater as a packaged build runs it: the GitHub
+// feed from app-update.yml (what electron-builder packages for this repo), a
+// release 0.3.1 newer than the running 0.3.0. Records each request with its
+// headers, and the headers the download would send.
+function realElectronUpdater(t) {
+  const { AppImageUpdater } = requireFromRoot('electron-updater/out/AppImageUpdater');
+  const dir = mkdtempSync(path.join(tmpdir(), 'mqttscope-updater-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  writeFileSync(path.join(dir, 'app-update.yml'), 'owner: ToRexZ\nrepo: mqtt-scope\nprovider: github\nupdaterCacheDirName: mqtt-scope-updater\n');
+  const app = {
+    version: '0.3.0',
+    name: 'MQTT Scope',
+    isPackaged: true,
+    appUpdateConfigPath: path.join(dir, 'app-update.yml'),
+    userDataPath: path.join(dir, 'data'),
+    baseCachePath: path.join(dir, 'cache'),
+    whenReady: () => Promise.resolve(),
+    relaunch() {},
+    quit() {},
+    onQuit() {},
+  };
+  const updater = new AppImageUpdater(null, app);
+  updater.logger = null;
+  updater.forceDevUpdateConfig = true; // stands in for APPIMAGE in the environment
+  const yml = [
+    'version: 0.3.1',
+    'files:',
+    '  - url: MQTT-Scope-0.3.1-linux-x86_64.AppImage',
+    '    sha512: AAAA',
+    '    size: 1',
+    'path: MQTT-Scope-0.3.1-linux-x86_64.AppImage',
+    'sha512: AAAA',
+    "releaseDate: '2026-10-22T00:00:00.000Z'",
+  ].join('\n');
+  const atom = `<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom"><entry><link rel="alternate" type="text/html" href="https://github.com/ToRexZ/mqtt-scope/releases/tag/v0.3.1"/><title>0.3.1</title><content type="html">Notes</content></entry></feed>`;
+  const responses = [
+    [/^\/ToRexZ\/mqtt-scope\/releases\.atom$/, atom],
+    [/^\/ToRexZ\/mqtt-scope\/releases\/latest$/, JSON.stringify({ tag_name: 'v0.3.1' })],
+    [/^\/ToRexZ\/mqtt-scope\/releases\/download\/v0\.3\.1\/latest[\w-]*\.yml$/, yml],
+  ];
+  const requests = [];
+  updater.httpExecutor = {
+    async request(options) {
+      const pathname = options.path.split('?')[0];
+      requests.push({ host: options.hostname, path: pathname, headers: { ...options.headers } });
+      const hit = responses.find(([re]) => re.test(pathname));
+      if (!hit) throw new Error(`unexpected request ${options.hostname}${options.path}`);
+      return hit[1];
+    },
+  };
+  const downloads = [];
+  updater.doDownloadUpdate = async (options) => {
+    downloads.push({ ...options.requestHeaders });
+    return [];
+  };
+  const savedId = () => readFileSync(path.join(dir, 'data', '.updaterId'), 'utf8');
+  return { updater, requests, downloads, savedId };
+}
+
+describe('electron-updater engine with the real electron-updater', () => {
+  test('on its own, electron-updater sends the install ID it keeps in .updaterId', async (t) => {
+    const { updater, requests, savedId } = realElectronUpdater(t);
+    const result = await updater.checkForUpdates();
+    assert.equal(result.isUpdateAvailable, true);
+    assert.match(savedId(), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    assert.notEqual(savedId(), NIL_UUID);
+    assert.ok(requests.some((r) => r.headers['x-user-staging-id'] === savedId()));
+  });
+
+  test('through the engine, no feed request or download sends it: every one sends the nil UUID', async (t) => {
+    const { updater, requests, downloads, savedId } = realElectronUpdater(t);
+    const engine = createEngine({ kind: 'appimage', feedUrl: null, log: fakeLog(), env: {}, loadUpdater: () => updater });
+    await engine.download(() => {});
+    assert.deepEqual(
+      requests.map((r) => `${r.host}${r.path}`.replace(/latest[\w-]*\.yml$/, 'latest*.yml')),
+      ['github.com/ToRexZ/mqtt-scope/releases.atom', 'github.com/ToRexZ/mqtt-scope/releases/latest', 'github.com/ToRexZ/mqtt-scope/releases/download/v0.3.1/latest*.yml'],
+    );
+    assert.equal(downloads.length, 1);
+    for (const headers of [...requests.map((r) => r.headers), ...downloads]) {
+      assert.equal(headers['x-user-staging-id'], NIL_UUID);
+      assert.ok(!Object.values(headers).some((v) => String(v).includes(savedId())), JSON.stringify(headers));
+    }
   });
 });
