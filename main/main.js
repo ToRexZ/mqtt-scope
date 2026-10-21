@@ -1,11 +1,15 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, safeStorage, session: electronSession, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, safeStorage, session: electronSession, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { MqttSession } = require('./mqttSession');
 const { createProfileStore } = require('./profileStore');
 const { createJsonStore } = require('./jsonStore');
+const { Updater } = require('./updater');
+const { createEngine } = require('./updateEngine');
+const { releaseUrl, createFetchRelease } = require('./fetchRelease');
+const { installKind, releasePageUrl } = require('./updateCheck');
 const log = require('./log');
 
 // Lets tests (and portable installs) keep their data in a chosen directory.
@@ -20,6 +24,7 @@ const windows = new Map(); // webContents.id -> { win, session }
 const childWindows = new Map(); // webContents.id -> { win, ownerId, topics: Set, init } (see openChildWindow)
 let profiles;
 let stores;
+let updater;
 let quitting = false;
 let menuShortcuts = {}; // action id -> accelerator label, from the renderer's settings
 
@@ -137,6 +142,52 @@ function broadcastChange(fromId, name) {
   for (const [id, { win }] of windows) if (id !== fromId && !win.isDestroyed()) win.webContents.send('store:changed', name);
 }
 
+// The Settings switch (on unless set to false) governs automatic checks only.
+const updateChecksOn = () => stores.get('settings')?.checkForUpdates !== false;
+
+// The update notice. MQTTSCOPE_UPDATE_URL (tests, the release gate) stands in
+// for GitHub and for electron-updater's feed. Without it, unpackaged runs
+// (npm start, tests) never contact anything, whatever MQTTSCOPE_UPDATE_KIND says.
+function createUpdater() {
+  const base = process.env.MQTTSCOPE_UPDATE_URL || '';
+  const kind =
+    !app.isPackaged && !base
+      ? 'dev'
+      : installKind({ platform: process.platform, env: process.env, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, exists: fs.existsSync });
+  const u = new Updater({
+    currentVersion: app.getVersion(),
+    kind,
+    fetchRelease: createFetchRelease({ fetch: (url, init) => net.fetch(url, init), url: releaseUrl(base), version: app.getVersion() }),
+    engine: createEngine({ kind, feedUrl: base || null, log }),
+    store: { get: () => stores.get('updates'), set: (value) => stores.set('updates', value) },
+    isEnabled: updateChecksOn,
+    connectedCount: () => [...windows.values()].filter(({ session }) => session.status.state === 'connected').length,
+    log,
+  });
+  // Every main window shows the same state. A window closing mid-broadcast
+  // must not keep the others from hearing it.
+  u.on('state', (state) => {
+    for (const { win } of windows.values()) {
+      if (win.isDestroyed()) continue;
+      try {
+        win.webContents.send('update:state', state);
+      } catch (err) {
+        log.warn('update', `could not send the update state: ${err.message}`);
+      }
+    }
+  });
+  if (base) globalThis.__mqttscopeUpdater = u; // for tests, like the renderer's window.__mqttscope
+  return u;
+}
+
+// Help → Check for Updates…: always asks, and tells the window it came from.
+async function checkForUpdatesNow() {
+  const asked = focusedMain();
+  const result = await updater.check({ manual: true });
+  const w = asked && !asked.win.isDestroyed() ? asked : focusedMain();
+  if (w && !w.win.isDestroyed()) w.win.webContents.send('update:checked', result);
+}
+
 function storageSecurity() {
   let available = false;
   try {
@@ -167,9 +218,22 @@ function registerIpc() {
   ipcMain.handle('profiles:security', () => storageSecurity());
   ipcMain.handle('store:get', (_e, name) => stores.get(name));
   ipcMain.handle('store:set', (e, name, value) => {
+    const checkedBefore = name === 'settings' && updateChecksOn();
     const res = stores.set(name, value);
     broadcastChange(e.sender.id, name);
+    // Turning update checks back on checks now rather than in up to 6 hours.
+    if (name === 'settings' && !checkedBefore && updateChecksOn()) updater.tick();
     return res;
+  });
+
+  // The renderer only sends intents; main builds every URL it opens.
+  ipcMain.handle('update:state', () => updater.state);
+  ipcMain.handle('update:download', () => updater.download());
+  ipcMain.handle('update:restart', (_e, force) => updater.restart({ force }));
+  ipcMain.handle('update:skip', () => updater.skip());
+  ipcMain.handle('update:openRelease', async () => {
+    const version = updater.state.latest?.version;
+    if (version) await shell.openExternal(releasePageUrl(version));
   });
 
   ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(String(text)));
@@ -329,6 +393,7 @@ function buildMenu() {
       label: 'Help',
       submenu: [
         { label: 'Keyboard Shortcuts…', click: toRenderer('keyboardSettings') },
+        { label: 'Check for Updates…', click: () => checkForUpdatesNow() },
         {
           label: 'About MQTT Scope',
           click: () =>
@@ -373,8 +438,12 @@ function start() {
     },
   });
   stores = createJsonStore(userData);
+  updater = createUpdater();
   registerIpc();
   createMainWindow();
+  updater.start();
+  // No check starts while the app shuts down.
+  app.on('will-quit', () => updater.stop());
   app.on('activate', () => {
     if (windows.size === 0) createMainWindow();
   });

@@ -31,12 +31,17 @@ export function profile(port, extra = {}) {
   };
 }
 
+// The update overrides (MQTTSCOPE_UPDATE_URL, _KIND, _FAKE) reach the app
+// only through `env`, never from the shell that runs the tests.
+const inheritedEnv = () => Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith('MQTTSCOPE_UPDATE_')));
+
 // Returns { app, page, userData, errors }. `errors` collects renderer
 // exceptions and console errors so tests can assert there were none.
-export async function launchApp({ userData = makeUserData(), headless = !process.env.MQTTSCOPE_E2E_HEADED } = {}) {
+// `env` adds or overrides environment variables for the app.
+export async function launchApp({ userData = makeUserData(), headless = !process.env.MQTTSCOPE_E2E_HEADED, env = {} } = {}) {
   const app = await electron.launch({
     args: [appDir, ...(headless ? ['--ozone-platform=headless'] : [])],
-    env: { ...process.env, MQTTSCOPE_USER_DATA: userData, MQTTSCOPE_HIDDEN: headless ? '1' : '' },
+    env: { ...inheritedEnv(), MQTTSCOPE_USER_DATA: userData, MQTTSCOPE_HIDDEN: headless ? '1' : '', ...env },
   });
   const page = await app.firstWindow();
   const errors = [];

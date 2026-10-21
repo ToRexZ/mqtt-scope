@@ -26,6 +26,16 @@ contextBridge.exposeInMainWorld('api', {
   storeGet: (name) => ipcRenderer.invoke('store:get', name),
   storeSet: (name, value) => ipcRenderer.invoke('store:set', name, value),
 
+  // Update state lives in main. Register onUpdateState before reading
+  // updateState(), so no change falls between the two.
+  updateState: () => ipcRenderer.invoke('update:state'),
+  onUpdateState: (cb) => ipcRenderer.on('update:state', (_e, state) => cb(state)),
+  onUpdateChecked: (cb) => ipcRenderer.on('update:checked', (_e, result) => cb(result)),
+  updateDownload: () => ipcRenderer.invoke('update:download'),
+  updateRestart: (force) => ipcRenderer.invoke('update:restart', force === true),
+  updateSkip: () => ipcRenderer.invoke('update:skip'),
+  updateOpenRelease: () => ipcRenderer.invoke('update:openRelease'),
+
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   pickFile: (title) => ipcRenderer.invoke('dialog:pickFile', title),
   confirm: (opts) => ipcRenderer.invoke('dialog:confirm', opts),

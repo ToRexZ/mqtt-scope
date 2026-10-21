@@ -26,10 +26,12 @@ if (!exe || !existsSync(exe)) {
 }
 
 const broker = await startBroker();
+// Update checks off: a packaged app would otherwise ask GitHub at startup.
+const userData = makeUserData({ profiles: [profile(broker.port)], settings: { checkForUpdates: false } });
 const app = await electron.launch({
   executablePath: path.resolve(exe),
   args: process.platform === 'linux' ? ['--ozone-platform=headless'] : [],
-  env: { ...process.env, MQTTSCOPE_USER_DATA: makeUserData({ profiles: [profile(broker.port)] }), MQTTSCOPE_HIDDEN: '1' },
+  env: { ...process.env, MQTTSCOPE_USER_DATA: userData, MQTTSCOPE_HIDDEN: '1' },
 });
 try {
   const page = await app.firstWindow();
