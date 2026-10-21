@@ -29,11 +29,11 @@ describe('buttonView', () => {
     assert.equal(buttonView(undefined), null);
   });
 
-  test('one label per status', () => {
-    assert.deepEqual(buttonView(state()), { icon: '↑', text: 'Update 0.3.1', tone: 'available' });
-    assert.deepEqual(buttonView(state({ status: 'downloading', progress: 42 })), { icon: null, text: 'Downloading 42%', tone: 'progress' });
-    assert.deepEqual(buttonView(state({ status: 'ready' })), { icon: null, text: 'Restart to update', tone: 'ready' });
-    assert.deepEqual(buttonView(state({ status: 'error', error: 'boom' })), { icon: null, text: 'Update failed', tone: 'failed' });
+  test('one label per status; once downloaded it restarts instead of opening the panel', () => {
+    assert.deepEqual(buttonView(state()), { icon: '↑', text: 'Update 0.3.1', tone: 'available', click: 'panel' });
+    assert.deepEqual(buttonView(state({ status: 'downloading', progress: 42 })), { icon: null, text: 'Downloading 42%', tone: 'progress', click: 'panel' });
+    assert.deepEqual(buttonView(state({ status: 'ready' })), { icon: null, text: 'Restart to update', tone: 'ready', click: 'restart' });
+    assert.deepEqual(buttonView(state({ status: 'error', error: 'boom' })), { icon: null, text: 'Update failed', tone: 'failed', click: 'panel' });
   });
 
   test('downloading before the first progress report reads 0%', () => {

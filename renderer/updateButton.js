@@ -15,7 +15,7 @@ export function initUpdateButton(api, buttonEl) {
   let confirm = null; // brokers a restart disconnects, while the panel asks about it
   let isOpen = false;
 
-  buttonEl.setAttribute('aria-haspopup', 'dialog');
+  // aria-haspopup is set while the button opens the panel (see render).
   buttonEl.setAttribute('aria-controls', PANEL_ID);
   buttonEl.setAttribute('aria-expanded', 'false');
 
@@ -23,7 +23,8 @@ export function initUpdateButton(api, buttonEl) {
   title.id = `${PANEL_ID}-title`;
   const current = el('div', 'update-current');
   const notes = el('div', 'update-notes'); // untrusted text: textContent only
-  const message = el('div', 'update-message');
+  const message = el('div', 'update-message'); // also describes the actions (see render)
+  message.id = `${PANEL_ID}-message`;
   message.setAttribute('aria-live', 'polite');
   const command = el('code', 'update-command');
   const actions = el('div', 'update-actions');
@@ -48,13 +49,7 @@ export function initUpdateButton(api, buttonEl) {
     copyCommand: () => api.copyText(state.pacmanCommand).then(() => toast('Command copied'), failed('copy the command')),
     skip: () => api.updateSkip(),
     later: () => close({ returnFocus: true }),
-    restart: async () => {
-      const res = await api.updateRestart(false);
-      if (res?.confirm > 0 && isOpen && state?.status === 'ready') {
-        confirm = res.confirm;
-        render('cancel'); // the safe choice has focus
-      }
-    },
+    restart,
     confirmRestart: async () => {
       await api.updateRestart(true);
       confirm = null;
@@ -65,6 +60,19 @@ export function initUpdateButton(api, buttonEl) {
       render('restart');
     },
   };
+
+  // Restart to update, from the panel or the top-bar button. Main answers
+  // { confirm: n } while n brokers are connected: the panel then asks inline
+  // (opening for it if need be) with Cancel, the safe choice, focused.
+  // { ok: true } means the app is quitting; a failed install arrives as an
+  // 'error' broadcast like any other change.
+  async function restart() {
+    const res = await api.updateRestart(false);
+    if (!(res?.confirm > 0) || state?.status !== 'ready') return;
+    confirm = res.confirm;
+    if (isOpen) render('cancel');
+    else open('cancel');
+  }
 
   // Keeps the buttons of an unchanged view in place (a click must survive a
   // progress update), rebuilding them only when the set of actions changes.
@@ -92,9 +100,9 @@ export function initUpdateButton(api, buttonEl) {
     if (node.textContent !== text) node.textContent = text;
   };
 
-  // Draws the current state. `focusId` moves focus to that action; otherwise
-  // focus that was in the panel stays on the same action, or on the panel when
-  // that action went away.
+  // Draws the current state. `focusId` moves focus to that action ('panel':
+  // the panel itself); otherwise focus that was in the panel stays on the same
+  // action, or on the panel when that action went away.
   function render(focusId) {
     const view = buttonView(state);
     if (!view) {
@@ -108,6 +116,8 @@ export function initUpdateButton(api, buttonEl) {
     }
     buttonEl.hidden = false;
     buttonEl.dataset.tone = view.tone;
+    if (view.click === 'panel') buttonEl.setAttribute('aria-haspopup', 'dialog');
+    else buttonEl.removeAttribute('aria-haspopup');
     if (buttonEl.textContent !== (view.icon ? `${view.icon} ${view.text}` : view.text)) {
       const icon = [];
       if (view.icon) {
@@ -130,11 +140,17 @@ export function initUpdateButton(api, buttonEl) {
     setText(command, v.command ?? '');
     syncButtons(actions, v.actions, 'btn');
     syncButtons(links, v.links, 'btn link');
+    // The message (e.g. "Restarting disconnects 1 broker.") is read out with the button that answers it.
+    for (const b of actions.children) {
+      if (v.message) b.setAttribute('aria-describedby', message.id);
+      else b.removeAttribute('aria-describedby');
+    }
+    place();
 
     const byId = (id) => panel.querySelector(`[data-action="${id}"]:not(:disabled)`);
-    if (focusId) byId(focusId)?.focus();
+    if (focusId === 'panel') panel.focus();
+    else if (focusId) byId(focusId)?.focus();
     else if (focused && (!panel.contains(document.activeElement) || document.activeElement.disabled)) (byId(focused.dataset.action) || panel).focus();
-    place();
   }
 
   // Under the button, right edges aligned, kept inside the window.
@@ -148,15 +164,14 @@ export function initUpdateButton(api, buttonEl) {
     panel.style.left = `${Math.max(MARGIN, Math.min(anchor.right - width, window.innerWidth - width - MARGIN))}px`;
   }
 
-  // `focus` (a check the user asked for) moves focus into the panel; opening
-  // from the button leaves it on the button.
-  function open({ focus = false } = {}) {
+  // `focusId` as for render: a check the user asked for focuses the panel, a
+  // confirm its Cancel; opening from the button leaves focus on the button.
+  function open(focusId) {
     if (!buttonView(state)) return;
     isOpen = true;
     panel.hidden = false;
     buttonEl.setAttribute('aria-expanded', 'true');
-    render();
-    if (focus) panel.focus();
+    render(focusId);
   }
 
   // `returnFocus` moves focus to the button (Later, Escape in the panel).
@@ -175,7 +190,12 @@ export function initUpdateButton(api, buttonEl) {
     render();
   }
 
-  buttonEl.addEventListener('click', () => (isOpen ? close() : open()));
+  // Toggles the panel, except once the update is downloaded: then it restarts.
+  buttonEl.addEventListener('click', () => {
+    if (buttonView(state)?.click === 'restart') restart();
+    else if (isOpen) close();
+    else open();
+  });
   const onEscape = (e) => {
     if (e.key !== 'Escape' || !isOpen) return;
     e.preventDefault();
@@ -197,7 +217,7 @@ export function initUpdateButton(api, buttonEl) {
 
   api.onUpdateChecked((checked) => {
     const reaction = checkedView(checked, state);
-    if (reaction?.open) open({ focus: true });
+    if (reaction?.open) open('panel');
     else if (reaction?.toast) toast(reaction.toast, reaction.kind);
   });
   // Listen first, then read, so no change falls in between (see preload.js).

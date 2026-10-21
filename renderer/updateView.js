@@ -10,19 +10,21 @@ export const SELF_UPDATING_KINDS = new Set(['appimage', 'nsis']);
 const STATUSES = new Set(['available', 'downloading', 'ready', 'error']);
 const percent = (state) => state.progress ?? 0;
 
-// { icon, text, tone } for the button, or null while it is hidden. The icon is
-// decoration (the DOM side hides it from assistive tech).
+// { icon, text, tone, click } for the button, or null while it is hidden. The
+// icon is decoration (the DOM side hides it from assistive tech). `click` is
+// what pressing it does: 'panel' toggles the panel; 'restart' (once the update
+// is downloaded) restarts into it, the panel opening only to confirm.
 export function buttonView(state) {
   if (!state || !STATUSES.has(state.status) || !state.latest) return null;
   switch (state.status) {
     case 'available':
-      return { icon: '↑', text: `Update ${state.latest.version}`, tone: 'available' };
+      return { icon: '↑', text: `Update ${state.latest.version}`, tone: 'available', click: 'panel' };
     case 'downloading':
-      return { icon: null, text: `Downloading ${percent(state)}%`, tone: 'progress' };
+      return { icon: null, text: `Downloading ${percent(state)}%`, tone: 'progress', click: 'panel' };
     case 'ready':
-      return { icon: null, text: 'Restart to update', tone: 'ready' };
+      return { icon: null, text: 'Restart to update', tone: 'ready', click: 'restart' };
     default:
-      return { icon: null, text: 'Update failed', tone: 'failed' };
+      return { icon: null, text: 'Update failed', tone: 'failed', click: 'panel' };
   }
 }
 

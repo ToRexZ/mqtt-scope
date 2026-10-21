@@ -477,6 +477,90 @@ test('self-updating: download progress, confirm while connected, restart install
   expect(errors).toEqual([]);
 });
 
+// Records every time the panel is shown or hidden.
+async function recordPanel(page) {
+  await page.evaluate(() => {
+    const p = document.querySelector('#update-panel');
+    window.__panelLog = [];
+    new MutationObserver(() => window.__panelLog.push(p.hidden ? 'hidden' : 'shown')).observe(p, { attributes: true, attributeFilter: ['hidden'] });
+  });
+  return () => page.evaluate(() => window.__panelLog.slice());
+}
+
+test('Restart to update on the top bar restarts at once when nothing is connected', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const { app, page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
+  await closeConnectionDialog(page);
+  const button = updateButton(page);
+  await expect(button).toHaveAttribute('aria-haspopup', 'dialog'); // opens the panel while offered
+  await page.evaluate(() => window.api.updateDownload());
+  await expect(button).toHaveText('Restart to update');
+  // Now it is an action, not a popup; it still names the panel a confirm would open in.
+  await expect(button).not.toHaveAttribute('aria-haspopup');
+  await expect(button).toHaveAttribute('aria-controls', 'update-panel');
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  const panelShown = await recordPanel(page);
+
+  // A failed install shows on the button (the error broadcast), still without the panel.
+  await app.evaluate(() => (globalThis.__updateInstallError = 'mv: cannot move'));
+  await button.click();
+  await expect(button).toHaveText('Update failed');
+  expect(await installed(app)).toBe(false);
+  expect(await panelShown()).toEqual([]);
+
+  // Retry from the panel, then the top-bar button installs at once.
+  await app.evaluate(() => delete globalThis.__updateInstallError);
+  await openPanel(page);
+  await panelButton(page, 'Retry').click();
+  await expect(button).toHaveText('Restart to update');
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  const before = (await panelShown()).length;
+  await button.click();
+  await expect.poll(() => installed(app)).toBe(true);
+  expect((await panelShown()).slice(before)).toEqual([]);
+  await expect(panel(page)).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('Restart to update on the top bar asks in the panel while a broker is connected', async ({ env }) => {
+  const broker = await env.broker();
+  const server = await env.releaseServer(release('9.9.9'));
+  const { app, page, errors } = await env.connected(broker, { env: overrides(server, SELF_UPDATING) });
+  const button = updateButton(page);
+  await page.evaluate(() => window.api.updateDownload());
+  await expect(button).toHaveText('Restart to update');
+  await expect(panel(page)).toBeHidden();
+
+  // The click asks main, which wants a confirm: the panel opens on it, Cancel focused.
+  await button.click();
+  await expect(panel(page)).toBeVisible();
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+  await expect(panel(page).locator('.update-message')).toHaveText('Restarting disconnects 1 broker.');
+  await expect(panelButtons(page)).toHaveText(['Restart', 'Cancel', 'Open release page']);
+  await expect(panelButton(page, 'Cancel')).toBeFocused();
+  // A screen reader hears what is being confirmed along with the button.
+  await expect(panelButton(page, 'Cancel')).toHaveAccessibleDescription('Restarting disconnects 1 broker.');
+  await expect(panelButton(page, 'Restart')).toHaveAccessibleDescription('Restarting disconnects 1 broker.');
+  expect(await installed(app)).toBe(false);
+
+  // Cancel goes back to the ready view; nothing is described by a message any more.
+  await panelButton(page, 'Cancel').click();
+  await expect(panelButtons(page)).toHaveText(['Restart to update', 'Later', 'Open release page']);
+  await expect(panelButton(page, 'Restart to update')).toBeFocused();
+  await expect(panelButton(page, 'Restart to update')).toHaveAccessibleDescription('');
+  expect(await installed(app)).toBe(false);
+
+  // Closed again, the top-bar button asks again; Restart in the confirm installs.
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await button.click();
+  await expect(panelButton(page, 'Cancel')).toBeFocused();
+  await panelButton(page, 'Restart').click();
+  await expect.poll(() => installed(app)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
 test('manual build opens the release page; pacman build shows the command', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9'));
 
