@@ -1,11 +1,15 @@
-// The update check as the main process wires it: when it may contact
+// The update check as the main process wires it (when it may contact
 // anything, the state every main window gets, Help → Check for Updates…, the
-// release page and the settings switch. A local release server stands in for
-// GitHub (MQTTSCOPE_UPDATE_URL); nothing here touches the network.
+// release page and the settings switch), then the top-bar button and panel
+// that show it. A local release server stands in for GitHub
+// (MQTTSCOPE_UPDATE_URL); nothing here touches the network.
 
 import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
-import { test, expect, makeUserData } from './fixtures.mjs';
+import { test, expect, makeUserData, toast, clipboard, waitForFile } from './fixtures.mjs';
+
+const { pacmanCommand } = createRequire(import.meta.url)('../../main/updateCheck.js');
 
 const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const release = (version, body = `Notes for ${version}`) => ({ tag_name: `v${version}`, body });
@@ -284,5 +288,414 @@ test('a broadcast to a closed window does not break the others', async ({ env })
   const logged = readFileSync(path.join(userData, 'logs', 'main.log'), 'utf8');
   expect(logged).toMatch(/ WARN update could not send the update state: Object has been destroyed/);
   expect(logged).not.toMatch(/ ERROR update/);
+  expect(errors).toEqual([]);
+});
+
+// ------------------------------------------------------------ top-bar button and panel
+
+const SELF_UPDATING = { MQTTSCOPE_UPDATE_KIND: 'appimage', MQTTSCOPE_UPDATE_FAKE: '1' };
+const releasePage = (version) => `https://github.com/ToRexZ/mqtt-scope/releases/tag/v${version}`;
+
+const updateButton = (page) => page.locator('#btn-update');
+const panel = (page) => page.locator('#update-panel');
+const panelButton = (page, name) => panel(page).getByRole('button', { name, exact: true });
+// Every button the panel shows: the actions, then the footer links.
+const panelButtons = (page) => panel(page).getByRole('button');
+const notes = (page) => panel(page).locator('.update-notes');
+
+// A window without a connection starts with the (modal) connection dialog.
+async function closeConnectionDialog(page) {
+  await page.locator('.conn-dialog .modal-close').click();
+  await expect(page.locator('.modal-overlay')).toHaveCount(0);
+}
+
+async function openPanel(page) {
+  await updateButton(page).click();
+  await expect(panel(page)).toBeVisible();
+}
+
+// The fake engine's gate (main/updateEngine.js): a download started while
+// held stops at 50 % until released.
+const holdDownloads = (app) =>
+  app.evaluate(() => {
+    globalThis.__updateDownloadHold = new Promise((resolve) => (globalThis.__releaseDownloads = resolve));
+  });
+const releaseDownloads = (app) =>
+  app.evaluate(() => {
+    delete globalThis.__updateDownloadHold;
+    globalThis.__releaseDownloads();
+  });
+const installed = (app) => app.evaluate(() => globalThis.__updateInstalled === true);
+
+// Replaces shell.openExternal; returns a reader of the URLs it was asked to open.
+async function stubOpenExternal(app) {
+  await app.evaluate(({ shell }) => {
+    globalThis.__opened = [];
+    shell.openExternal = async (url) => void globalThis.__opened.push(url);
+  });
+  return () => app.evaluate(() => globalThis.__opened.slice());
+}
+
+// Records every text the button shows ('(hidden)' while hidden), so
+// short-lived states are not missed.
+async function recordButton(page) {
+  await page.evaluate(() => {
+    const b = document.querySelector('#btn-update');
+    const now = () => (b.hidden ? '(hidden)' : b.textContent);
+    window.__buttonLog = [now()];
+    new MutationObserver(() => now() !== window.__buttonLog.at(-1) && window.__buttonLog.push(now())).observe(b, {
+      childList: true,
+      characterData: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['hidden'],
+    });
+  });
+  return () => page.evaluate(() => window.__buttonLog.slice());
+}
+
+test('notice: button, panel, Later keeps it, Skip hides it until a newer release', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9', 'Fixed things'));
+  const { app, page, errors } = await env.launch({ env: overrides(server) });
+  await closeConnectionDialog(page);
+  const button = updateButton(page);
+
+  // A quiet button beside Settings; the arrow is decoration, not part of its name.
+  await expect(button).toHaveText('↑ Update 9.9.9');
+  await expect(page.getByRole('button', { name: 'Update 9.9.9', exact: true })).toBeVisible();
+  const box = async (sel) => page.locator(sel).boundingBox();
+  const [clear, update, settings] = [await box('#btn-clear'), await button.boundingBox(), await box('#btn-settings')];
+  expect(clear.x + clear.width).toBeLessThanOrEqual(update.x);
+  expect(update.x + update.width).toBeLessThanOrEqual(settings.x);
+  expect(update.y).toBe(settings.y);
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  await expect(button).toHaveAttribute('aria-controls', 'update-panel');
+  await expect(panel(page)).toBeHidden();
+
+  // The panel: versions, notes and this build's actions, without blocking the window.
+  await button.click();
+  const dialog = page.getByRole('dialog', { name: 'MQTT Scope 9.9.9' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog).toHaveAttribute('aria-modal', 'false');
+  await expect(page.locator('.modal-overlay')).toHaveCount(0);
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+  await expect(dialog).toContainText(`You have ${VERSION}`);
+  await expect(notes(page)).toHaveText('Fixed things');
+  await expect(panelButtons(page)).toHaveText(['Download', 'Later', 'Skip this version']);
+  await expect(button).toBeFocused(); // clicking does not move focus into the panel
+
+  // Later closes it; the notice stays.
+  await panelButton(page, 'Later').click();
+  await expect(panel(page)).toBeHidden();
+  await expect(button).toBeVisible();
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  await expect(button).toBeFocused();
+
+  // So does a click anywhere else, which keeps its own focus.
+  await button.click();
+  await expect(panel(page)).toBeVisible();
+  await page.locator('#tree-filter').click();
+  await expect(panel(page)).toBeHidden();
+  await expect(page.locator('#tree-filter')).toBeFocused();
+  // The button toggles it as well.
+  await button.click();
+  await expect(panel(page)).toBeVisible();
+  await button.click();
+  await expect(panel(page)).toBeHidden();
+
+  // Skip this version (asked over IPC, like any user) hides it ...
+  await openPanel(page);
+  await panelButton(page, 'Skip this version').click();
+  await expect(button).toBeHidden();
+  await expect(panel(page)).toBeHidden();
+  await expect(page.locator('#btn-settings')).toBeFocused(); // focus is not dropped with the button
+  expect((await updateState(page)).status).toBe('none');
+
+  // ... and automatic checks finding the same release keep it hidden.
+  const asked = server.requests();
+  await tick(app);
+  expect(server.requests()).toBe(asked + 1);
+  expect((await updateState(page)).status).toBe('none');
+  await expect(button).toBeHidden();
+
+  // A newer release shows it again, quietly: no panel, and the user keeps typing where they were.
+  await page.locator('#tree-filter').fill('robot');
+  server.setRelease(release('9.9.10', 'More fixes'));
+  await tick(app);
+  await expect(button).toHaveText('↑ Update 9.9.10');
+  await expect(panel(page)).toBeHidden();
+  await expect(page.locator('#tree-filter')).toBeFocused();
+
+  // Help → Check for Updates… opens the panel in the window that asked.
+  await checkForUpdates(app);
+  await expect(page.getByRole('dialog', { name: 'MQTT Scope 9.9.10' })).toBeVisible();
+  await expect(panel(page)).toBeFocused();
+  await expect(notes(page)).toHaveText('More fixes');
+  expect(errors).toEqual([]);
+});
+
+test('self-updating: download progress, confirm while connected, restart installs', async ({ env }) => {
+  const broker = await env.broker();
+  const server = await env.releaseServer(release('9.9.9'));
+  const { app, page, errors } = await env.connected(broker, { env: overrides(server, SELF_UPDATING) });
+  const button = updateButton(page);
+  await expect(button).toHaveText('↑ Update 9.9.9');
+  const shown = await recordButton(page);
+
+  await openPanel(page);
+  await expect(panelButtons(page)).toHaveText(['Download update', 'Later', 'Skip this version', 'Open release page']);
+
+  // Downloading: progress on the button and in the panel; nothing to skip now.
+  await holdDownloads(app);
+  await panelButton(page, 'Download update').click();
+  await expect(button).toHaveText('Downloading 50%');
+  await expect(panelButtons(page)).toHaveText(['Downloading… 50%', 'Later', 'Open release page']);
+  await expect(panelButton(page, 'Downloading… 50%')).toBeDisabled();
+  await expect(panel(page)).toBeFocused(); // the pressed button went away; focus stays in the panel
+  await releaseDownloads(app);
+  await expect(button).toHaveText('Restart to update');
+  expect(await shown()).toEqual(['↑ Update 9.9.9', 'Downloading 0%', 'Downloading 50%', 'Downloading 100%', 'Restart to update']);
+  await expect(panelButtons(page)).toHaveText(['Restart to update', 'Later', 'Open release page']);
+
+  // Connected to a broker: the panel asks first, with Cancel focused.
+  await panelButton(page, 'Restart to update').click();
+  await expect(panel(page)).toContainText('Restarting disconnects 1 broker.');
+  await expect(panelButtons(page)).toHaveText(['Restart', 'Cancel', 'Open release page']);
+  await expect(panelButton(page, 'Cancel')).toBeFocused();
+  expect(await installed(app)).toBe(false);
+
+  // Cancel goes back to the ready view.
+  await panelButton(page, 'Cancel').click();
+  await expect(panelButtons(page)).toHaveText(['Restart to update', 'Later', 'Open release page']);
+  await expect(panel(page)).not.toContainText('Restarting disconnects');
+  await expect(panelButton(page, 'Restart to update')).toBeFocused();
+  expect(await installed(app)).toBe(false);
+
+  await panelButton(page, 'Restart to update').click();
+  await panelButton(page, 'Restart').click();
+  await expect.poll(() => installed(app)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+test('manual build opens the release page; pacman build shows the command', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+
+  // Builds that cannot update themselves: Download opens that version's release page.
+  const manual = await env.launch({ env: overrides(server) });
+  const openedManual = await stubOpenExternal(manual.app);
+  await closeConnectionDialog(manual.page);
+  await openPanel(manual.page);
+  await expect(panelButtons(manual.page)).toHaveText(['Download', 'Later', 'Skip this version']);
+  await panelButton(manual.page, 'Download').click();
+  await expect.poll(openedManual).toEqual([releasePage('9.9.9')]);
+  expect(manual.errors).toEqual([]);
+  await env.closeApp(manual);
+
+  // pacman: the command that builds this exact version, to copy.
+  const { app, page, errors } = await env.launch({ env: overrides(server, { MQTTSCOPE_UPDATE_KIND: 'pacman' }) });
+  const opened = await stubOpenExternal(app);
+  await closeConnectionDialog(page);
+  await expect(updateButton(page)).toHaveText('↑ Update 9.9.9');
+  await openPanel(page);
+  await expect(panel(page)).toContainText('Installed by the package manager. Update with:');
+  await expect(panel(page).locator('code')).toHaveText(pacmanCommand('9.9.9'));
+  await expect(panelButtons(page)).toHaveText(['Copy command', 'Later', 'Skip this version', 'Open release page']);
+  await app.evaluate(({ clipboard: c }) => c.writeText(''));
+  await panelButton(page, 'Copy command').click();
+  await expect.poll(() => clipboard(app)).toBe(pacmanCommand('9.9.9'));
+  await expect(toast(page).filter({ hasText: 'Command copied' })).toBeVisible();
+  await panelButton(page, 'Open release page').click();
+  await expect.poll(opened).toEqual([releasePage('9.9.9')]);
+  expect(errors).toEqual([]);
+});
+
+test('release notes are shown as text', async ({ env }) => {
+  const body = '<img src=x onerror=alert(1)>\n- item';
+  const server = await env.releaseServer(release('9.9.9', body));
+  const { app, page, errors } = await env.launch({ env: overrides(server) });
+  await closeConnectionDialog(page);
+  await openPanel(page);
+  expect(await notes(page).evaluate((n) => n.textContent)).toBe(body);
+  await expect(panel(page).locator('img')).toHaveCount(0);
+  expect(await notes(page).evaluate((n) => n.children.length)).toBe(0);
+  // Line breaks are kept.
+  expect(await notes(page).evaluate((n) => n.innerText)).toBe(body);
+
+  // A release without notes says so.
+  server.setRelease(release('9.9.10', ''));
+  await tick(app);
+  await expect(page.getByRole('dialog', { name: 'MQTT Scope 9.9.10' })).toBeVisible();
+  await expect(notes(page)).toHaveText('No release notes.');
+  expect(errors).toEqual([]);
+});
+
+test('a new window shows the current update state', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const { app, page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
+  await expect(updateButton(page)).toHaveText('↑ Update 9.9.9');
+
+  // Opened after the update was found.
+  const second = await newWindow(app);
+  await expect(updateButton(second)).toHaveText('↑ Update 9.9.9');
+
+  // A download started in one window shows in all of them, and in one opened mid-download.
+  await holdDownloads(app);
+  await closeConnectionDialog(second);
+  await openPanel(second);
+  await panelButton(second, 'Download update').click();
+  for (const p of [page, second]) await expect(updateButton(p)).toHaveText('Downloading 50%');
+  const third = await newWindow(app);
+  await expect(updateButton(third)).toHaveText('Downloading 50%');
+  // Only the window it was opened in shows the panel.
+  await expect(panel(page)).toBeHidden();
+  await expect(panel(third)).toBeHidden();
+
+  await releaseDownloads(app);
+  for (const p of [page, second, third]) await expect(updateButton(p)).toHaveText('Restart to update');
+  expect(errors).toEqual([]);
+});
+
+test('turning the setting off stops automatic checks; Help still checks', async ({ env }) => {
+  const server = await env.releaseServer(release(VERSION));
+  const { app, page, userData, errors } = await env.launch({ env: overrides(server) });
+  await expect.poll(() => server.requests()).toBe(1); // the startup check
+  await closeConnectionDialog(page);
+
+  await page.locator('#btn-settings').click();
+  const dialog = page.locator('.modal.settings');
+  const box = dialog.locator('input[name="checkForUpdates"]');
+  await expect(box).toBeChecked();
+  await expect(dialog.locator('label.check', { has: page.locator('input[name="checkForUpdates"]') })).toHaveText(
+    'Check for updates (asks GitHub at startup and every 6 hours)',
+  );
+  await box.uncheck();
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await expect(dialog).toHaveCount(0);
+  await waitForFile(path.join(userData, 'settings.json'), (b) => JSON.parse(b).checkForUpdates === false);
+  expect((await page.evaluate(() => window.__mqttscope.settings)).checkForUpdates).toBe(false);
+
+  // An automatic check asks nothing now.
+  await tick(app);
+  expect(server.requests()).toBe(1);
+
+  // Help → Check for Updates… still asks, and says so.
+  await checkForUpdates(app);
+  await expect(toast(page).filter({ hasText: `You're on the latest version (${VERSION})` })).toBeVisible();
+  expect(server.requests()).toBe(2);
+
+  // The dialog shows the saved choice; saving other settings keeps it.
+  await page.locator('#btn-settings').click();
+  await expect(box).not.toBeChecked();
+  await dialog.locator('[name="historyLimit"]').fill('50');
+  await dialog.getByRole('button', { name: 'Save' }).click();
+  await waitForFile(path.join(userData, 'settings.json'), (b) => JSON.parse(b).historyLimit === 50);
+  expect(JSON.parse(readFileSync(path.join(userData, 'settings.json'), 'utf8')).checkForUpdates).toBe(false);
+  await tick(app);
+  expect(server.requests()).toBe(2);
+  expect(errors).toEqual([]);
+});
+
+test('a failed download shows its error in the panel, and Retry can succeed', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const { app, page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
+  await closeConnectionDialog(page);
+  await app.evaluate(() => (globalThis.__updateDownloadError = 'net::ERR_CONNECTION_RESET'));
+  await openPanel(page);
+  await panelButton(page, 'Download update').click();
+
+  await expect(updateButton(page)).toHaveText('Update failed');
+  await expect(panel(page).locator('.update-message')).toHaveText('net::ERR_CONNECTION_RESET');
+  await expect(panelButtons(page)).toHaveText(['Retry', 'Later', 'Skip this version', 'Open release page']);
+  await expect(toast(page)).toHaveCount(0); // in the panel, not a toast
+
+  await app.evaluate(() => delete globalThis.__updateDownloadError);
+  await panelButton(page, 'Retry').click();
+  await expect(updateButton(page)).toHaveText('Restart to update');
+  await expect(panel(page).locator('.update-message')).toBeHidden();
+  await expect(panelButtons(page)).toHaveText(['Restart to update', 'Later', 'Open release page']);
+  expect(errors).toEqual([]);
+});
+
+test('Help → Check for Updates… answers latest, failure and development builds with a toast', async ({ env }) => {
+  const server = await env.releaseServer(release(VERSION));
+  const { app, page, errors } = await env.launch({ env: overrides(server) });
+  await expect.poll(() => server.requests()).toBe(1);
+
+  await checkForUpdates(app);
+  await expect(toast(page, 'info').filter({ hasText: `You're on the latest version (${VERSION})` })).toBeVisible();
+
+  server.setRelease(null); // 503
+  await checkForUpdates(app);
+  await expect(toast(page, 'error').filter({ hasText: "Couldn't check for updates: HTTP 503" })).toBeVisible();
+  await expect(updateButton(page)).toBeHidden();
+  await expect(panel(page)).toBeHidden();
+  expect(errors).toEqual([]);
+
+  const dev = await env.launch({});
+  await checkForUpdates(dev.app);
+  await expect(toast(dev.page, 'info').filter({ hasText: 'Update checks are off in development builds' })).toBeVisible();
+  await expect(updateButton(dev.page)).toBeHidden();
+  expect(dev.errors).toEqual([]);
+});
+
+test('Escape closes the panel and returns focus to the button', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const { page, errors } = await env.launch({ env: overrides(server) });
+  await closeConnectionDialog(page);
+  const button = updateButton(page);
+
+  // Keyboard only: Enter opens it, Tab goes into it (it follows the button), Escape closes it.
+  await button.focus();
+  await page.keyboard.press('Enter');
+  await expect(panel(page)).toBeVisible();
+  await expect(button).toHaveAttribute('aria-expanded', 'true');
+  await expect(button).toBeFocused();
+  await page.keyboard.press('Tab');
+  await expect(panelButton(page, 'Download')).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await expect(button).toHaveAttribute('aria-expanded', 'false');
+  await expect(button).toBeFocused();
+
+  // Escape on the button itself closes it too.
+  await page.keyboard.press('Space');
+  await expect(panel(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await expect(button).toBeFocused();
+
+  // Escape elsewhere closes it without taking focus from where it is.
+  await button.click();
+  await expect(panel(page)).toBeVisible();
+  await page.locator('#tree-filter').focus();
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await expect(page.locator('#tree-filter')).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
+test('in a narrow window the button and panel stay inside the window', async ({ env }) => {
+  const long = Array.from({ length: 2000 }, (_, i) => `- change ${i + 1}: ${'detail '.repeat(12)}`).join('\n');
+  const server = await env.releaseServer(release('9.9.9', long));
+  const { page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
+  await page.setViewportSize({ width: 598, height: 1300 });
+  await closeConnectionDialog(page);
+
+  await expect(updateButton(page)).toBeInViewport({ ratio: 1 });
+  await openPanel(page);
+  const inside = async (locator, width, height) => {
+    const b = await locator.boundingBox();
+    return b.x >= 0 && b.y >= 0 && b.x + b.width <= width && b.y + b.height <= height;
+  };
+  expect(await inside(panel(page), 598, 1300)).toBe(true);
+  for (const b of await panelButtons(page).all()) expect(await inside(b, 598, 1300)).toBe(true);
+  // Long notes scroll inside the panel.
+  expect(await notes(page).evaluate((n) => n.scrollHeight > n.clientHeight)).toBe(true);
+
+  // Still inside, actions and all, when the window shrinks further while it
+  // is open: the notes give up their height first.
+  await page.setViewportSize({ width: 420, height: 400 });
+  await expect.poll(() => inside(panel(page), 420, 400)).toBe(true);
+  for (const b of await panelButtons(page).all()) expect(await inside(b, 420, 400)).toBe(true);
   expect(errors).toEqual([]);
 });

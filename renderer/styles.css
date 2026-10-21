@@ -257,6 +257,120 @@ span.icon {
   margin-right: 6px;
 }
 
+/* ------------------------------------------------------------ update notice */
+
+/* A quiet button beside Settings (updateButton.js); data-tone is its state. */
+.btn.update {
+  color: var(--accent);
+  font-variant-numeric: tabular-nums;
+}
+.btn.update[data-tone='failed'] {
+  color: var(--err);
+}
+.btn.update[aria-expanded='true'] {
+  background: var(--panel-3);
+  border-color: var(--accent);
+}
+/* Anchored under the button by updateButton.js (left, top, max-height), like
+   a menu but not modal; long notes scroll inside it. */
+.update-panel {
+  position: fixed;
+  z-index: var(--z-menu);
+  width: min(420px, calc(100vw - 16px));
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  overflow: auto;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+.update-panel:focus {
+  outline: none;
+}
+.update-panel:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.update-title {
+  margin: 0;
+  font-size: 15px;
+}
+.update-current {
+  color: var(--muted);
+  margin-top: -6px;
+}
+.update-notes {
+  flex: 0 1 auto;
+  min-height: 3em;
+  max-height: 40vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font-size: 12px;
+}
+.update-notes.empty {
+  color: var(--faint);
+}
+.update-message[data-tone='warn'],
+.update-message[data-tone='error'] {
+  padding: 2px 8px;
+  border-left: 3px solid var(--warn);
+}
+.update-message[data-tone='error'] {
+  border-left-color: var(--err);
+  overflow-wrap: anywhere;
+}
+.update-command {
+  display: block;
+  padding: 6px 8px;
+  font: 12px/1.45 var(--mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: all;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.update-panel .btn:disabled {
+  cursor: progress;
+  font-variant-numeric: tabular-nums;
+}
+.update-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding-top: 8px;
+  border-top: 1px solid var(--grid);
+}
+.update-links:empty {
+  display: none;
+}
+.btn.link {
+  padding: 2px 0;
+  font-size: 12px;
+  color: var(--muted);
+  background: none;
+  border-color: transparent;
+}
+.btn.link:hover {
+  color: var(--accent);
+  background: none;
+  text-decoration: underline;
+}
+
 /* ------------------------------------------------------------ layout */
 
 .layout {

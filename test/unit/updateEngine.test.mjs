@@ -112,6 +112,57 @@ describe('fake engine (MQTTSCOPE_UPDATE_FAKE=1)', () => {
   afterEach(() => {
     delete globalThis.__updateInstalled;
     delete globalThis.__updateInstallError;
+    delete globalThis.__updateDownloadHold;
+    delete globalThis.__updateDownloadError;
+  });
+
+  const fake = () => createEngine({ kind: 'appimage', feedUrl: null, log: fakeLog(), env: { MQTTSCOPE_UPDATE_FAKE: '1' }, loadUpdater: assert.fail });
+
+  test('a test can hold the download at 50 % (a promise in globalThis.__updateDownloadHold)', async (t) => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const hold = deferred();
+    globalThis.__updateDownloadHold = hold.promise;
+    const seen = [];
+    let done = false;
+    const download = fake()
+      .download((p) => seen.push(p))
+      .then(() => (done = true));
+    t.mock.timers.tick(150);
+    await flush();
+    t.mock.timers.tick(10_000); // far longer than the whole unheld download
+    await flush();
+    assert.deepEqual(seen, [0, 50]);
+    assert.equal(done, false);
+    hold.resolve();
+    await flush();
+    t.mock.timers.tick(150);
+    await download;
+    assert.deepEqual(seen, [0, 50, 100]);
+  });
+
+  test('a test can fail the download at 50 % (a message in globalThis.__updateDownloadError)', async () => {
+    globalThis.__updateDownloadError = 'Connection reset';
+    const seen = [];
+    await assert.rejects(
+      fake().download((p) => seen.push(p)),
+      { message: 'Connection reset' },
+    );
+    assert.deepEqual(seen, [0, 50]);
+    delete globalThis.__updateDownloadError;
+    seen.length = 0;
+    await fake().download((p) => seen.push(p));
+    assert.deepEqual(seen, [0, 50, 100]);
+  });
+
+  test('the failure is read after the hold, so a held download can still be failed', async () => {
+    const hold = deferred();
+    const reached = deferred();
+    globalThis.__updateDownloadHold = hold.promise;
+    const download = fake().download((p) => p === 50 && reached.resolve());
+    await reached.promise;
+    globalThis.__updateDownloadError = 'late failure';
+    hold.resolve();
+    await assert.rejects(download, { message: 'late failure' });
   });
 
   test('reports 0, 50 and 100 % over about 300 ms, then resolves', async (t) => {

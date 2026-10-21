@@ -12,6 +12,7 @@ import { decode, extractNumber, hexDump } from './payload.js';
 import { DEFAULT_SETTINGS, normalizeSettings, openSettings } from './settings.js';
 import { hasNumbers } from './fields.js';
 import { openSubscriptions } from './subscriptionsDialog.js';
+import { initUpdateButton } from './updateButton.js';
 import { ACTIONS, bindingIndex, comboFromEvent, keyBelongsToTarget, pointerFocus, resolveBindings, toAccelerator } from './keys.js';
 
 const api = window.api;
@@ -374,6 +375,7 @@ $('#btn-pause').addEventListener('click', () => {
 });
 $('#btn-clear').addEventListener('click', clearTree);
 $('#btn-settings').addEventListener('click', () => showSettings());
+initUpdateButton(api, $('#btn-update'));
 
 async function showSettings(tab) {
   const next = await openSettings(api, settings, { tab });

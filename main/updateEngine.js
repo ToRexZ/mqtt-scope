@@ -17,8 +17,11 @@ function createEngine({ kind, feedUrl, log, env = process.env, loadUpdater = () 
   return electronUpdaterEngine({ feedUrl, log, loadUpdater });
 }
 
-// Reports 0, 50 and 100 % over ~300 ms. Installing only sets a flag tests
-// read, or fails with the message a test put in globalThis.__updateInstallError.
+// Reports 0, 50 and 100 % over ~300 ms. At 50 % a test can hold the download
+// (a promise in globalThis.__updateDownloadHold, awaited) or fail it (a message
+// in globalThis.__updateDownloadError, read after the hold). Installing only
+// sets a flag tests read, or fails with the message a test put in
+// globalThis.__updateInstallError.
 function fakeEngine() {
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   return {
@@ -26,6 +29,8 @@ function fakeEngine() {
       onProgress(0);
       await wait(FAKE_STEP_MS);
       onProgress(50);
+      await globalThis.__updateDownloadHold;
+      if (globalThis.__updateDownloadError) throw new Error(globalThis.__updateDownloadError);
       await wait(FAKE_STEP_MS);
       onProgress(100);
     },

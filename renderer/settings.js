@@ -9,6 +9,7 @@ export const DEFAULT_SETTINGS = {
   historyLimit: 100, // messages kept per topic
   historyMB: 64, // payload megabytes kept per topic
   autoExpand: true, // clicking a topic in the tree also expands it one level
+  checkForUpdates: true, // automatic update checks (main reads it from settings.json)
   keys: {}, // keyboard shortcut overrides: action id -> combo
 };
 
@@ -26,6 +27,7 @@ export function normalizeSettings(raw) {
     if (Number.isFinite(v)) out[k] = Math.min(max, Math.max(min, Math.round(v)));
   }
   if (typeof raw?.autoExpand === 'boolean') out.autoExpand = raw.autoExpand;
+  if (typeof raw?.checkForUpdates === 'boolean') out.checkForUpdates = raw.checkForUpdates;
   out.keys = normalizeOverrides(raw?.keys);
   return out;
 }
@@ -47,15 +49,21 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
       wrap.append(el('span', 'field-label', label), input, el('span', 'field-hint', hint));
       return wrap;
     };
-    const autoExpand = Object.assign(el('input'), { type: 'checkbox', name: 'autoExpand', checked: current.autoExpand });
-    const autoLabel = el('label', 'check');
-    autoLabel.append(autoExpand, document.createTextNode(' Expand a topic one level when you click it in the tree'));
+    const checkbox = (key, text) => {
+      const input = Object.assign(el('input'), { type: 'checkbox', name: key, checked: current[key] });
+      const wrap = el('label', 'check');
+      wrap.append(input, document.createTextNode(text));
+      return { input, wrap };
+    };
+    const autoExpand = checkbox('autoExpand', ' Expand a topic one level when you click it in the tree');
+    const checkUpdates = checkbox('checkForUpdates', ' Check for updates (asks GitHub at startup and every 6 hours)');
     const general = el('div', 'settings-page');
     general.dataset.page = 'general';
     general.append(
       numberField('historyLimit', 'Messages kept per topic', 'Older messages are dropped. Used by History, Diff and Chart.'),
       numberField('historyMB', 'History size per topic (MB)', 'Caps memory for topics with large payloads. The latest message is always kept.'),
-      autoLabel,
+      autoExpand.wrap,
+      checkUpdates.wrap,
     );
 
     // ---- Keyboard
@@ -143,7 +151,7 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
       e.preventDefault();
       if (conflicts(bindings).size) return showTab('keyboard');
       const raw = Object.fromEntries(Object.entries(fields).map(([k, i]) => [k, i.value]));
-      const next = normalizeSettings({ ...raw, autoExpand: autoExpand.checked, keys: bindings });
+      const next = normalizeSettings({ ...raw, autoExpand: autoExpand.input.checked, checkForUpdates: checkUpdates.input.checked, keys: bindings });
       try {
         await api.storeSet('settings', next);
       } catch (err) {
