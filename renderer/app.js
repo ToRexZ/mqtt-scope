@@ -464,13 +464,26 @@ document.addEventListener('keydown', (e) => {
   ACTION_HANDLERS[action](e);
 });
 
+// A narrow window puts the tree above the inspector (styles.css), so the same
+// handle then resizes the tree's height, which is remembered separately.
+const stacked = matchMedia('(max-width: 899px)');
 splitter($('#split-main'), {
   axis: 'x',
   storageKey: 'mqttscope.treeWidth',
   initial: 460,
   min: 220,
   max: () => window.innerWidth - 420,
+  active: () => !stacked.matches,
   apply: (px) => $('#layout').style.setProperty('--tree-w', `${px}px`),
+});
+splitter($('#split-main'), {
+  axis: 'y',
+  storageKey: 'mqttscope.treeHeight',
+  initial: Math.round(window.innerHeight * 0.35),
+  min: 80,
+  max: () => $('#layout').clientHeight - 260,
+  active: () => stacked.matches,
+  apply: (px) => $('#layout').style.setProperty('--tree-h', `${px}px`),
 });
 splitter($('#split-right'), {
   axis: 'y',

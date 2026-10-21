@@ -263,10 +263,29 @@ span.icon {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: var(--tree-w, 460px) 5px 1fr;
+  /* A saved tree width can be too wide for a smaller window: always leave the
+     inspector the room the splitter does while dragging. */
+  grid-template-columns: clamp(220px, var(--tree-w, 460px), calc(100% - 425px)) 5px 1fr;
 }
 .layout.max-viewer {
   grid-template-columns: 1fr;
+}
+/* Narrower than the window's minimum width, which tiling window managers
+   ignore: the tree goes above the inspector instead of beside it. */
+@media (max-width: 899px) {
+  .topbar {
+    flex-wrap: wrap;
+  }
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: clamp(80px, var(--tree-h, 35%), calc(100% - 260px)) 5px 1fr;
+  }
+  .layout.max-viewer {
+    grid-template-rows: 1fr;
+  }
+  #split-main {
+    cursor: row-resize;
+  }
 }
 .layout.max-viewer .tree-pane,
 .layout.max-viewer #split-main,
@@ -469,6 +488,8 @@ span.icon {
 /* ------------------------------------------------------------ viewer */
 
 .viewer {
+  /* A narrow inspector moves the history below the message (query below). */
+  container: viewer / size;
   flex: 1;
   min-height: 0;
   display: flex;
@@ -589,6 +610,22 @@ span.icon {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+/* Narrow but tall: the history goes below the message rather than taking
+   half its width. A short inspector keeps it beside the message. */
+@container viewer (max-width: 640px) and (min-height: 400px) {
+  .viewer-main {
+    display: flex;
+    flex-direction: column;
+  }
+  .viewer-body {
+    flex: 1;
+  }
+  .viewer-history {
+    flex: 0 0 35%;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
 }
 .history-head {
   padding: 6px 10px;
