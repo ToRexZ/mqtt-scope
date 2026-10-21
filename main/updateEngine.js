@@ -17,7 +17,8 @@ function createEngine({ kind, feedUrl, log, env = process.env, loadUpdater = () 
   return electronUpdaterEngine({ feedUrl, log, loadUpdater });
 }
 
-// Reports 0, 50 and 100 % over ~300 ms; installing only sets a flag tests read.
+// Reports 0, 50 and 100 % over ~300 ms. Installing only sets a flag tests
+// read, or fails with the message a test put in globalThis.__updateInstallError.
 function fakeEngine() {
   const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
   return {
@@ -29,6 +30,7 @@ function fakeEngine() {
       onProgress(100);
     },
     quitAndInstall() {
+      if (globalThis.__updateInstallError) throw new Error(globalThis.__updateInstallError);
       globalThis.__updateInstalled = true;
     },
   };

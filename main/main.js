@@ -180,6 +180,15 @@ function createUpdater() {
   return u;
 }
 
+// The install has started the new version, which comes up while this one
+// still closes its windows (each waits up to 1.5 s for its flush). Hand it the
+// single-instance lock now, or it would quit and leave this one opening a
+// window for it on the way out.
+function quitForUpdate() {
+  quitting = true;
+  app.releaseSingleInstanceLock();
+}
+
 // Help → Check for Updates…: always asks, and tells the window it came from.
 async function checkForUpdatesNow() {
   const asked = focusedMain();
@@ -229,7 +238,11 @@ function registerIpc() {
   // The renderer only sends intents; main builds every URL it opens.
   ipcMain.handle('update:state', () => updater.state);
   ipcMain.handle('update:download', () => updater.download());
-  ipcMain.handle('update:restart', (_e, force) => updater.restart({ force }));
+  ipcMain.handle('update:restart', (_e, force) => {
+    const res = updater.restart({ force });
+    if (res.ok) quitForUpdate();
+    return res;
+  });
   ipcMain.handle('update:skip', () => updater.skip());
   ipcMain.handle('update:openRelease', async () => {
     const version = updater.state.latest?.version;
@@ -450,7 +463,7 @@ function start() {
 }
 
 if (app.requestSingleInstanceLock()) {
-  app.on('second-instance', () => app.isReady() && createMainWindow());
+  app.on('second-instance', () => app.isReady() && !quitting && createMainWindow());
   app.on('before-quit', () => (quitting = true));
   app.whenReady().then(start);
   app.on('window-all-closed', () => {

@@ -213,6 +213,45 @@ test('self-updating build: download, confirm while connected, restart installs (
   expect(await installed()).toBe(true);
 });
 
+// The new version starts while this one still closes its windows (each waits
+// up to 1.5 s for its flush). It must get the single-instance lock, and this
+// one must not open a window for it on the way out.
+test('Restart to update hands the single-instance lock to the new version; a failed install keeps it', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const userData = makeUserData();
+  const updateEnv = overrides(server, { MQTTSCOPE_UPDATE_KIND: 'appimage', MQTTSCOPE_UPDATE_FAKE: '1' });
+  const { app, page } = await env.launch({ userData, env: updateEnv });
+  await waitForStatus(page, 'available');
+  await page.evaluate(() => window.api.updateDownload());
+  const hasLock = () => app.evaluate(({ app: a }) => a.hasSingleInstanceLock());
+  const windowCount = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+  // What launching the app again does while this instance holds the lock.
+  const launchedAgain = () => app.evaluate(({ app: a }) => void a.emit('second-instance', {}, [], process.cwd(), {}));
+
+  // The install fails: the lock stays, and launching again still opens a window.
+  await app.evaluate(() => (globalThis.__updateInstallError = 'mv: cannot move'));
+  expect(await page.evaluate(() => window.api.updateRestart(true))).toEqual({ ok: false });
+  expect(await updateState(page)).toMatchObject({ status: 'error', error: 'mv: cannot move' });
+  expect(await hasLock()).toBe(true);
+  await launchedAgain();
+  expect(await windowCount()).toBe(2);
+
+  // Retry; this time the install starts and this instance is on its way out.
+  await app.evaluate(() => delete globalThis.__updateInstallError);
+  await page.evaluate(() => window.api.updateDownload());
+  expect(await page.evaluate(() => window.api.updateRestart(true))).toEqual({ ok: true });
+  expect(await app.evaluate(() => globalThis.__updateInstalled)).toBe(true);
+  expect(await hasLock()).toBe(false);
+  await launchedAgain();
+  expect(await windowCount()).toBe(2);
+
+  // The relaunched app (same data folder) starts and takes the lock. (Its page
+  // waits a few seconds for this instance's browser storage, which a real old
+  // version frees by quitting; this one stays up.)
+  const next = await env.launch({ userData });
+  expect(await next.app.evaluate(({ app: a }) => a.hasSingleInstanceLock())).toBe(true);
+});
+
 test('a broadcast to a closed window does not break the others', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9'));
   const userData = makeUserData();

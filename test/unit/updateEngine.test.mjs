@@ -111,6 +111,7 @@ describe('createEngine', () => {
 describe('fake engine (MQTTSCOPE_UPDATE_FAKE=1)', () => {
   afterEach(() => {
     delete globalThis.__updateInstalled;
+    delete globalThis.__updateInstallError;
   });
 
   test('reports 0, 50 and 100 % over about 300 ms, then resolves', async (t) => {
@@ -131,6 +132,16 @@ describe('fake engine (MQTTSCOPE_UPDATE_FAKE=1)', () => {
 
   test('installing only sets a flag; nothing quits', () => {
     const engine = createEngine({ kind: 'nsis', feedUrl: null, log: fakeLog(), env: { MQTTSCOPE_UPDATE_FAKE: '1' }, loadUpdater: assert.fail });
+    engine.quitAndInstall();
+    assert.equal(globalThis.__updateInstalled, true);
+  });
+
+  test('installing fails with the message a test puts in globalThis.__updateInstallError', () => {
+    const engine = createEngine({ kind: 'appimage', feedUrl: null, log: fakeLog(), env: { MQTTSCOPE_UPDATE_FAKE: '1' }, loadUpdater: assert.fail });
+    globalThis.__updateInstallError = 'mv: cannot move';
+    assert.throws(() => engine.quitAndInstall(), { message: 'mv: cannot move' });
+    assert.equal(globalThis.__updateInstalled, undefined);
+    delete globalThis.__updateInstallError;
     engine.quitAndInstall();
     assert.equal(globalThis.__updateInstalled, true);
   });
