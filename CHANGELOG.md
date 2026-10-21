@@ -6,6 +6,27 @@ All notable changes to MQTT Scope. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-21
+
+### Added
+
+- **Update notice.** MQTT Scope checks GitHub for a newer release at startup
+  and every 6 hours. When there is one, an **Update x.y.z** button appears in
+  the top bar and opens a panel with the release notes. **Later** closes the
+  panel; **Skip this version** hides that version until a newer one is out.
+  Turn the automatic checks off in **Settings → General → Check for updates**.
+- **Help → Check for Updates…** checks right away, tells you when you are on
+  the latest version or the check failed, and un-skips a skipped version.
+- **Self-update.** The AppImage and the Windows installer download the update
+  on request (**Download update**) and install it with **Restart to update**
+  (which asks first if brokers are connected), or when you quit. Tar.gz,
+  Windows portable and macOS builds open the release page instead; Arch Linux
+  packages show a command to copy.
+- Releases now include `PKGBUILD` and `mqtt-scope.desktop` for Arch Linux, so
+  `makepkg -si` works from the release files alone.
+- After a self-update the AppImage has the new version in its file name:
+  rename it (e.g. `MQTT-Scope.AppImage`) to keep launchers working.
+
 ## [0.2.1] - 2026-10-21
 
 ### Added
@@ -108,7 +129,8 @@ First release.
 - Several brokers at once (one window each); installers for Linux, Windows and
   macOS.
 
-[Unreleased]: https://github.com/ToRexZ/mqtt-scope/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/ToRexZ/mqtt-scope/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/ToRexZ/mqtt-scope/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/ToRexZ/mqtt-scope/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ToRexZ/mqtt-scope/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ToRexZ/mqtt-scope/releases/tag/v0.1.0
