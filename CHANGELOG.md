@@ -6,10 +6,24 @@ All notable changes to MQTT Scope. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-21
+
 ### Added
 
 - Release files come with signed GitHub build attestations: check a download
   with `gh attestation verify <file> --repo ToRexZ/mqtt-scope`.
+
+### Fixed
+
+- **Narrow windows.** Tiling window managers can make the window narrower than
+  its 900 px minimum, which cut off the inspector, publisher and top bar. Below
+  that width the topic tree now sits above the inspector (drag the bar between
+  them to resize; the height is remembered), the top bar wraps, and a narrow
+  but tall inspector shows the message history below the message.
+- The inspector's topic no longer collapses into a column of single characters
+  when the inspector is narrow; its buttons wrap below it instead.
+- A remembered tree width no longer squeezes the inspector after the window
+  gets smaller.
 
 ## [0.2.0] - 2026-10-20
 
@@ -94,6 +108,7 @@ First release.
 - Several brokers at once (one window each); installers for Linux, Windows and
   macOS.
 
-[Unreleased]: https://github.com/ToRexZ/mqtt-scope/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/ToRexZ/mqtt-scope/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/ToRexZ/mqtt-scope/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ToRexZ/mqtt-scope/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/ToRexZ/mqtt-scope/releases/tag/v0.1.0
