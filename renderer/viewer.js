@@ -82,10 +82,12 @@ export class MessageViewer {
     this.topicEl = el('div', 'viewer-topic');
     this.metaEl = el('div', 'viewer-meta');
     const topicRow = el('div', 'viewer-topic-row');
-    topicRow.append(
+    const topicGroup = el('div', 'viewer-topic-group');
+    topicGroup.append(
       this.topicEl,
       iconButton('copy', 'Copy topic', () => this.source && this.copy(this.source.path, 'Topic copied')),
     );
+    topicRow.append(topicGroup);
     head.append(topicRow, this.metaEl);
     const actions = el('div', 'viewer-actions');
     topicRow.append(actions);

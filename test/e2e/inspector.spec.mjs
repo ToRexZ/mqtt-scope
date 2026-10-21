@@ -410,3 +410,32 @@ test('selectTopic helper and tree selection agree', async ({ env }) => {
   await expect(page.locator('#publisher-host .topic-input')).toHaveValue('x/y/z');
   expect(errors).toEqual([]);
 });
+
+test('inspector header in a narrow window: topic keeps its width, actions wrap instead of overflowing', async ({ env }) => {
+  const broker = await env.broker();
+  const topic = 'capra/robot/link/hitch/endstops/status';
+  await broker.publish(topic, '{"state":"RECORDING"}', { retain: true });
+  const { page, errors } = await env.connected(broker);
+  await page.setViewportSize({ width: 1000, height: 800 });
+  await openTopic(page, topic);
+
+  const layout = await page.evaluate(() => {
+    const head = document.querySelector('#viewer-host .viewer-head');
+    const topicEl = head.querySelector('.viewer-topic');
+    const h = head.getBoundingClientRect();
+    const text = document.createRange();
+    text.selectNodeContents(topicEl);
+    return {
+      topicLines: new Set([...text.getClientRects()].map((r) => Math.round(r.top))).size,
+      overflowing: [...head.querySelectorAll('.viewer-actions .btn')]
+        .filter((b) => {
+          const r = b.getBoundingClientRect();
+          return r.left < h.left || r.right > h.right;
+        })
+        .map((b) => b.textContent),
+    };
+  });
+  expect(layout.topicLines).toBe(1);
+  expect(layout.overflowing).toEqual([]);
+  expect(errors).toEqual([]);
+});
