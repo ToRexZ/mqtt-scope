@@ -1,8 +1,10 @@
 'use strict';
 
 // The one request an update check makes: a plain GET for the latest release,
-// with only Accept and User-Agent headers, and a time limit that also covers
-// reading the body. No Electron here; main passes net.fetch.
+// with a time limit that also covers reading the body. The app adds only the
+// Accept and User-Agent headers below, no identifiers or cookies; Chromium's
+// net.fetch adds its standard ones (Accept-Language, Accept-Encoding,
+// Sec-Fetch-*). No Electron here; main passes net.fetch.
 
 const { LATEST_RELEASE_API } = require('./updateCheck');
 

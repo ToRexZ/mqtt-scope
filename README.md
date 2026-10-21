@@ -182,9 +182,16 @@ breaks launchers and shortcuts that point at the old file. Rename it to e.g.
 `MQTT-Scope.AppImage` for a stable path.
 
 Privacy: automatic and manual checks make one request to GitHub's
-latest-release API for ToRexZ/mqtt-scope, with only `Accept` and `User-Agent`
-(`MQTT-Scope/<version>`) headers. **Download update** fetches the update files
-from that GitHub release.
+latest-release API for ToRexZ/mqtt-scope. The app adds only the `Accept` and
+`User-Agent` (`MQTT-Scope/<version>`) headers to it, and no identifiers or
+cookies; the browser engine adds its standard headers (such as
+`Accept-Language`). On the AppImage and the Windows installer, **Download
+update** then has electron-updater (`User-Agent: electron-builder`) fetch
+GitHub's release list for the repository, the latest release's update
+description file (`latest-linux.yml` or `latest.yml`) and the new build (only
+its changed blocks where it can). These requests carry no install identifier
+either: electron-updater's staging ID header is the same all-zero value on
+every install.
 
 ## Keyboard shortcuts
 
@@ -215,16 +222,17 @@ new keys; clashes are flagged). Defaults (Ctrl is Cmd on macOS):
 ## Settings and data
 
 Settings → General: messages kept per topic (default 100), history size per
-topic (default 64 MB; the latest message is always kept), and whether clicking
-a topic in the tree also expands it one level (default on), and whether to
-check for updates (default on).
+topic (default 64 MB; the latest message is always kept), whether clicking a
+topic in the tree also expands it one level (default on), and whether to check
+for updates (default on).
 
 Data lives in the app data folder (File → Open Data Folder):
 `profiles.json` (connections), `savedMessages.json`, `plotTabs.json` (plot
 tabs; `plots.json` keeps the tab on screen in the 0.1 format for older
 versions),
-`settings.json`, `updates.json` (the version you skipped), `logs/main.log`. Set `MQTTSCOPE_USER_DATA=/some/dir` to use a
-different folder (e.g. a portable install).
+`settings.json`, `updates.json` (the version you skipped), `logs/main.log`. Set
+`MQTTSCOPE_USER_DATA=/some/dir` to use a different folder (e.g. a portable
+install).
 
 ## Development
 
