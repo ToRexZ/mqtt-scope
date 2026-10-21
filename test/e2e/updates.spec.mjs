@@ -199,7 +199,7 @@ test('turning the setting back on checks at once; other settings changes do not'
   expect((await updateState(page)).status).toBe('available');
 });
 
-test('self-updating build: download, confirm while connected, restart installs (fake engine)', async ({ env }) => {
+test('self-updating build: download, confirm while connected or reconnecting, restart installs (fake engine)', async ({ env }) => {
   const broker = await env.broker();
   const server = await env.releaseServer(release('9.9.9'));
   const { app, page } = await env.connected(broker, { env: overrides(server, { MQTTSCOPE_UPDATE_KIND: 'appimage', MQTTSCOPE_UPDATE_FAKE: '1' }) });
@@ -211,6 +211,12 @@ test('self-updating build: download, confirm while connected, restart installs (
   expect((await broadcasts(page)).map((s) => (s.status === 'downloading' ? s.progress : s.status))).toEqual([0, 50, 100, 'ready']);
 
   const installed = () => app.evaluate(() => globalThis.__updateInstalled === true);
+  expect(await page.evaluate(() => window.api.updateRestart(false))).toEqual({ confirm: 1 });
+  expect(await installed()).toBe(false);
+
+  // A broker that went away while the app keeps reconnecting counts too.
+  await broker.close();
+  await page.waitForFunction(() => ['offline', 'reconnecting', 'error'].includes(window.__mqttscope.status.state));
   expect(await page.evaluate(() => window.api.updateRestart(false))).toEqual({ confirm: 1 });
   expect(await installed()).toBe(false);
   expect(await page.evaluate(() => window.api.updateRestart(true))).toEqual({ ok: true });

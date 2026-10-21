@@ -161,7 +161,8 @@ function createUpdater() {
     engine: createEngine({ kind, feedUrl: base || null, log }),
     store: { get: () => stores.get('updates'), set: (value) => stores.set('updates', value) },
     isEnabled: updateChecksOn,
-    connectedCount: () => [...windows.values()].filter(({ session }) => session.status.state === 'connected').length,
+    // A restart drops brokers still connecting or reconnecting too.
+    connectedCount: () => [...windows.values()].filter(({ session }) => session.active).length,
     log,
   });
   // Every main window shows the same state. A window closing mid-broadcast

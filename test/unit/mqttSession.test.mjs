@@ -296,6 +296,7 @@ describe('MqttSession without a connection', () => {
     const s = new MqttSession();
     assert.deepEqual(s.status, { state: 'disconnected' });
     assert.equal(s.connected, false);
+    assert.equal(s.active, false);
     assert.deepEqual(s.subscriptions, []);
     assert.equal(s.options.flushIntervalMs, 50);
     assert.equal(s.options.maxBuffered, 50000);
@@ -324,6 +325,7 @@ describe('MqttSession without a connection', () => {
     const res = s.connect({ protocol: 'mqtt', host: '' });
     assert.deepEqual(res, { ok: false, error: 'Host is required' });
     assert.deepEqual(s.status, { state: 'error', error: 'Host is required' });
+    assert.equal(s.active, false, 'an error without a client drops nothing');
     assert.deepEqual(ev.status, [{ state: 'error', error: 'Host is required' }]);
     assert.equal(clients.length, before, 'no client created');
     assert.equal(s.timer, null, 'no flush timer started');
@@ -509,6 +511,35 @@ describe('MqttSession with a fake client', () => {
     assert.deepEqual(s.status, { state: 'error', url: 'mqtt://broker.test:1883', error: 'Connection refused: Not authorized' });
     c.emit('close');
     assert.equal(s.status.state, 'error', 'close after error keeps the error visible');
+  });
+
+  // What a restart for an update asks about (main counts active sessions).
+  test('active while connected or still trying to connect, not once disconnected', () => {
+    const { c } = connect();
+    const seen = () => [s.status.state, s.active];
+    assert.deepEqual(seen(), ['connecting', true]);
+    goOnline(c);
+    assert.deepEqual(seen(), ['connected', true]);
+    c.connected = false;
+    c.emit('offline');
+    assert.deepEqual(seen(), ['offline', true]);
+    c.emit('reconnect');
+    assert.deepEqual(seen(), ['reconnecting', true]);
+    c.emit('error', new Error('connect ECONNREFUSED 127.0.0.1:1883'));
+    c.emit('close'); // mqtt.js retries
+    assert.deepEqual(seen(), ['error', true]);
+    c.emit('reconnect');
+    c.options.reconnectPeriod = 0;
+    c.emit('close'); // no retry coming
+    assert.deepEqual(seen(), ['disconnected', false]);
+
+    connect();
+    assert.deepEqual(seen(), ['connecting', true]);
+    s.disconnect();
+    assert.deepEqual(seen(), ['disconnected', false]);
+    connect();
+    s.connect(profile({ host: '' })); // replaces the session with one that cannot start
+    assert.deepEqual(seen(), ['error', false]);
   });
 
   test('messages are buffered as standalone copies and flushed in a batch', () => {

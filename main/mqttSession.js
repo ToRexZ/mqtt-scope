@@ -131,6 +131,12 @@ class MqttSession extends EventEmitter {
     return !!this.client && this.client.connected;
   }
 
+  // Connected, or still trying to be (connecting, reconnecting, or offline or
+  // failed while mqtt.js retries): what ending this session would drop.
+  get active() {
+    return !!this.client && this.status.state !== 'disconnected';
+  }
+
   connect(profile) {
     this.disconnect();
     let opts;
