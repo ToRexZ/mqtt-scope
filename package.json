@@ -1,7 +1,7 @@
 {
   "name": "mqtt-scope",
   "productName": "MQTT Scope",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Desktop MQTT client: live auto-subscribed topic tree, large message inspector, live plots and a publisher with saved messages",
   "main": "main/main.js",
   "license": "MIT",
