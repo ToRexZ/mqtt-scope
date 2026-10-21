@@ -271,33 +271,50 @@ test('a broadcast to a closed window does not break the others', async ({ env })
   const userData = makeUserData();
   const { app, page, errors } = await env.launch({ userData, env: overrides(server) });
   await waitForStatus(page, 'available');
-  await newWindow(app);
-  await recordUpdates(page);
-  // The second window goes away right before a change is broadcast. (Main
-  // broadcasts in window creation order, which is webContents id order.)
+  const watch = (p) => {
+    p.on('pageerror', (e) => errors.push(String(e)));
+    p.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  };
+  const second = await newWindow(app);
+  watch(second);
+  await recordUpdates(second);
+  const logged = () => readFileSync(path.join(userData, 'logs', 'main.log'), 'utf8');
+  // Main broadcasts in window creation order (webContents id order). The
+  // first window goes away right before a change is broadcast: it is skipped,
+  // not sent to, and the second still hears it.
   await app.evaluate(({ BrowserWindow }) => {
-    const [, second] = BrowserWindow.getAllWindows().sort((a, b) => a.webContents.id - b.webContents.id);
-    second.destroy();
+    const [first] = BrowserWindow.getAllWindows().sort((a, b) => a.webContents.id - b.webContents.id);
+    first.destroy();
     globalThis.__mqttscopeUpdater.skip();
   });
-  await expect.poll(async () => (await broadcasts(page)).map((s) => s.status)).toEqual(['none']);
+  await expect.poll(async () => (await broadcasts(second)).map((s) => s.status)).toEqual(['none']);
+  expect(logged()).not.toMatch(/could not send the update state/);
 
   // A window that cannot take the message (a destroyed one throws "Object has
   // been destroyed") does not keep the windows after it from hearing it.
   const third = await newWindow(app);
+  watch(third);
   await recordUpdates(third);
   await app.evaluate(({ BrowserWindow }) => {
     const [first] = BrowserWindow.getAllWindows().sort((a, b) => a.webContents.id - b.webContents.id);
+    globalThis.__realSend = first.webContents.send;
     first.webContents.send = () => {
       throw new Error('Object has been destroyed');
     };
   });
-  server.setRelease(release('9.9.10'));
-  await tick(app);
-  await expect.poll(async () => (await broadcasts(third)).map((s) => s.latest?.version)).toEqual(['9.9.10']);
-  const logged = readFileSync(path.join(userData, 'logs', 'main.log'), 'utf8');
-  expect(logged).toMatch(/ WARN update could not send the update state: Object has been destroyed/);
-  expect(logged).not.toMatch(/ ERROR update/);
+  try {
+    server.setRelease(release('9.9.10'));
+    await tick(app);
+    await expect.poll(async () => (await broadcasts(third)).map((s) => s.latest?.version)).toEqual(['9.9.10']);
+  } finally {
+    // Its flush request on close must reach it, or closing the app throws.
+    await app.evaluate(({ BrowserWindow }) => {
+      const [first] = BrowserWindow.getAllWindows().sort((a, b) => a.webContents.id - b.webContents.id);
+      first.webContents.send = globalThis.__realSend;
+    });
+  }
+  expect(logged()).toMatch(/ WARN update could not send the update state: Object has been destroyed/);
+  expect(logged()).not.toMatch(/ ERROR update/);
   expect(errors).toEqual([]);
 });
 
