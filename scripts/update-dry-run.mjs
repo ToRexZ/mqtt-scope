@@ -5,8 +5,10 @@
 // so through the inline confirm), and install on quit.
 //
 // The app's update traffic only goes to a feed on 127.0.0.1 (through
-// MQTTSCOPE_UPDATE_URL), which logs every request with its headers. The builds
-// use electron-builder's caches (a machine's first build downloads Electron).
+// MQTTSCOPE_UPDATE_URL), which logs every request with its headers; a request
+// that carries an install ID (x-user-staging-id other than the nil UUID) fails
+// the pass. The builds use electron-builder's caches (a machine's first build
+// downloads Electron).
 // No FUSE needed (APPIMAGE_EXTRACT_AND_RUN=1).
 // Linux x64 in a desktop session: electron-updater starts the new version
 // itself, without Playwright's headless switch (its windows stay hidden).
@@ -17,7 +19,7 @@
 // reason and exits non-zero. --keep leaves the scratch folder (under $TMPDIR).
 
 import { _electron as electron } from '@playwright/test';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -45,6 +47,7 @@ const TOTAL_MS = 45 * 60_000;
 // Settings that differ from the defaults; the update must keep them.
 const SETTINGS = { historyLimit: 250, autoExpand: false, checkForUpdates: true };
 const CONFIRM = 'Restarting disconnects 1 broker.';
+const NIL_UUID = '00000000-0000-0000-0000-000000000000'; // the x-user-staging-id the app sends
 const startLine = new RegExp(` INFO start ${TO.replaceAll('.', '\\.')} `);
 
 // Short names: Chromium's singleton socket goes in $TMPDIR/scoped_dir<6>/, and
@@ -194,9 +197,12 @@ async function startFeed(dir) {
 }
 
 // What the feed saw, for the review of what the app sends: every request with
-// all its headers, then where x-user-staging-id (electron-updater's) went.
+// all its headers, then where x-user-staging-id (electron-updater's) went and
+// whether anything sent the install ID electron-updater keeps in
+// data/.updaterId. Returns false if a request identified the install.
 function printFeed(requests, updaterIdFile) {
   const pathOf = (r) => r.url.split('?')[0];
+  const paths = (rs) => (rs.length ? ` (${[...new Set(rs.map(pathOf))].join(', ')})` : '');
   console.log(`  feed requests (${requests.length}):`);
   for (const r of requests) {
     const { range, ...headers } = r.headers;
@@ -204,12 +210,18 @@ function printFeed(requests, updaterIdFile) {
     console.log(`    ${r.method} ${r.url} -> ${r.status}${ranges}, ${r.bytes} bytes${r.error ? `, error: ${r.error}` : ''}`);
     for (const [k, v] of Object.entries(headers)) console.log(`      ${k}: ${v}`);
   }
-  const staged = requests.filter((r) => r.headers['x-user-staging-id']);
-  const ids = [...new Set(staged.map((r) => r.headers['x-user-staging-id']))];
+  const staged = requests.filter((r) => 'x-user-staging-id' in r.headers);
+  const nil = staged.filter((r) => r.headers['x-user-staging-id'] === NIL_UUID);
+  const other = staged.filter((r) => r.headers['x-user-staging-id'] !== NIL_UUID);
+  const otherIds = [...new Set(other.map((r) => r.headers['x-user-staging-id']))];
+  console.log(
+    `  x-user-staging-id: the nil UUID on ${nil.length} of ${requests.length} requests${paths(nil)}; absent on ${requests.length - staged.length}; ` +
+      (other.length ? `ANOTHER VALUE (an install ID) on ${other.length}${paths(other)}: ${otherIds.join(', ')}` : 'any other value: on none'),
+  );
   const saved = readText(updaterIdFile).trim() || null;
-  const where = staged.length ? ` (${[...new Set(staged.map(pathOf))].join(', ')})` : '';
-  const same = saved && ids.length === 1 && ids[0] === saved ? ', the same value: kept in the user-data folder' : '';
-  console.log(`  x-user-staging-id: on ${staged.length} of ${requests.length} requests${where}; values: ${ids.join(', ') || 'none'}; data/.updaterId: ${saved ?? 'absent'}${same}`);
+  const sentSaved = !!saved && requests.some((r) => Object.values(r.headers).some((v) => String(v).includes(saved)));
+  console.log(`  data/.updaterId: ${saved ? `${saved}, ${sentSaved ? 'SENT with a request' : 'kept locally, sent with no request'}` : 'absent'}`);
+  return other.length === 0 && !sentSaved;
 }
 
 // The processes of this run under `dir`: everything whose executable or
@@ -301,6 +313,7 @@ function sha512(file) {
 async function build() {
   const env = { ...process.env, TMPDIR: path.join(scratch, 'build-tmp') };
   mkdirSync(env.TMPDIR);
+  rmSync(path.join(root, 'dist', appImage(FROM)), { force: true }); // an older build must not stand in for this one
   await run('npm', ['run', 'dist:linux', '--', '--publish', 'never'], { log: path.join(scratch, `build-${FROM}.log`), env });
   if (!existsSync(path.join(root, 'dist', appImage(FROM)))) throw new Error(`The build made no dist/${appImage(FROM)}`);
   step(`built dist/${appImage(FROM)}`);
@@ -377,17 +390,24 @@ async function restartToUpdate(ctx) {
       if (!/closed/i.test(err.message)) throw err;
     });
   step('clicked Restart');
-  await until(() => startLine.test(readText(ctx.log)), { timeout: RELAUNCH_MS, interval: 100, message: `\`start ${TO}\` in main.log within ${secs(RELAUNCH_MS)} of Restart` });
+  await until(() => startLine.test(readText(ctx.log)), {
+    timeout: Math.max(0, clicked + RELAUNCH_MS - Date.now()), // RELAUNCH_MS from the click
+    interval: 100,
+    message: `\`start ${TO}\` in main.log within ${secs(RELAUNCH_MS)} of Restart`,
+  });
   const relaunchedAt = Date.now();
   const old = await withTimeout(ctx.exited, QUIT_MS, `${FROM} to quit after Restart`);
-  step(`${FROM} exited ${secs(old.at - clicked)} after Restart (code ${old.code}, signal ${old.signal}); main.log showed \`start ${TO}\` ${secs(relaunchedAt - clicked)} after it`);
+  step(`${FROM} exited ${secs(old.at - clicked)} after Restart (code ${old.code}, signal ${old.signal}); main.log showed \`start ${TO}\` ${secs(relaunchedAt - clicked)} after Restart`);
 
   const procs = processesUnder(ctx.dir);
   const main = procs.find((p) => isAppMain(p) && program(p).startsWith(ctx.tmpDir + path.sep));
   if (!main) throw new Error(`main.log shows \`start ${TO}\`, but no ${TO} process runs: ${describeProcesses(procs)}`);
   const runtime = procs.find((p) => program(p) === ctx.newFile);
   const rel = (p) => path.relative(ctx.dir, p);
-  step(`relaunched by electron-updater: ${TO} main process ${main.pid} (${rel(program(main))}), under AppImage runtime ${runtime ? `${runtime.pid} (${rel(program(runtime))})` : 'not found'}`);
+  // (Its APPIMAGE cannot be checked from outside: Chromium's process-title
+  // rewriting blanks the main process's /proc/<pid>/environ.)
+  if (!runtime) throw new Error(`The ${TO} main process ${main.pid} runs, but not under ${rel(ctx.newFile)}'s AppImage runtime: ${describeProcesses(procs)}`);
+  step(`relaunched by electron-updater: ${TO} main process ${main.pid} (${rel(program(main))}), under AppImage runtime ${runtime.pid} (${rel(program(runtime))})`);
   await expectInstalled(ctx);
 
   // TO's startup update check proves it got through start(), and it reads settings.json.
@@ -468,7 +488,9 @@ async function runPass({ folder, finish }) {
     console.log(`  main.log (end):\n${indent(tail(ctx.log, 25) || '(none)')}`);
     console.log(`  app/ now: ${readdirSync(ctx.appDir).join(', ') || '(empty)'}`);
   }
-  if (ctx.feed) printFeed(ctx.feed.requests, path.join(sub('data'), '.updaterId'));
+  if (ctx.feed && !printFeed(ctx.feed.requests, path.join(sub('data'), '.updaterId'))) {
+    failure ||= new Error('An update request identified the install (see x-user-staging-id and data/.updaterId above)');
+  }
   try {
     const ended = await endProcesses(dir);
     if (ended !== 'none running') step(`left running, now ended: ${ended}`);
@@ -482,11 +504,24 @@ async function runPass({ folder, finish }) {
 
 process.on('SIGINT', () => abort('interrupted', 130));
 process.on('SIGTERM', () => abort('terminated', 143));
+process.on('SIGHUP', () => abort('hung up (the terminal went away)', 129));
 process.on('uncaughtException', (err) => abort(`unexpected error: ${err.stack || err}`, 1));
 process.on('unhandledRejection', (err) => abort(`unexpected error: ${err?.stack || err}`, 1));
 setTimeout(() => abort(`the dry run took over ${TOTAL_MS / 60_000} min`, 1), TOTAL_MS).unref();
 
+// Which code this run tested: the commit, and whether the tree had changes on top.
+function sourceState() {
+  try {
+    const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
+    const changed = git('status', '--porcelain').split('\n').filter(Boolean).length;
+    return `commit ${git('rev-parse', 'HEAD')}, ${changed ? `tree DIRTY (${changed} changed files)` : 'tree clean'}`;
+  } catch (err) {
+    return `commit unknown (${err.message.split('\n')[0]})`;
+  }
+}
+
 console.log(`MQTT Scope AppImage update dry run, ${FROM} -> ${TO} (scratch: ${scratch})`);
+console.log(sourceState());
 let failed = false;
 try {
   if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error(`Linux x64 only (this is ${process.platform} ${process.arch})`);
