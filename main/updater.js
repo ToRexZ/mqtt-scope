@@ -18,7 +18,8 @@ const messageOf = (err) => err?.message || String(err);
 
 class Updater extends EventEmitter {
   // fetchRelease(): Promise<GitHub release JSON>; it must settle (callers give it a timeout).
-  // engine: { download(onProgress(percent)): Promise<void>, quitAndInstall(): void } | null.
+  // engine: { download(onProgress(percent)): Promise<void>, quitAndInstall(): void } | null;
+  // download() must settle too, or the state stays 'downloading'.
   // store: { get(): { skipped?: string } | null, set(obj) }.
   constructor({ currentVersion, kind, fetchRelease, engine = null, store, isEnabled, connectedCount, log }) {
     super();
@@ -34,6 +35,7 @@ class Updater extends EventEmitter {
     this._request = null; // in-flight release fetch, shared by concurrent checks
     this._download = null; // in-flight download, shared by concurrent calls
     this._downloadId = 0;
+    this._installing = false; // quitAndInstall() was called; never call it twice
     this._timer = null;
   }
 
@@ -58,6 +60,7 @@ class Updater extends EventEmitter {
   // One automatic check, skipped while the setting is off. Never rejects:
   // it runs from a timer, so anything unexpected is logged instead.
   async tick() {
+    if (this._kind === 'dev') return;
     try {
       if (this._isEnabled()) await this.check();
     } catch (err) {
@@ -118,11 +121,14 @@ class Updater extends EventEmitter {
   // connected, unless force is exactly true; otherwise quits and installs.
   restart({ force = false } = {}) {
     if (this._state.status !== 'ready') return { ok: false };
+    if (this._installing) return { ok: true };
     const connected = this._connectedCount();
     if (connected > 0 && force !== true) return { confirm: connected };
+    this._installing = true;
     try {
       this._engine.quitAndInstall();
     } catch (err) {
+      this._installing = false;
       this._log.warn('update', `install failed: ${messageOf(err)}`);
       this._set({ status: 'error', error: messageOf(err) });
       return { ok: false };
@@ -187,11 +193,21 @@ class Updater extends EventEmitter {
     });
   }
 
+  // Each listener runs in isolation and its errors are logged, not thrown: a
+  // failing broadcast (e.g. to a destroyed window) must not abort the
+  // transition that triggered it, nor keep the other listeners from hearing it.
   _set(patch) {
     const next = { ...this._state, ...patch };
     if (JSON.stringify(next) === JSON.stringify(this._state)) return;
     this._state = next;
-    this.emit('state', this.state);
+    const snapshot = this.state;
+    for (const listener of this.rawListeners('state')) {
+      try {
+        listener.call(this, snapshot);
+      } catch (err) {
+        this._log.error('update', err);
+      }
+    }
   }
 
   _loadSkipped() {

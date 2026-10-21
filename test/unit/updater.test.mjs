@@ -568,6 +568,7 @@ describe('restart', () => {
 
   test('an install that throws shows its error and can be retried', async () => {
     const { u, w, engine } = await readyToInstall();
+    const installOk = engine.quitAndInstall;
     engine.quitAndInstall = () => {
       throw new Error('cannot replace the AppImage');
     };
@@ -576,11 +577,67 @@ describe('restart', () => {
     assert.equal(u.state.error, 'cannot replace the AppImage');
     assert.match(w.logs.map((l) => l.join(' ')).join('\n'), /cannot replace the AppImage/);
 
+    engine.quitAndInstall = installOk;
     const p = u.download();
     engine.pending.resolve();
     await p;
     assert.equal(u.state.status, 'ready');
+    assert.deepEqual(u.restart(), { ok: true });
+    assert.equal(engine.installs, 1, 'the retry installs');
   });
+
+  test('restart installs only once', async () => {
+    const { u, w, engine } = await readyToInstall();
+    w.connected = 1;
+    assert.deepEqual(u.restart({ force: true }), { ok: true });
+    assert.deepEqual(u.restart({ force: true }), { ok: true });
+    assert.deepEqual(u.restart(), { ok: true }, 'already installing: no confirm');
+    assert.equal(engine.installs, 1);
+  });
+});
+
+describe('state listeners', () => {
+  // In production the listener is an IPC broadcast, which throws for a destroyed window.
+  const failingAt = {
+    'download start': (s) => s.status === 'downloading' && s.progress === 0,
+    progress: (s) => s.status === 'downloading' && s.progress > 0,
+    ready: (s) => s.status === 'ready',
+  };
+  for (const [name, when] of Object.entries(failingAt)) {
+    test(`a listener that throws on ${name} is logged and cannot wedge the download`, async () => {
+      const engine = fakeEngine();
+      const { u, w } = make({ engine });
+      await u.check();
+      u.prependListener('state', (s) => {
+        if (when(s)) throw new Error(`listener broke on ${name}`);
+      });
+      let p;
+      assert.doesNotThrow(() => {
+        p = u.download();
+      });
+      assert.equal(engine.downloads, 1);
+      assert.doesNotThrow(() => engine.onProgress(50));
+      assert.equal(u.state.progress, 50);
+      engine.pending.resolve();
+      await p;
+      assert.equal(u.state.status, 'ready');
+      assert.deepEqual(
+        w.events.map((e) => [e.status, e.progress]),
+        [
+          ['available', null],
+          ['downloading', 0],
+          ['downloading', 50],
+          ['ready', null],
+        ],
+        'the listener after the failing one heard every change',
+      );
+      assert.ok(w.logs.some((l) => l[0] === 'error' && l.join(' ').includes(`listener broke on ${name}`)));
+
+      await u.check();
+      assert.deepEqual(u.restart(), { ok: true });
+      assert.equal(engine.installs, 1);
+    });
+  }
 });
 
 describe('start / stop / tick', () => {
@@ -617,6 +674,7 @@ describe('start / stop / tick', () => {
     await advance(t, CHECK_INTERVAL_MS * 3);
     assert.equal(dev.w.enabledReads, 0, 'no timer for dev builds');
     await dev.u.tick();
+    assert.equal(dev.w.enabledReads, 0, 'tick does nothing for dev builds');
     assert.equal(dev.w.fetches, 0);
     dev.u.stop();
   });
