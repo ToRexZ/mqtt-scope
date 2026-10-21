@@ -140,7 +140,7 @@ Download the file for your platform from the
 then build the package from the release's `PKGBUILD` and `mqtt-scope.desktop`:
 
 ```sh
-mkdir -p ~/.cache/mqtt-scope-pkg/latest && cd ~/.cache/mqtt-scope-pkg/latest && curl -fLO https://github.com/ToRexZ/mqtt-scope/releases/latest/download/PKGBUILD -fLO https://github.com/ToRexZ/mqtt-scope/releases/latest/download/mqtt-scope.desktop && makepkg -si
+mkdir -p ~/.cache/mqtt-scope-pkg/latest && cd ~/.cache/mqtt-scope-pkg/latest && curl -fLO https://github.com/ToRexZ/mqtt-scope/releases/latest/download/PKGBUILD -fLO https://github.com/ToRexZ/mqtt-scope/releases/latest/download/mqtt-scope.desktop && makepkg -sic
 ```
 
 The AppImage needs FUSE 2 (`sudo pacman -S fuse2` on Arch, `sudo apt install

@@ -113,7 +113,7 @@ describe('pacmanCommand', () => {
       pacmanCommand('0.3.1'),
       'mkdir -p ~/.cache/mqtt-scope-pkg/0.3.1 && cd ~/.cache/mqtt-scope-pkg/0.3.1 && ' +
         'curl -fLO https://github.com/ToRexZ/mqtt-scope/releases/download/v0.3.1/PKGBUILD ' +
-        '-fLO https://github.com/ToRexZ/mqtt-scope/releases/download/v0.3.1/mqtt-scope.desktop && makepkg -si',
+        '-fLO https://github.com/ToRexZ/mqtt-scope/releases/download/v0.3.1/mqtt-scope.desktop && makepkg -sic',
     );
   });
 });

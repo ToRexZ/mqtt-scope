@@ -46,11 +46,13 @@ function releasePageUrl(version) {
   return `https://github.com/${REPO}/releases/tag/v${version}`;
 }
 
-// Shell one-liner that fetches this release's PKGBUILD + desktop file and installs it.
+// Shell one-liner that fetches this release's PKGBUILD + desktop file and
+// installs it, then removes the build folders (makepkg -c; they hold the whole
+// app twice).
 function pacmanCommand(version) {
   const dir = `~/.cache/mqtt-scope-pkg/${version}`;
   const base = `https://github.com/${REPO}/releases/download/v${version}`;
-  return `mkdir -p ${dir} && cd ${dir} && curl -fLO ${base}/PKGBUILD -fLO ${base}/mqtt-scope.desktop && makepkg -si`;
+  return `mkdir -p ${dir} && cd ${dir} && curl -fLO ${base}/PKGBUILD -fLO ${base}/mqtt-scope.desktop && makepkg -sic`;
 }
 
 // How this build was installed, which decides how (or whether) it can update.
