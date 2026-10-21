@@ -6,6 +6,33 @@ on:
     tags: ['v*']
   pull_request:
 
+# Pull requests and pushes to main run `test` only. Pushing an annotated vX.Y.Z
+# tag also cuts a release, in this order:
+#
+#   test -> package -> release -> pkgbuild -> aur
+#
+# package   Builds the installers on Linux, Windows and macOS. Every
+#           electron-builder call passes `--publish never`: CI attaches files
+#           itself. (`build.publish` in package.json does not publish anything;
+#           it tells packaged apps which GitHub repository to check for updates.)
+# release   Publishes the GitHub release with the installers plus
+#           electron-builder's update description files (latest.yml,
+#           latest-linux.yml, latest-mac.yml) and *.blockmap files. The in-app
+#           updater (electron-updater) reads these from the latest release to
+#           update the AppImage and the Windows installer build in place; a
+#           release without them leaves those installs unable to update.
+# pkgbuild  Fills in packaging/aur/PKGBUILD for the tag (pkgver, checksums of the
+#           release's own tar.gz) and attaches PKGBUILD and mqtt-scope.desktop to
+#           the release. The update panel of pacman installs shows a command
+#           that downloads exactly these two assets from that version's release
+#           and runs makepkg (pacmanCommand in main/updateCheck.js), so their
+#           names are fixed. It attaches after the release is published, which
+#           relies on the repository leaving "immutable releases" off.
+# aur       Pushes the same PKGBUILD, .SRCINFO and mqtt-scope.desktop to the AUR.
+#
+# Asset names are part of the updater's contract: installs already out there
+# fetch latest*.yml, the installers those files name, PKGBUILD and
+# mqtt-scope.desktop by exact name, so renaming any of them breaks their updates.
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -35,12 +62,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # update-info: the update description file this OS's build must write.
           - os: ubuntu-latest
             dist: dist:linux
+            update-info: latest-linux.yml
           - os: windows-latest
             dist: dist:win
+            update-info: latest.yml
           - os: macos-latest
             dist: dist:mac
+            update-info: latest-mac.yml
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     env:
@@ -54,21 +85,42 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run ${{ matrix.dist }} -- --publish never
+      # A release without its update description file (or one naming a file
+      # that is not uploaded) silently stops installs from updating.
+      - name: Check the update description file
+        shell: bash
+        env:
+          UPDATE_INFO: dist/${{ matrix.update-info }}
+        run: |
+          if [ ! -f "$UPDATE_INFO" ]; then echo "::error::electron-builder did not write $UPDATE_INFO"; exit 1; fi
+          cat "$UPDATE_INFO"
+          urls="$(sed -n 's/^ *- url: //p' "$UPDATE_INFO")"
+          if [ -z "$urls" ]; then echo "::error::$UPDATE_INFO lists no files"; exit 1; fi
+          for url in $urls; do
+            if [ ! -f "dist/$url" ]; then echo "::error::$UPDATE_INFO names $url, which is not in dist/"; exit 1; fi
+          done
       - name: Smoke-test the packaged app
         if: runner.os == 'Linux'
         run: xvfb-run -a npm run verify:package
       - name: Smoke-test the packaged app
         if: runner.os != 'Linux'
         run: npm run verify:package
+      # The release job merges all three artifacts into one folder, so every
+      # file name must be unique across OSes: installers and blockmaps carry
+      # the OS in their name, and each OS writes a differently named latest*.yml.
+      # The Linux AppImage embeds its blockmap, so Linux uploads no .blockmap.
       - uses: actions/upload-artifact@v4
         with:
           name: installers-${{ matrix.os }}
+          if-no-files-found: error
           path: |
             dist/*.AppImage
             dist/*.tar.gz
             dist/*.exe
             dist/*.dmg
             dist/*.zip
+            dist/latest*.yml
+            dist/*.blockmap
 
   release:
     needs: package
@@ -84,6 +136,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: installers-*
           merge-multiple: true
       # Signed record that each file was built by this workflow from this
       # commit; verify with `gh attestation verify <file> --repo ToRexZ/mqtt-scope`.
@@ -96,11 +149,52 @@ jobs:
           body_path: release-notes.md
           generate_release_notes: true
 
-  # Publishes packaging/aur to the AUR package mqtt-scope-bin for the new tag.
+  # Computes packaging/aur for the new tag and attaches PKGBUILD and
+  # mqtt-scope.desktop to its release (see the top of this file). Hands
+  # PKGBUILD, .SRCINFO and mqtt-scope.desktop to the aur job as artifact
+  # aur-package. Runs on every tag, with or without an AUR key.
+  pkgbuild:
+    needs: release
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    timeout-minutes: 20
+    permissions:
+      contents: write # gh release upload
+    steps:
+      - name: Install tools
+        run: pacman -Syu --noconfirm --needed git pacman-contrib github-cli
+      - uses: actions/checkout@v4
+      # makepkg refuses to run as root, hence the builder user. updpkgsums
+      # downloads the sources, including the tar.gz the release job just published.
+      - name: Update PKGBUILD for this release
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          useradd -m builder
+          cp -r packaging/aur /home/builder/pkg && chown -R builder /home/builder/pkg
+          cd /home/builder/pkg
+          sed -i -e "s/^pkgver=.*/pkgver=${version}/" -e "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
+          su builder -c "cd /home/builder/pkg && updpkgsums && makepkg --printsrcinfo > .SRCINFO"
+      # --repo: gh needs no git checkout here. --clobber: a re-run replaces them.
+      - name: Attach PKGBUILD and mqtt-scope.desktop to the release
+        working-directory: /home/builder/pkg
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$GITHUB_REF_NAME" PKGBUILD mqtt-scope.desktop --clobber --repo "$GITHUB_REPOSITORY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aur-package
+          if-no-files-found: error
+          include-hidden-files: true # .SRCINFO; upload-artifact skips dotfiles otherwise
+          path: |
+            /home/builder/pkg/PKGBUILD
+            /home/builder/pkg/.SRCINFO
+            /home/builder/pkg/mqtt-scope.desktop
+
+  # Publishes the pkgbuild job's files to the AUR package mqtt-scope-bin.
   # Does nothing until the repository secret AUR_SSH_PRIVATE_KEY is set (the
   # private half of an SSH key registered on the AUR account).
   aur:
-    needs: release
+    needs: pkgbuild
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     env:
@@ -112,18 +206,12 @@ jobs:
           if [ -n "$AUR_KEY" ]; then echo "enabled=true" >> "$GITHUB_OUTPUT"; else echo "No AUR_SSH_PRIVATE_KEY secret: skipping"; fi
       - name: Install tools
         if: steps.gate.outputs.enabled == 'true'
-        run: pacman -Syu --noconfirm --needed git openssh pacman-contrib
-      - uses: actions/checkout@v4
+        run: pacman -Syu --noconfirm --needed git openssh
+      - uses: actions/download-artifact@v4
         if: steps.gate.outputs.enabled == 'true'
-      - name: Update PKGBUILD for this release
-        if: steps.gate.outputs.enabled == 'true'
-        run: |
-          version="${GITHUB_REF_NAME#v}"
-          useradd -m builder
-          cp -r packaging/aur /home/builder/pkg && chown -R builder /home/builder/pkg
-          cd /home/builder/pkg
-          sed -i -e "s/^pkgver=.*/pkgver=${version}/" -e "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
-          su builder -c "cd /home/builder/pkg && updpkgsums && makepkg --printsrcinfo > .SRCINFO"
+        with:
+          name: aur-package
+          path: aur-package
       - name: Push to the AUR
         if: steps.gate.outputs.enabled == 'true'
         run: |
@@ -132,7 +220,7 @@ jobs:
           ssh-keyscan -t ed25519 aur.archlinux.org >> ~/.ssh/known_hosts
           printf 'Host aur.archlinux.org\n  User aur\n  IdentityFile ~/.ssh/aur\n' > ~/.ssh/config
           git clone ssh://aur@aur.archlinux.org/mqtt-scope-bin.git aur
-          cp /home/builder/pkg/PKGBUILD /home/builder/pkg/.SRCINFO /home/builder/pkg/mqtt-scope.desktop aur/
+          cp aur-package/PKGBUILD aur-package/.SRCINFO aur-package/mqtt-scope.desktop aur/
           cd aur
           git add PKGBUILD .SRCINFO mqtt-scope.desktop
           if git diff --cached --quiet; then echo "AUR package already up to date"; exit 0; fi

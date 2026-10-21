@@ -23,6 +23,13 @@
     "appId": "io.github.torexz.mqtt-scope",
     "productName": "MQTT Scope",
     "artifactName": "MQTT-Scope-${version}-${os}-${arch}.${ext}",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ToRexZ",
+        "repo": "mqtt-scope"
+      }
+    ],
     "directories": {
       "buildResources": "build",
       "output": "dist"
