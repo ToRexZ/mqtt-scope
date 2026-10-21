@@ -481,10 +481,21 @@ span.icon {
 }
 .viewer-topic-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 6px;
 }
+/* The topic breaks anywhere, so if it shrank to fit beside the actions a
+   narrow inspector would squeeze it to a column of single characters. The
+   group keeps its full width instead and the actions wrap below it. */
+.viewer-topic-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .viewer-topic {
+  min-width: 0;
   font-family: var(--mono);
   font-size: 14px;
   font-weight: 600;
@@ -548,6 +559,8 @@ span.icon {
 }
 .viewer-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 4px;
 }
 .viewer-main {
