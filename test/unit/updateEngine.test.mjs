@@ -253,6 +253,27 @@ describe('electron-updater engine', () => {
     assert.deepEqual(updater.calls[0], ['setFeedURL', { provider: 'generic', url: 'http://127.0.0.1:5000' }]);
   });
 
+  test('a configuration that fails is done again on the next attempt, not kept half done', async () => {
+    const { engine, updater, loads } = realEngine({ feedUrl: 'http://127.0.0.1:5000' });
+    const setFeedURL = updater.setFeedURL.bind(updater);
+    let failures = 1;
+    updater.setFeedURL = (options) => {
+      if (failures-- > 0) throw new Error('Invalid feed URL');
+      setFeedURL(options);
+    };
+    await assert.rejects(engine.download(() => {}), { message: 'Invalid feed URL' });
+    assert.deepEqual(updater.calls, [], 'nothing asked of a half-configured updater');
+    const done = engine.download(() => {});
+    await untilDownloading(updater);
+    updater.pending.resolve([]);
+    await done;
+    assert.equal(loads(), 2);
+    assert.deepEqual(
+      updater.calls.map(([name]) => name),
+      ['setFeedURL', 'checkForUpdates', 'downloadUpdate'],
+    );
+  });
+
   test('checks the feed, then downloads, forwarding progress', async () => {
     const { engine, updater } = realEngine();
     const before = updater.listeners_();

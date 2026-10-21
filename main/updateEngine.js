@@ -52,19 +52,21 @@ const asError = (err) => (err instanceof Error ? err : new Error(String(err)));
 
 function electronUpdaterEngine({ feedUrl, log, loadUpdater }) {
   let updater = null;
+  // Kept only once fully configured, so a failure here is retried next time.
   const get = () => {
     if (updater) return updater;
-    updater = loadUpdater();
-    updater.autoDownload = false; // nothing downloads until the user asks
-    updater.autoInstallOnAppQuit = true; // a downloaded update installs when the user quits
-    updater.requestHeaders = { ...NO_INSTALL_ID };
-    updater.logger = {
+    const u = loadUpdater();
+    u.autoDownload = false; // nothing downloads until the user asks
+    u.autoInstallOnAppQuit = true; // a downloaded update installs when the user quits
+    u.requestHeaders = { ...NO_INSTALL_ID };
+    u.logger = {
       info: (m) => log.info('update', m),
       warn: (m) => log.warn('update', m),
       error: (m) => log.error('update', m),
     };
-    if (feedUrl) updater.setFeedURL({ provider: 'generic', url: feedUrl });
-    return updater;
+    if (feedUrl) u.setFeedURL({ provider: 'generic', url: feedUrl });
+    updater = u;
+    return u;
   };
 
   // electron-updater downloads only what its own check found.
