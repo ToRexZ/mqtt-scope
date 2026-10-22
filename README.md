@@ -187,13 +187,15 @@ What the button does depends on how you installed:
 | `.tar.gz`, Windows portable, macOS | **Download** opens the release page. |
 | Arch package | The panel shows a command to copy and paste into a terminal. |
 
-On **Restart to update** every window shows an *Installing MQTT Scope x.y.z*
-dialog with a moving progress bar, and the app closes. On Windows the
-installer then shows its own window with the install's progress (starting it
-can take several seconds) and opens the new version when done; a per-machine
-installation asks for administrator rights first, as any install there does.
-The AppImage restarts into the new version within seconds. Installing on quit
-happens silently.
+On **Restart to update** every main window shows an *Installing MQTT Scope
+x.y.z* dialog with a moving progress bar until the app closes. On Windows the
+installer's own window then shows the install's progress, and MQTT Scope opens
+again in front when it is done, about half a minute in all. A per-machine
+installation asks for administrator rights first; declining leaves MQTT Scope
+closed and not updated (start it again, and the notice comes back). With both
+a per-user and a per-machine copy installed, the update goes to the
+per-machine one. The AppImage restarts into the new version within seconds.
+Installing on quit happens silently.
 
 Tip: electron-updater replaces a versioned AppImage name
 (`MQTT-Scope-0.3.0-linux-x86_64.AppImage`) with the new versioned name, which
@@ -294,9 +296,12 @@ npm run verify:package   # launch the packaged app and check it connects
 `build/installer.nsh` (the `nsis.include` in package.json) makes the Windows
 installer skip its questions and Finish page when an update runs it with its
 window, as Restart to update does from 0.3.0 on. Each version's installer is
-run that way by the version before it, so keep it in the build config for
-every later version (electron-builder fails the build if the file is
-missing).
+run that way by the version before it, so keep it in the build config for every
+later version (electron-builder fails the build if the file is missing; a unit
+test checks the config and the hooks). After upgrading electron-builder, check
+that its NSIS templates still call the `customInstallMode` and
+`customFinishPage` hooks, and add no installer page that does not skip itself
+on `--updated`.
 
 The Linux builds take their icon from `build/icons/`, one PNG per icon theme
 size. After changing `build/icon.svg`, regenerate them with
@@ -344,6 +349,7 @@ main/          Electron main process (CommonJS)
   updateCheck.js version compare, release parsing, install type, pacman command (pure)
   updater.js     update state: periodic checks, skip, download, restart
   updateEngine.js  downloads and installs for AppImage / Windows installer (electron-updater)
+  afterUpdate.js   the window comes to the front when the Windows installer starts the new version
   fetchRelease.js  the one request a check makes: GitHub's latest release
   desktopIntegration.js  the AppImage's menu entry and icons, so GNOME shows its logo
   preload.js     the only API the UI can call (contextIsolation + sandbox)

@@ -28,7 +28,9 @@ the app or grabs focus unprompted drops a session someone is watching.
 ## Anti-goals (a failure even if it works)
 
 - The app restarts, downloads, or installs without the user asking.
-- Popups, modal dialogs or focus stealing because of an update.
+- Unprompted popups, modal dialogs or focus stealing because of an update.
+  (The Installing dialog and the restarted window coming to the front follow
+  the user's own Restart to update; see Installing.)
 - Error toasts when there is no internet. Robot networks are often offline;
   a failed check must be silent (logged only).
 - A check that sends anything beyond a plain request for the latest release.
@@ -69,20 +71,26 @@ app has to exit for the install to replace it, so it cannot report the
 install's progress. Once a restart goes ahead (no confirm needed, or
 **Restart** in the confirm), every main window shows a modal *Installing MQTT
 Scope x.y.z* dialog: an animated, indeterminate bar (a sliding segment; a
-pulse with reduced motion) and no buttons, since it cannot be stopped. This
-is the one modal an update shows, and only after the user asked for the
-restart. Main broadcasts this state, then starts the install 300 ms later so
-every window can draw it before the main process may block (starting the
-unsigned Windows installer took 5–15 s in a Windows 11 VM). A failed install
-closes the dialog and shows its error as before. On Windows the installer
-then runs with its window instead of silently (silent, the screen stayed
-empty for the 25–50 s the install took): its progress bar shows the install,
-it keeps the existing installation's mode without asking, and starts the new
-version and closes itself instead of waiting on its Finish page
-(`build/installer.nsh`; a fresh install is unchanged). Each version's
+pulse with reduced motion) and no buttons, since it cannot be stopped.
+Nothing opens over it or takes its focus meanwhile. This is the one modal an
+update shows, and only after the user asked for the restart. Main broadcasts
+this state, then starts the install 300 ms later so every window can draw it
+first. Starting the unsigned Windows installer blocked the main process for
+5–15 s in a Windows 11 VM, and after any click Windows marked the window Not
+Responding and froze the bar; so Restart to update starts it from a worker
+thread and quits once it has started (install on quit keeps the plain start).
+A failed start or install closes the dialog and shows its error as before. On
+Windows the installer then runs with its window instead of silently (silent,
+the screen stayed empty for the 25–50 s the install took): its progress bar
+shows the install, it keeps the existing installation's mode without asking,
+and starts the new version and closes itself instead of waiting on its Finish
+page (`build/installer.nsh`; a fresh install is unchanged). Each version's
 installer is run that way by the version before it, so that file stays in the
-build for good. The AppImage restarts within seconds. Installing on quit
-stays silent.
+build for good. The new version, started with `--updated`, brings its first
+window to the front once: after a click elsewhere Windows would open it
+behind other windows, and it is the window the user asked to restart into, so
+this is not unprompted focus stealing. The AppImage restarts within seconds.
+Installing on quit stays silent.
 
 **AppImage file names** keep the version (`MQTT-Scope-0.3.0-linux-x86_64.AppImage`).
 electron-updater writes the update under the new versioned name and removes
