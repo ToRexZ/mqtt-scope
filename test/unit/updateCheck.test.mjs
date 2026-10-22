@@ -119,18 +119,47 @@ describe('pacmanCommand', () => {
 });
 
 describe('installKind', () => {
-  const k = (o) => installKind({ platform: 'linux', env: {}, isPackaged: true, resourcesPath: '/r', exists: () => false, ...o });
+  // A mounted AppImage: the runtime sets APPIMAGE and APPDIR, and the app runs from inside APPDIR.
+  const MOUNT = { APPIMAGE: '/a/MQTT.AppImage', APPDIR: '/tmp/.mount_MQTTab' };
+  const k = (o) => installKind({ platform: 'linux', env: {}, isPackaged: true, resourcesPath: '/r', execPath: '/tmp/.mount_MQTTab/mqtt-scope', exists: () => false, ...o });
+  const pacmanMarker = (p) => p === path.join('/r', 'pacman-package');
 
   test('linux kinds', () => {
-    assert.equal(k({ env: { APPIMAGE: '/a/MQTT.AppImage' } }), 'appimage');
-    assert.equal(k({ exists: (p) => p === path.join('/r', 'pacman-package') }), 'pacman');
+    assert.equal(k({ env: MOUNT }), 'appimage');
+    assert.equal(k({ exists: pacmanMarker }), 'pacman');
     assert.equal(k({}), 'manual'); // tar.gz
   });
   test('AppImage wins over the pacman marker', () => {
-    assert.equal(k({ env: { APPIMAGE: '/a' }, exists: () => true }), 'appimage');
+    assert.equal(k({ env: MOUNT, exists: () => true }), 'appimage');
   });
   test('empty APPIMAGE is not an AppImage', () => {
-    assert.equal(k({ env: { APPIMAGE: '' } }), 'manual');
+    assert.equal(k({ env: { ...MOUNT, APPIMAGE: '' } }), 'manual');
+  });
+  test("another AppImage's APPIMAGE and APPDIR, passed on by e.g. its terminal, do not make this build an AppImage", () => {
+    const leaked = { APPIMAGE: '/home/u/Applications/Cursor.AppImage', APPDIR: '/tmp/.mount_Cursor' };
+    assert.equal(k({ env: leaked, execPath: '/opt/mqtt-scope/mqtt-scope' }), 'manual'); // tar.gz
+    assert.equal(k({ env: leaked, execPath: '/opt/mqtt-scope/mqtt-scope', exists: pacmanMarker }), 'pacman');
+    // Even an extracted AppImage of this app (AppRun next to it) started from there.
+    assert.equal(k({ env: leaked, execPath: '/home/u/squashfs-root/mqtt-scope', exists: (p) => p === '/home/u/squashfs-root/AppRun' }), 'manual');
+    // APPDIR only shares a prefix with the executable's folder.
+    assert.equal(k({ env: { ...leaked, APPDIR: '/tmp/.mount_MQTT' }, execPath: '/tmp/.mount_MQTTab/mqtt-scope' }), 'manual');
+  });
+  test('APPIMAGE without APPDIR (an extracted AppImage started directly): only next to its AppRun', () => {
+    const env = { APPIMAGE: '/a/MQTT.AppImage' };
+    const seen = [];
+    const exists = (p) => {
+      seen.push(p);
+      return p === '/x/squashfs-root/AppRun';
+    };
+    assert.equal(k({ env, execPath: '/x/squashfs-root/mqtt-scope', exists }), 'appimage');
+    assert.deepEqual(seen, ['/x/squashfs-root/AppRun']);
+    assert.equal(k({ env, execPath: '/opt/mqtt-scope/mqtt-scope' }), 'manual');
+  });
+  test('APPDIR is compared by its real path (the executable path is a real path)', () => {
+    const realpath = (p) => p.replace(/^\/link\//, '/real/');
+    const env = { APPIMAGE: '/a/MQTT.AppImage', APPDIR: '/link/appimage_extracted_1' };
+    assert.equal(k({ env, execPath: '/real/appimage_extracted_1/mqtt-scope', realpath }), 'appimage');
+    assert.equal(k({ env, execPath: '/real/appimage_extracted_1/mqtt-scope' }), 'manual');
   });
   test('pacman marker is only looked up under resourcesPath', () => {
     const seen = [];
@@ -152,7 +181,7 @@ describe('installKind', () => {
   });
   test('unpackaged is dev', () => {
     assert.equal(k({ isPackaged: false }), 'dev');
-    assert.equal(k({ isPackaged: false, env: { APPIMAGE: '/a' } }), 'dev');
+    assert.equal(k({ isPackaged: false, env: MOUNT }), 'dev');
   });
   test('MQTTSCOPE_UPDATE_URL makes an unpackaged build manual', () => {
     assert.equal(k({ isPackaged: false, env: { MQTTSCOPE_UPDATE_URL: 'http://127.0.0.1:1' } }), 'manual');

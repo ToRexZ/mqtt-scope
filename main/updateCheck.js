@@ -1,7 +1,7 @@
 'use strict';
 
 // Pure helpers for the update notice: version compare, release parsing, install kind.
-// No Electron or I/O here; callers inject `exists` and `env`.
+// No Electron or I/O here; callers inject `exists`, `realpath` and `env`.
 
 const path = require('node:path');
 
@@ -55,14 +55,27 @@ function pacmanCommand(version) {
   return `mkdir -p ${dir} && cd ${dir} && curl -fLO ${base}/PKGBUILD -fLO ${base}/mqtt-scope.desktop && makepkg -sic`;
 }
 
+// Whether the running executable belongs to the AppImage in APPIMAGE. AppImage
+// apps pass APPIMAGE and APPDIR on to everything they start (a terminal, say),
+// so APPIMAGE alone could name another app's file, which a self-update would
+// then replace. It counts only for an executable inside APPDIR or, without
+// APPDIR (an extracted AppImage started directly), next to its AppRun.
+function runsFromAppImage({ env, execPath, exists, realpath }) {
+  if (!env.APPIMAGE || !execPath) return false;
+  if (!env.APPDIR) return exists(path.join(path.dirname(execPath), 'AppRun'));
+  const rel = path.relative(realpath(env.APPDIR), realpath(execPath));
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
+
 // How this build was installed, which decides how (or whether) it can update.
-function installKind({ platform, env, isPackaged, resourcesPath, exists }) {
+// realpath resolves symlinks (execPath is a real path, APPDIR may not be).
+function installKind({ platform, env, isPackaged, resourcesPath, execPath, exists, realpath = (p) => p }) {
   const override = env.MQTTSCOPE_UPDATE_KIND;
   if (OVERRIDABLE_KINDS.has(override)) return override;
   if (!isPackaged) return env.MQTTSCOPE_UPDATE_URL ? 'manual' : 'dev';
   if (platform === 'win32') return env.PORTABLE_EXECUTABLE_DIR ? 'portable' : 'nsis';
   if (platform === 'linux') {
-    if (env.APPIMAGE) return 'appimage';
+    if (runsFromAppImage({ env, execPath, exists, realpath })) return 'appimage';
     if (exists(path.join(resourcesPath, 'pacman-package'))) return 'pacman';
   }
   return 'manual';

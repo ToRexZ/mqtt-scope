@@ -150,7 +150,22 @@ const updateChecksOn = () => stores.get('settings')?.checkForUpdates !== false;
 // (npm start, tests) are 'dev', whatever MQTTSCOPE_UPDATE_KIND says.
 function currentInstallKind() {
   if (!app.isPackaged && !process.env.MQTTSCOPE_UPDATE_URL) return 'dev';
-  return installKind({ platform: process.platform, env: process.env, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, exists: fs.existsSync });
+  const realpath = (p) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  return installKind({
+    platform: process.platform,
+    env: process.env,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    execPath: process.execPath,
+    exists: fs.existsSync,
+    realpath,
+  });
 }
 
 // The update notice. MQTTSCOPE_UPDATE_URL (tests, the release gate) stands in
