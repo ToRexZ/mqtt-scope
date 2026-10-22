@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { requireFromRoot } from './_util.mjs';
 
-const { createEngine } = requireFromRoot('./main/updateEngine.js');
+const { createEngine, spawnInWorker } = requireFromRoot('./main/updateEngine.js');
 
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
@@ -347,15 +347,11 @@ describe('electron-updater engine', () => {
 
   // quitAndInstall(isSilent, isForceRunAfter): a silent install runs the new
   // version if isForceRunAfter, one with its window if autoRunAppAfterInstall.
-  test('install quits and relaunches the new version: the Windows installer with its window, the AppImage silently', () => {
-    for (const [kind, call] of [
-      ['nsis', ['quitAndInstall', false, true]],
-      ['appimage', ['quitAndInstall', true, true]],
-    ]) {
-      const { engine, updater } = realEngine({ kind });
-      engine.quitAndInstall();
-      assert.deepEqual(updater.calls.at(-1), call, kind);
-    }
+  // (The Windows installer's restart is below, against the real NsisUpdater.)
+  test('Restart to update on the AppImage quits, installs silently and relaunches, as before', () => {
+    const { engine, updater } = realEngine({ kind: 'appimage' });
+    engine.quitAndInstall();
+    assert.deepEqual(updater.calls.at(-1), ['quitAndInstall', true, true]);
   });
 
   test("an install under a new file name (electron-updater's appimage-filename-updated) is passed to onRenamed", async () => {
@@ -512,9 +508,10 @@ describe('electron-updater engine with the real electron-updater', () => {
 });
 
 // electron-updater's Windows updater, with a downloaded installer and a
-// stand-in for starting it. build/installer.nsh relies on these arguments:
-// --updated without /S shows the progress and skips the questions, and
-// --force-run then starts the new version and closes the installer.
+// stand-in for starting it on the main thread (its spawnLog). build/installer.nsh
+// relies on these arguments: --updated without /S shows the progress and skips
+// the questions, and --force-run then starts the new version and closes the
+// installer.
 function realNsisUpdater(t) {
   const { NsisUpdater } = requireFromRoot('electron-updater/out/NsisUpdater');
   const dir = mkdtempSync(path.join(tmpdir(), 'mqttscope-nsis-'));
@@ -545,38 +542,221 @@ function realNsisUpdater(t) {
     started.push([cmd, ...args]);
     return true;
   };
-  // After starting the installer, quitAndInstall announces the quit through
+  // Starting the installer, electron-updater announces the quit through
   // Electron's own autoUpdater, which plain Node does not have: stand in for
   // the electron module while the test runs.
+  const announced = [];
+  const autoUpdater = new EventEmitter();
+  autoUpdater.on('before-quit-for-update', () => announced.push(app.quits));
+  // Electron's app, for its before-quit: askQuit() is what app.quit() starts
+  // with, and returns whether a listener held it off.
+  const electronApp = new EventEmitter();
+  const askQuit = () => {
+    let held = false;
+    electronApp.emit('before-quit', { preventDefault: () => (held = true) });
+    return held;
+  };
   const electronId = requireFromRoot.resolve('electron');
   const saved = requireFromRoot.cache[electronId];
-  requireFromRoot.cache[electronId] = { id: electronId, filename: electronId, loaded: true, exports: { autoUpdater: new EventEmitter() } };
+  requireFromRoot.cache[electronId] = { id: electronId, filename: electronId, loaded: true, exports: { autoUpdater, app: electronApp } };
   t.after(() => {
     if (saved) requireFromRoot.cache[electronId] = saved;
     else delete requireFromRoot.cache[electronId];
   });
-  return { updater, app, installer, started };
+  return { updater, app, installer, started, announced, dir, askQuit };
 }
 
+// Stands in for spawnInWorker: records each start and holds it until the test
+// settles it (resolve(pid) or reject(err)).
+function fakeWorkerSpawn() {
+  const calls = [];
+  const spawn = (cmd, args, opts) => {
+    const d = deferred();
+    calls.push({ cmd, args, opts, ...d });
+    return d.promise;
+  };
+  return { spawn, calls };
+}
+
+const nsisEngine = (updater, spawnDetached, log = fakeLog()) =>
+  createEngine({ kind: 'nsis', feedUrl: null, log, env: {}, loadUpdater: () => updater, spawnDetached });
+
 describe('the Windows installer as the real electron-updater runs it', () => {
-  test('Restart to update runs it with its window and has it start the new version; then the app quits', async (t) => {
-    const { updater, app, installer, started } = realNsisUpdater(t);
-    const engine = createEngine({ kind: 'nsis', feedUrl: null, log: fakeLog(), env: {}, loadUpdater: () => updater });
-    engine.quitAndInstall();
-    assert.deepEqual(started, [[installer, '--updated', '--force-run']]);
-    assert.equal(app.quits, 0, 'quits on the next turn');
+  // The window stays responsive while the installer starts, so the user can
+  // quit (or close the last window) meanwhile.
+  test('a quit asked for while the installer starts waits for it; then the app quits once', async (t) => {
+    const { updater, app, askQuit } = realNsisUpdater(t);
+    const workers = fakeWorkerSpawn();
+    const done = nsisEngine(updater, workers.spawn).quitAndInstall();
+    assert.equal(askQuit(), true, 'held off');
+    workers.calls[0].resolve(1);
+    await done;
+    await flush();
+    assert.equal(app.quits, 1);
+    assert.equal(askQuit(), false, 'no longer held');
+  });
+
+  test('a quit asked for while the installer failed to start happens then, so the update installs on that quit', async (t) => {
+    const { updater, app, askQuit } = realNsisUpdater(t);
+    const workers = fakeWorkerSpawn();
+    const done = nsisEngine(updater, workers.spawn).quitAndInstall();
+    assert.equal(askQuit(), true);
+    workers.calls[0].reject(Object.assign(new Error('spawn EPERM'), { code: 'EPERM' }));
+    await assert.rejects(done);
+    await flush();
+    assert.equal(app.quits, 1);
+    assert.equal(updater.quitAndInstallCalled, false, 'so install on quit runs');
+  });
+
+  test('without a quit asked for, a failed start leaves the app running', async (t) => {
+    const { updater, app } = realNsisUpdater(t);
+    const workers = fakeWorkerSpawn();
+    const done = nsisEngine(updater, workers.spawn).quitAndInstall();
+    workers.calls[0].reject(Object.assign(new Error('spawn EPERM'), { code: 'EPERM' }));
+    await assert.rejects(done);
+    await flush();
+    assert.equal(app.quits, 0);
+  });
+
+  // Starting the unsigned installer blocked the main process for 5-15 s on
+  // Windows (child_process.spawn), so a restart starts it in a worker thread.
+  test('Restart to update starts it off the main thread, with its window and --force-run; the app quits once it started', async (t) => {
+    const { updater, app, installer, started, announced } = realNsisUpdater(t);
+    const workers = fakeWorkerSpawn();
+    const done = nsisEngine(updater, workers.spawn).quitAndInstall();
+    assert.ok(done instanceof Promise);
+    assert.deepEqual(
+      workers.calls.map((c) => [c.cmd, ...c.args]),
+      [[installer, '--updated', '--force-run']],
+    );
+    assert.deepEqual(workers.calls[0].opts, { env: undefined, stdio: 'ignore' }, "spawnLog's own defaults");
+    assert.deepEqual(started, [], 'nothing started on the main thread');
+    await flush();
+    assert.equal(app.quits, 0, 'not before the installer runs');
+    workers.calls[0].resolve(4242);
+    await done;
+    assert.equal(app.quits, 0, 'quits on the next turn, as quitAndInstall does');
+    await flush();
+    assert.equal(app.quits, 1);
+    assert.deepEqual(announced, [0], "Electron's before-quit-for-update, before the quit");
+  });
+
+  test('a failed start is thrown and nothing quits; a retry starts it again', async (t) => {
+    const { updater, app, installer } = realNsisUpdater(t);
+    const workers = fakeWorkerSpawn();
+    const engine = nsisEngine(updater, workers.spawn);
+    const first = engine.quitAndInstall();
+    workers.calls[0].reject(Object.assign(new Error('spawn EPERM'), { code: 'EPERM' }));
+    await assert.rejects(first, { message: 'spawn EPERM' });
+    await flush();
+    assert.equal(app.quits, 0);
+    assert.equal(updater.quitAndInstallCalled, false, 'electron-updater would ignore a second install');
+
+    const second = engine.quitAndInstall();
+    assert.deepEqual(
+      workers.calls.map((c) => [c.cmd, ...c.args]),
+      [
+        [installer, '--updated', '--force-run'],
+        [installer, '--updated', '--force-run'],
+      ],
+    );
+    workers.calls[1].resolve(1);
+    await second;
     await flush();
     assert.equal(app.quits, 1);
   });
 
-  test('a downloaded update installs silently on quit and does not start the new version', async (t) => {
+  test("Windows refusing it (EACCES) falls back to electron-updater's elevate.exe, also off the main thread", async (t) => {
+    const { updater, app, installer, started, dir } = realNsisUpdater(t);
+    const savedResources = process.resourcesPath;
+    process.resourcesPath = dir;
+    t.after(() => {
+      process.resourcesPath = savedResources;
+    });
+    const workers = fakeWorkerSpawn();
+    const done = nsisEngine(updater, workers.spawn).quitAndInstall();
+    workers.calls[0].reject(Object.assign(new Error('spawn EACCES'), { code: 'EACCES' }));
+    for (let i = 0; i < 5 && workers.calls.length < 2; i++) await flush();
+    assert.deepEqual(
+      workers.calls.map((c) => [c.cmd, ...c.args]),
+      [
+        [installer, '--updated', '--force-run'],
+        [path.join(dir, 'elevate.exe'), installer, '--updated', '--force-run'],
+      ],
+    );
+    assert.equal(app.quits, 0);
+    workers.calls[1].resolve(7);
+    await done;
+    await flush();
+    assert.equal(app.quits, 1);
+    assert.deepEqual(started, []);
+  });
+
+  test('a downloaded update installs silently on quit, on the main thread (a worker would die with the app)', async (t) => {
     const { updater, app, installer, started } = realNsisUpdater(t);
     updater.checkForUpdates = async () => ({ isUpdateAvailable: true, updateInfo: { version: '0.3.1' } });
     updater.downloadUpdate = async () => [installer];
-    const engine = createEngine({ kind: 'nsis', feedUrl: null, log: fakeLog(), env: {}, loadUpdater: () => updater });
-    await engine.download(() => {});
+    const workers = fakeWorkerSpawn();
+    await nsisEngine(updater, workers.spawn).download(() => {});
     updater.addQuitHandler(); // what electron-updater does once a download completes
     app.quitHandler(0);
     assert.deepEqual(started, [[installer, '--updated', '/S']]);
+    assert.deepEqual(workers.calls, []);
+  });
+
+  test('after a failed restart, quitting still installs silently on the main thread', async (t) => {
+    const { updater, app, installer, started } = realNsisUpdater(t);
+    updater.checkForUpdates = async () => ({ isUpdateAvailable: true, updateInfo: { version: '0.3.1' } });
+    updater.downloadUpdate = async () => [installer];
+    const workers = fakeWorkerSpawn();
+    const engine = nsisEngine(updater, workers.spawn);
+    await engine.download(() => {});
+    updater.addQuitHandler();
+    const restart = engine.quitAndInstall();
+    workers.calls[0].reject(Object.assign(new Error('spawn EPERM'), { code: 'EPERM' }));
+    await assert.rejects(restart);
+    app.quitHandler(0);
+    assert.deepEqual(started, [[installer, '--updated', '/S']]);
+    assert.equal(workers.calls.length, 1);
+  });
+});
+
+describe('spawnInWorker (a detached start off the main thread)', () => {
+  test('starts the program from a worker thread and resolves its pid; the main thread does not spawn', async (t) => {
+    const childProcess = requireFromRoot('node:child_process');
+    t.mock.method(childProcess, 'spawn', () => assert.fail('spawned on the main thread'));
+    const pid = await spawnInWorker(process.execPath, ['-e', ''], { env: undefined, stdio: 'ignore' });
+    assert.equal(typeof pid, 'number');
+    assert.ok(pid > 0);
+  });
+
+  test('a program that cannot be started rejects with its error code', async () => {
+    await assert.rejects(spawnInWorker(path.join(tmpdir(), 'mqttscope-no-such-program'), [], {}), { code: 'ENOENT' });
+  });
+
+  test('no answer within the timeout rejects', async () => {
+    class SilentWorker extends EventEmitter {
+      unref() {}
+    }
+    await assert.rejects(spawnInWorker('setup.exe', [], { timeoutMs: 20, Worker: SilentWorker }), { message: 'The installer did not start within 0.02 s' });
+  });
+
+  test('a worker that fails or ends without an answer rejects', async () => {
+    class FailingWorker extends EventEmitter {
+      constructor() {
+        super();
+        setImmediate(() => this.emit('error', new Error('worker broke')));
+      }
+      unref() {}
+    }
+    await assert.rejects(spawnInWorker('setup.exe', [], { Worker: FailingWorker }), { message: 'worker broke' });
+    class QuietExit extends EventEmitter {
+      constructor() {
+        super();
+        setImmediate(() => this.emit('exit', 1));
+      }
+      unref() {}
+    }
+    await assert.rejects(spawnInWorker('setup.exe', [], { Worker: QuietExit }), { message: 'The installer could not be started (its worker thread exited with code 1)' });
   });
 });

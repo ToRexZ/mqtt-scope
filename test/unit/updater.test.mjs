@@ -560,13 +560,15 @@ describe('download', () => {
   });
 });
 
+// restart() answers once the install it starts has been asked for.
+const restartedLater = (u, w, opts) => {
+  const answer = u.restart(opts);
+  fire(w);
+  return answer;
+};
+
 describe('restart', () => {
-  // restart() answers once the install it starts has been asked for.
-  const restarted = (u, w, opts) => {
-    const answer = u.restart(opts);
-    fire(w);
-    return answer;
-  };
+  const restarted = restartedLater;
 
   test('restart asks to confirm while connected, force installs', async () => {
     const { u, w, engine } = await readyToInstall();
@@ -711,6 +713,38 @@ describe('restart', () => {
     assert.equal(w.events.length, during);
     assert.equal(u.state.status, 'installing');
     assert.equal(u.state.latest.version, '0.3.1');
+  });
+
+  // The Windows installer starts in the background (main/updateEngine.js):
+  // quitAndInstall() then returns a promise.
+  test('an install that starts in the background: installing until it settles; a failure is an error, and Retry works', async () => {
+    const { u, w, engine } = await readyToInstall();
+    let pending = deferred();
+    engine.quitAndInstall = () => {
+      engine.installs++;
+      return pending.promise;
+    };
+    let answer = null;
+    restartedLater(u, w).then((a) => (answer = a));
+    await flush();
+    assert.equal(engine.installs, 1);
+    assert.equal(answer, null, 'answers once the install started');
+    assert.equal(u.state.status, 'installing');
+    pending.reject(new Error('The installer did not start within 60 s'));
+    await flush();
+    assert.deepEqual(answer, { ok: false });
+    assert.equal(u.state.status, 'error');
+    assert.equal(u.state.error, 'The installer did not start within 60 s');
+
+    const p = u.download();
+    engine.pending.resolve();
+    await p;
+    pending = deferred();
+    const retry = restartedLater(u, w);
+    pending.resolve();
+    assert.deepEqual(await retry, { ok: true });
+    assert.equal(engine.installs, 2);
+    assert.equal(u.state.status, 'installing');
   });
 
   test('a listener that throws on "installing" is logged and cannot stop the install', async () => {

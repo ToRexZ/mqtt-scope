@@ -1,5 +1,7 @@
 // Launches the packaged app (dist/*-unpacked) headless, connects it to an
-// in-process broker and checks a message arrives. Run after `npm run dist:*`.
+// in-process broker and checks a message arrives, and that it can start a
+// program from a worker thread, as Restart to update starts the Windows
+// installer (main/updateEngine.js). Run after `npm run dist:*`.
 //
 //   node scripts/verify-package.mjs [path/to/executable]
 
@@ -43,8 +45,14 @@ try {
   await page.waitForFunction(() => window.__mqttscope.status.state === 'connected', null, { timeout: 15000 });
   await broker.publish('verify/package', '{"ok":true}', { retain: true });
   await page.waitForFunction(() => !!window.__mqttscope.tree.find('verify/package'), null, { timeout: 15000 });
+  // From the packaged code (asar, fuses), with a harmless program for the installer.
+  const pid = await app.evaluate(async (_electron, isWindows) => {
+    const { spawnInWorker } = process.mainModule.require('./updateEngine.js');
+    return isWindows ? spawnInWorker(process.env.ComSpec || 'cmd.exe', ['/d', '/c', 'exit 0']) : spawnInWorker('/bin/sh', ['-c', 'exit 0']);
+  }, process.platform === 'win32');
+  if (!(pid > 0)) throw new Error(`Starting a program from a worker thread gave pid ${pid}`);
   if (errors.length) throw new Error(`Renderer errors: ${errors.join('\n')}`);
-  console.log(`OK: ${exe} connected and received a message (v${await app.evaluate(({ app: electronApp }) => electronApp.getVersion())})`);
+  console.log(`OK: ${exe} connected, received a message and started a program from a worker thread (v${await app.evaluate(({ app: electronApp }) => electronApp.getVersion())})`);
 } finally {
   await app.close();
   await broker.close();

@@ -27,8 +27,10 @@ const messageOf = (err) => err?.message || String(err);
 
 class Updater extends EventEmitter {
   // fetchRelease(): Promise<GitHub release JSON>; it must settle (callers give it a timeout).
-  // engine: { download(onProgress(percent)): Promise<void>, quitAndInstall(): void } | null;
-  // download() must settle too, or the state stays 'downloading'.
+  // engine: { download(onProgress(percent)): Promise<void>, quitAndInstall(): void | Promise<void> } | null;
+  // download() must settle too, or the state stays 'downloading'. quitAndInstall()
+  // returns (or resolves) once the install has started, and throws (or rejects)
+  // if it could not start.
   // store: { get(): { skipped?: string } | null, set(obj) }.
   // later(fn, ms): runs fn once after ms (a setTimeout; injectable for tests).
   constructor({ currentVersion, kind, fetchRelease, engine = null, store, isEnabled, connectedCount, log, later = (fn, ms) => setTimeout(fn, ms) }) {
@@ -143,9 +145,9 @@ class Updater extends EventEmitter {
     return this._installing;
   }
 
-  _install() {
+  async _install() {
     try {
-      this._engine.quitAndInstall();
+      await this._engine.quitAndInstall();
     } catch (err) {
       this._installing = null;
       this._log.warn('update', `install failed: ${messageOf(err)}`);
