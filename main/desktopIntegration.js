@@ -153,12 +153,13 @@ function writeAtomic(file, data) {
   }
 }
 
-function integrateDesktop({ kind, isPackaged, log, platform = process.platform, env = process.env, home = os.homedir(), execPath = process.execPath }) {
+function integrateDesktop({ kind, isPackaged, log, platform = process.platform, env = process.env, home, execPath = process.execPath }) {
   const appImage = env.APPIMAGE;
   if (!shouldIntegrate({ kind, platform, isPackaged, appImage })) return;
   try {
     const appDir = path.resolve(env.APPDIR || path.dirname(execPath));
-    const where = locations({ env, home, appDir });
+    const where = locations({ env, home: home ?? os.homedir(), appDir });
+    if (!path.isAbsolute(where.dataHome)) throw new Error('no home folder');
     const result = plan({
       entryFile: where.entry,
       entry: desktopEntry({ appImage }),

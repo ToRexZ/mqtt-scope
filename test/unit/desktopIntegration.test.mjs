@@ -388,6 +388,19 @@ describe('integrateDesktop (files)', () => {
     assert.equal(logs[0][1], 'desktop');
   });
 
+  test('no home folder and no XDG_DATA_HOME: a warning, nothing written relative to the working folder', () => {
+    const cwd = process.cwd();
+    process.chdir(root);
+    try {
+      assert.doesNotThrow(() => run({ home: '', env: { APPIMAGE: path.join(root, 'A.AppImage'), APPDIR: appDir, XDG_DATA_DIRS: sysDir } }));
+    } finally {
+      process.chdir(cwd);
+    }
+    assert.equal(fs.existsSync(path.join(root, '.local')), false);
+    assert.equal(logs.length, 1);
+    assert.equal(logs[0][0], 'warn');
+  });
+
   test('other builds and unpackaged runs touch nothing', () => {
     for (const over of [{ kind: 'pacman' }, { kind: 'manual' }, { isPackaged: false }, { platform: 'win32' }]) run(over);
     run({ env: { APPIMAGE: '', APPDIR: appDir, XDG_DATA_HOME: dataHome } });
