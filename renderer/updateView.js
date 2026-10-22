@@ -96,8 +96,10 @@ export function installingView(state) {
 }
 
 // What a window does with the answer to Help → Check for Updates…:
-// { toast, kind } to show, { open: true } for the panel, or null.
+// { toast, kind } to show, { open: true } for the panel, or null. Nothing
+// while an update installs, so nothing takes focus from the Installing dialog.
 export function checkedView(checked, state) {
+  if (state?.status === 'installing') return null;
   switch (checked?.result) {
     case 'available':
       return { open: true };

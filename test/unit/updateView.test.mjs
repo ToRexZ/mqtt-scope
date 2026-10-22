@@ -231,6 +231,12 @@ describe('checkedView (Help → Check for Updates…)', () => {
     assert.deepEqual(checkedView({ result: 'available', version: '0.3.1' }, state()), { open: true });
   });
 
+  test('nothing while an update installs: nothing may take focus from the Installing dialog', () => {
+    for (const result of ['available', 'latest', 'error', 'disabled']) {
+      assert.equal(checkedView({ result, version: '0.3.1', error: 'x' }, state({ status: 'installing' })), null, result);
+    }
+  });
+
   test('anything else is ignored', () => {
     for (const r of [null, undefined, {}, { result: 'what' }, 'latest']) assert.equal(checkedView(r, state()), null, JSON.stringify(r));
   });

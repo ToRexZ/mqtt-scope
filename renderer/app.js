@@ -333,6 +333,7 @@ api.onFlush(async () => {
 });
 
 api.onMenu((action) => {
+  if (updates.installing()) return; // nothing opens over the Installing dialog
   if (document.querySelector('.modal-overlay') && action !== 'connections') return;
   ACTION_HANDLERS[action]?.();
 });
@@ -375,7 +376,7 @@ $('#btn-pause').addEventListener('click', () => {
 });
 $('#btn-clear').addEventListener('click', clearTree);
 $('#btn-settings').addEventListener('click', () => showSettings());
-initUpdateButton(api, $('#btn-update'));
+const updates = initUpdateButton(api, $('#btn-update'));
 
 async function showSettings(tab) {
   const next = await openSettings(api, settings, { tab });
@@ -503,7 +504,7 @@ splitter($('#split-right'), {
   const [saved] = await Promise.all([api.storeGet('settings').catch(() => null), connections.load(), publisher.load(), plots.load()]);
   applySettings(normalizeSettings(saved));
   const s = await api.status();
-  if (s.state === 'disconnected') connections.open();
+  if (s.state === 'disconnected' && !updates.installing()) connections.open();
 })();
 
 // Exposed for end-to-end tests and debugging from DevTools.

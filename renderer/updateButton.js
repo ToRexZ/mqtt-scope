@@ -11,6 +11,8 @@ const PANEL_ID = 'update-panel';
 const MARGIN = 8; // px kept clear of the window's edges
 const GAP = 6; // px between the button and the panel
 
+// Returns { installing() }: whether the Installing dialog shows, so the window
+// opens nothing over it.
 export function initUpdateButton(api, buttonEl) {
   let state = null;
   let confirm = null; // brokers a restart disconnects, while the panel asks about it
@@ -227,6 +229,7 @@ export function initUpdateButton(api, buttonEl) {
   // Listen first, then read, so no change falls in between (see preload.js).
   api.onUpdateState(apply);
   api.updateState().then(apply, () => {});
+  return { installing: installing.isOpen };
 }
 
 // The Installing dialog: modal, above everything including the panel, with an
@@ -285,5 +288,5 @@ function installingDialog(fallbackFocus) {
     returnTo = null;
     if (hadFocus) back?.focus();
   }
-  return { render };
+  return { render, isOpen: () => overlay.isConnected };
 }

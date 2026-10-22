@@ -684,13 +684,58 @@ test('Restart to update: every window shows the Installing dialog, its bar movin
 
   await expect.poll(() => installed(app)).toBe(true);
   // The real app now quits; this one stays, and so does the dialog, also in a
-  // window opened now. Keys stay in it.
+  // window opened now (without its connection dialog). Keys stay in it.
   const third = await newWindow(app);
   await expect(installingDialog(third)).toBeVisible();
+  await expect(installingDialog(third)).toBeFocused();
+  await expect(third.locator('.conn-dialog')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Tab');
   for (const p of [page, second]) await expect(installingDialog(p)).toBeVisible();
   await expect(installingDialog(page)).toBeFocused();
+
+  // Nothing opens over it or takes its focus: neither Connections… (the menu
+  // action allowed over other dialogs) nor Help → Check for Updates….
+  await clickMenu(app, 'File', 'Connections…');
+  await checkForUpdates(app);
+  await expect.poll(() => server.requests()).toBe(2);
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
+  await expect(page.locator('.conn-dialog')).toHaveCount(0);
+  await expect(panel(page)).toBeHidden();
+  await expect(toast(page)).toHaveCount(0);
+  await expect(installingDialog(page)).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
+// The main process can be busy while the dialog shows (it was blocked for
+// seconds starting the Windows installer, before that moved to a worker): the
+// bar is a compositor animation and keeps moving regardless.
+test('the Installing dialog keeps moving while the main process is busy', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const { app, page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
+  await closeConnectionDialog(page);
+  await page.evaluate(() => window.api.updateDownload());
+  await expect(updateButton(page)).toHaveText('Restart to update');
+  await updateButton(page).click();
+  await expect(installingDialog(page)).toBeVisible();
+  await page.evaluate(() => {
+    const fill = document.querySelector('.installing-overlay .installing-bar-fill');
+    window.__frames = [];
+    const frame = () => {
+      window.__frames.push({ at: Date.now(), transform: getComputedStyle(fill).transform });
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame(frame);
+  });
+  const busy = await app.evaluate(() => {
+    const start = Date.now();
+    while (Date.now() - start < 1500); // the main process does nothing else meanwhile
+    return { start, end: Date.now() };
+  });
+  const frames = await page.evaluate(() => window.__frames);
+  const during = frames.filter((f) => f.at > busy.start + 100 && f.at < busy.end - 100);
+  expect(during.length, `frames while main was busy (of ${frames.length})`).toBeGreaterThan(10);
+  expect(new Set(during.map((f) => f.transform)).size).toBeGreaterThan(5);
   expect(errors).toEqual([]);
 });
 
