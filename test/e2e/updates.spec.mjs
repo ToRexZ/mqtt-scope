@@ -8,6 +8,7 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { test, expect, makeUserData, toast, clipboard, waitForFile } from './fixtures.mjs';
 
 const { pacmanCommand } = createRequire(import.meta.url)('../../main/updateCheck.js');
@@ -740,19 +741,42 @@ test('the Installing dialog keeps moving while the main process is busy', async 
 });
 
 // The Windows installer starts the new version with --updated; by then the
-// user may have clicked elsewhere, and Windows would open it behind.
+// user may have clicked elsewhere, and Windows would open it behind. Unlike
+// the other tests, the window is shown when it is created, as in a real start
+// (not MQTTSCOPE_HIDDEN; still headless). A probe preloaded into the main
+// process records the toggle, which is over before a test could look, and
+// withholds 'ready-to-show' from shown windows, as some machines do.
+const ALWAYS_ON_TOP_PROBE = fileURLToPath(new URL('../helpers/alwaysOnTopProbe.cjs', import.meta.url));
+const shown = (args = []) => ({ env: { MQTTSCOPE_HIDDEN: '' }, args, preload: [ALWAYS_ON_TOP_PROBE] });
+const allLoaded = (app) => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().every((w) => !w.webContents.isLoading()));
+
 test('started after an update (--updated), the first window comes to the front, once', async ({ env }) => {
   const line = / INFO update started after an update: bringing the window to the front$/gm;
   const logged = (userData) => readFileSync(path.join(userData, 'logs', 'main.log'), 'utf8').match(line)?.length ?? 0;
-  const { app, userData, errors } = await env.launch({ args: ['--updated'] });
+  const { app, userData, errors } = await env.launch(shown(['--updated']));
+  const toggles = () => app.evaluate(() => globalThis.__alwaysOnTop);
+  const [first] = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.id));
   await expect.poll(() => logged(userData)).toBe(1);
+  // Above the others for a moment, shown, then back to a normal window.
+  await expect.poll(toggles).toEqual([
+    { id: first, set: true, visible: true },
+    { id: first, set: false, visible: true },
+  ]);
+
+  // Later windows are left alone: a new one, and one a second launch opens.
   await newWindow(app);
-  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.isAlwaysOnTop()))).toEqual([false, false]);
+  await app.evaluate(({ app: a }) => void a.emit('second-instance', {}, ['MQTT Scope', '--updated'], process.cwd(), {}));
+  await expect.poll(() => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(3);
+  await expect.poll(() => allLoaded(app)).toBe(true);
+  expect(await toggles()).toHaveLength(2);
   expect(logged(userData)).toBe(1);
   expect(errors).toEqual([]);
 
-  const plain = await env.launch({});
+  // A start without --updated leaves its window alone.
+  const plain = await env.launch(shown());
   await newWindow(plain.app);
+  await expect.poll(() => allLoaded(plain.app)).toBe(true);
+  expect(await plain.app.evaluate(() => globalThis.__alwaysOnTop)).toEqual([]);
   expect(logged(plain.userData)).toBe(0);
 });
 

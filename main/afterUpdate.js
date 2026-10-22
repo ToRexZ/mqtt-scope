@@ -17,9 +17,12 @@ function bringToFront(win) {
 }
 
 // win: the first main window. Returns whether this start came from an update.
+// Once its page has loaded: not on 'ready-to-show', which Electron sends a
+// window shown when it was created (as main.js makes them) only from its first
+// paint, unreliably (electron#25448).
 function frontAfterUpdate({ argv, win, log }) {
   if (!argv.includes('--updated')) return false;
-  win.once('ready-to-show', () => {
+  win.webContents.once('did-finish-load', () => {
     if (win.isDestroyed()) return;
     log.info('update', 'started after an update: bringing the window to the front');
     bringToFront(win);

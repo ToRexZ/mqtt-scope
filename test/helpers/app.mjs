@@ -38,10 +38,11 @@ const inheritedEnv = () => Object.fromEntries(Object.entries(process.env).filter
 // Returns { app, page, userData, errors }. `errors` collects renderer
 // exceptions and console errors so tests can assert there were none.
 // `env` adds or overrides environment variables for the app; `args` are extra
-// command-line arguments.
-export async function launchApp({ userData = makeUserData(), headless = !process.env.MQTTSCOPE_E2E_HEADED, env = {}, args = [] } = {}) {
+// command-line arguments; `preload` are modules the main process loads before
+// main.js (electron -r).
+export async function launchApp({ userData = makeUserData(), headless = !process.env.MQTTSCOPE_E2E_HEADED, env = {}, args = [], preload = [] } = {}) {
   const app = await electron.launch({
-    args: [appDir, ...(headless ? ['--ozone-platform=headless'] : []), ...args],
+    args: [...preload.flatMap((m) => ['-r', m]), appDir, ...(headless ? ['--ozone-platform=headless'] : []), ...args],
     env: { ...inheritedEnv(), MQTTSCOPE_USER_DATA: userData, MQTTSCOPE_HIDDEN: headless ? '1' : '', ...env },
   });
   const page = await app.firstWindow();
