@@ -42,6 +42,10 @@
     Function finishPageUnlessUpdated
       ${if} ${isUpdated}
       ${andIf} ${isForceRun}
+        # Windows lets only the foreground process hand on the right to come
+        # to the front (ASFW_ANY): the new version, started through the shell,
+        # may then take it (main/afterUpdate.js also tries).
+        System::Call 'user32::AllowSetForegroundWindow(i -1) i'
         # otherwise the app's window opens behind the installer's
         HideWindow
         Call StartApp

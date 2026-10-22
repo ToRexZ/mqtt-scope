@@ -11,6 +11,7 @@ const { createEngine } = require('./updateEngine');
 const { releaseUrl, createFetchRelease } = require('./fetchRelease');
 const { installKind, releasePageUrl } = require('./updateCheck');
 const { integrateDesktop } = require('./desktopIntegration');
+const { frontAfterUpdate } = require('./afterUpdate');
 const log = require('./log');
 
 // Lets tests (and portable installs) keep their data in a chosen directory.
@@ -485,7 +486,8 @@ function start() {
   integrateDesktop({ kind, isPackaged: app.isPackaged, log });
   updater = createUpdater(kind);
   registerIpc();
-  createMainWindow();
+  // Started by the Windows installer after Restart to update: that window comes to the front.
+  frontAfterUpdate({ argv: process.argv, win: createMainWindow(), log });
   updater.start();
   // No check starts while the app shuts down.
   app.on('will-quit', () => updater.stop());

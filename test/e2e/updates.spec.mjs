@@ -694,6 +694,23 @@ test('Restart to update: every window shows the Installing dialog, its bar movin
   expect(errors).toEqual([]);
 });
 
+// The Windows installer starts the new version with --updated; by then the
+// user may have clicked elsewhere, and Windows would open it behind.
+test('started after an update (--updated), the first window comes to the front, once', async ({ env }) => {
+  const line = / INFO update started after an update: bringing the window to the front$/gm;
+  const logged = (userData) => readFileSync(path.join(userData, 'logs', 'main.log'), 'utf8').match(line)?.length ?? 0;
+  const { app, userData, errors } = await env.launch({ args: ['--updated'] });
+  await expect.poll(() => logged(userData)).toBe(1);
+  await newWindow(app);
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().map((w) => w.isAlwaysOnTop()))).toEqual([false, false]);
+  expect(logged(userData)).toBe(1);
+  expect(errors).toEqual([]);
+
+  const plain = await env.launch({});
+  await newWindow(plain.app);
+  expect(logged(plain.userData)).toBe(0);
+});
+
 test('AppImage: the Installing dialog says the app restarts', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9'));
   const { page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
