@@ -4,7 +4,7 @@
 // that show it. A local release server stands in for GitHub
 // (MQTTSCOPE_UPDATE_URL); nothing here touches the network.
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { test, expect, makeUserData, toast, clipboard, waitForFile } from './fixtures.mjs';
@@ -94,7 +94,9 @@ test('unpackaged run with only MQTTSCOPE_UPDATE_KIND set never contacts anything
 
 // The AppImage's menu entry (main/desktopIntegration.js) is for packaged
 // builds only: these tests never write into a home folder. (No system data
-// dirs, so an installed MQTT Scope cannot be why nothing is written.)
+// dirs, so an installed MQTT Scope cannot be why nothing is written.) The
+// data folder itself may appear: without a ~/.pki, Chromium keeps its NSS
+// database in $XDG_DATA_HOME/pki/nssdb (as on a fresh CI runner).
 test('unpackaged run reported as an AppImage adds no menu entry', async ({ env }) => {
   const server = await env.releaseServer(release(VERSION));
   const userData = makeUserData();
@@ -102,7 +104,9 @@ test('unpackaged run reported as an AppImage adds no menu entry', async ({ env }
   const appImage = { APPIMAGE: '/nowhere/MQTT-Scope.AppImage', XDG_DATA_HOME: dataHome, XDG_DATA_DIRS: path.join(userData, 'none') };
   const { page } = await env.launch({ userData, env: overrides(server, { MQTTSCOPE_UPDATE_KIND: 'appimage', ...appImage }) });
   expect((await updateState(page)).kind).toBe('appimage');
-  expect(existsSync(dataHome)).toBe(false);
+  const found = existsSync(dataHome) ? readdirSync(dataHome, { recursive: true }).map((f) => f.split(path.sep).join('/')) : [];
+  const ours = found.filter((f) => /^(applications|icons)(\/|$)/.test(f));
+  expect(ours, `share/ holds: ${found.join(', ') || 'nothing'}`).toEqual([]);
 });
 
 test('override: startup check finds a newer release and every window gets it', async ({ env }) => {
