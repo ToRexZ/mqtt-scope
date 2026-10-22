@@ -6,7 +6,7 @@
 import { test, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { requireFromRoot } from './_util.mjs';
@@ -349,6 +349,28 @@ describe('electron-updater engine', () => {
     assert.deepEqual(updater.calls.at(-1), ['quitAndInstall', true, true]);
   });
 
+  test("an install under a new file name (electron-updater's appimage-filename-updated) is passed to onRenamed", async () => {
+    const renamed = [];
+    const { engine, updater } = realEngine({ onRenamed: (file) => renamed.push(file) });
+    const done = engine.download(() => {});
+    await untilDownloading(updater);
+    updater.pending.resolve([]);
+    await done;
+    updater.emit('appimage-filename-updated', '/a/MQTT-Scope-9.9.9-linux-x86_64.AppImage');
+    assert.deepEqual(renamed, ['/a/MQTT-Scope-9.9.9-linux-x86_64.AppImage']);
+  });
+
+  test('an onRenamed that throws is logged, never thrown into the install', () => {
+    const { engine, updater, log } = realEngine({
+      onRenamed: () => {
+        throw new Error('disk full');
+      },
+    });
+    engine.quitAndInstall();
+    assert.doesNotThrow(() => updater.emit('appimage-filename-updated', '/a/MQTT-Scope-9.9.9-linux-x86_64.AppImage'));
+    assert.deepEqual(log.lines, [['warn', 'update', 'after installing as /a/MQTT-Scope-9.9.9-linux-x86_64.AppImage: disk full']]);
+  });
+
   test('an install that fails (reported as an event) throws, and leaves no listener behind', () => {
     const { engine, updater } = realEngine();
     const before = updater.listeners_();
@@ -428,6 +450,40 @@ describe('electron-updater engine with the real electron-updater', () => {
     assert.match(savedId(), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     assert.notEqual(savedId(), NIL_UUID);
     assert.ok(requests.some((r) => r.headers['x-user-staging-id'] === savedId()));
+  });
+
+  // doInstall as Restart to update (isForceRunAfter) and install on quit call
+  // it, with the downloaded update in cache/ and APPIMAGE naming the running file.
+  test('installing under the new versioned name reports it on both paths; a name without a version is kept', async (t) => {
+    const cases = [
+      { isForceRunAfter: true, running: 'MQTT-Scope-0.3.0-linux-x86_64.AppImage', renamed: 'MQTT-Scope-0.3.1-linux-x86_64.AppImage' },
+      { isForceRunAfter: false, running: 'MQTT-Scope-0.3.0-linux-x86_64.AppImage', renamed: 'MQTT-Scope-0.3.1-linux-x86_64.AppImage' },
+      { isForceRunAfter: false, running: 'MQTT-Scope.AppImage', renamed: null },
+    ];
+    for (const { isForceRunAfter, running, renamed } of cases) {
+      const { updater } = realElectronUpdater(t);
+      const dir = mkdtempSync(path.join(tmpdir(), 'mqttscope-install-'));
+      t.after(() => rmSync(dir, { recursive: true, force: true }));
+      mkdirSync(path.join(dir, 'cache'));
+      writeFileSync(path.join(dir, running), 'the running version');
+      const update = path.join(dir, 'cache', 'MQTT-Scope-0.3.1-linux-x86_64.AppImage');
+      writeFileSync(update, '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // runs and exits, like AppRun with APPIMAGE_EXIT_AFTER_INSTALL
+      const seen = [];
+      const engine = createEngine({ kind: 'appimage', feedUrl: null, log: fakeLog(), env: {}, loadUpdater: () => updater, onRenamed: (file) => seen.push(file) });
+      await engine.download(() => {});
+      updater.downloadedUpdateHelper = { file: update };
+      const saved = process.env.APPIMAGE;
+      process.env.APPIMAGE = path.join(dir, running);
+      try {
+        assert.equal(updater.doInstall({ isForceRunAfter }), true);
+      } finally {
+        if (saved === undefined) delete process.env.APPIMAGE;
+        else process.env.APPIMAGE = saved;
+      }
+      const label = `${running}, isForceRunAfter ${isForceRunAfter}`;
+      assert.deepEqual(seen, renamed ? [path.join(dir, renamed)] : [], label);
+      assert.deepEqual(readdirSync(dir).sort(), [renamed || running, 'cache'].sort(), label);
+    }
   });
 
   test('through the engine, no feed request or download sends it: every one sends the nil UUID', async (t) => {

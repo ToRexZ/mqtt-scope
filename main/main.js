@@ -178,7 +178,14 @@ function createUpdater(kind) {
     currentVersion: app.getVersion(),
     kind,
     fetchRelease: createFetchRelease({ fetch: (url, init) => net.fetch(url, init), url: releaseUrl(base), version: app.getVersion() }),
-    engine: createEngine({ kind, feedUrl: base || null, log }),
+    engine: createEngine({
+      kind,
+      feedUrl: base || null,
+      log,
+      // The menu entry follows the AppImage to its new name, also when the
+      // update installs on quit and the new version does not start.
+      onRenamed: (file) => integrateDesktop({ kind, isPackaged: app.isPackaged, log, env: { ...process.env, APPIMAGE: file } }),
+    }),
     store: { get: () => stores.get('updates'), set: (value) => stores.set('updates', value) },
     isEnabled: updateChecksOn,
     // A restart drops brokers still connecting or reconnecting too.

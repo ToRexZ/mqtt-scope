@@ -18,10 +18,13 @@ const NO_INSTALL_ID = { 'x-user-staging-id': '00000000-0000-0000-0000-0000000000
 
 // feedUrl: the MQTTSCOPE_UPDATE_URL override as a generic feed, or null for the
 // feed packaged with the app. MQTTSCOPE_UPDATE_FAKE=1 selects a fake for tests.
-function createEngine({ kind, feedUrl, log, env = process.env, loadUpdater = () => require('electron-updater').autoUpdater }) {
+// onRenamed(file): the AppImage update was installed under a new file name
+// (the new version's), before that file runs; called on Restart to update and
+// on quit, where the new version does not start.
+function createEngine({ kind, feedUrl, log, onRenamed = () => {}, env = process.env, loadUpdater = () => require('electron-updater').autoUpdater }) {
   if (!SELF_UPDATING.has(kind)) return null;
   if (env.MQTTSCOPE_UPDATE_FAKE === '1') return fakeEngine();
-  return electronUpdaterEngine({ feedUrl, log, loadUpdater });
+  return electronUpdaterEngine({ feedUrl, log, onRenamed, loadUpdater });
 }
 
 // Reports 0, 50 and 100 % over ~300 ms. At 50 % a test can hold the download
@@ -50,7 +53,7 @@ function fakeEngine() {
 
 const asError = (err) => (err instanceof Error ? err : new Error(String(err)));
 
-function electronUpdaterEngine({ feedUrl, log, loadUpdater }) {
+function electronUpdaterEngine({ feedUrl, log, onRenamed, loadUpdater }) {
   let updater = null;
   // Kept only once fully configured, so a failure here is retried next time.
   const get = () => {
@@ -65,6 +68,14 @@ function electronUpdaterEngine({ feedUrl, log, loadUpdater }) {
       error: (m) => log.error('update', m),
     };
     if (feedUrl) u.setFeedURL({ provider: 'generic', url: feedUrl });
+    // Emitted inside the (synchronous) install; a failure here must not stop it.
+    u.on('appimage-filename-updated', (file) => {
+      try {
+        onRenamed(file);
+      } catch (err) {
+        log.warn('update', `after installing as ${file}: ${err.message}`);
+      }
+    });
     updater = u;
     return u;
   };
