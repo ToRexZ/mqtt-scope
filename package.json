@@ -46,7 +46,7 @@
         "tar.gz"
       ],
       "category": "Development",
-      "icon": "build/icon.png",
+      "icon": "build/icons",
       "synopsis": "MQTT client with live topic tree, inspector, plots and publisher",
       "syncDesktopName": true
     },

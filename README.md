@@ -272,6 +272,10 @@ npm run dist:mac     # dmg + zip (build on macOS)
 npm run verify:package   # launch the packaged app and check it connects
 ```
 
+The Linux builds take their icon from `build/icons/`, one PNG per icon theme
+size. After changing `build/icon.svg`, regenerate them with
+`for n in 16 32 48 64 128 256 512; do rsvg-convert -w $n -h $n build/icon.svg -o build/icons/${n}x${n}.png; done`.
+
 CI (`.github/workflows/ci.yml`) runs the linter and all tests on every push and
 pull request.
 
