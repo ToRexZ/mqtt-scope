@@ -151,11 +151,13 @@ function otherLauncher(applicationDirs) {
 }
 
 // A desktop entry named like ours in one of these dirs (one read per dir, and
-// only if the file exists). An empty file is none.
+// only if the file exists). An empty file is none, and neither is ours (the
+// data home can be listed under another spelling, e.g. through a symlink).
 function entryNamedLikeOurs(applicationDirs) {
   for (const dir of applicationDirs) {
     const file = path.join(dir, ENTRY_FILE);
-    if (/^\[Desktop Entry\]/m.test(readOrNull(file, 'utf8') || '')) return file;
+    const text = readOrNull(file, 'utf8') || '';
+    if (/^\[Desktop Entry\]/m.test(text) && !isOurs(text)) return file;
   }
   return null;
 }

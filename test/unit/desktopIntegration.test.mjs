@@ -402,6 +402,19 @@ describe('integrateDesktop (files)', () => {
     ]);
   });
 
+  test('XDG_DATA_DIRS naming the data home under another spelling (a symlink): our own entry is not "another", no remove/write loop', () => {
+    fs.mkdirSync(dataHome, { recursive: true });
+    const alias = path.join(root, 'home-link');
+    fs.symlinkSync(home, alias); // like /home -> /var/home
+    const env = { APPIMAGE: path.join(root, 'A.AppImage'), APPDIR: appDir, XDG_DATA_HOME: dataHome, XDG_DATA_DIRS: `${path.join(alias, '.local', 'share')}:${sysDir}` };
+    run({ env });
+    logs = [];
+    run({ env });
+    run({ env });
+    assert.ok(fs.existsSync(entryPath()));
+    assert.deepEqual(logs, []);
+  });
+
   test('an empty file with our name in a system data dir is no entry (the release gate hides one that way)', () => {
     writeFile(path.join(sysDir, 'applications', 'mqtt-scope.desktop'), '');
     run();
