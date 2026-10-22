@@ -64,6 +64,26 @@ windows and connections after the restart is a non-goal. If the user quits
 instead, the update installs on that quit. A failed download or install shows
 its error in the panel (not a toast) and offers retry plus the release page.
 
+**Installing** *(decided after measuring the Windows installer, 0.3.0)*. The
+app has to exit for the install to replace it, so it cannot report the
+install's progress. Once a restart goes ahead (no confirm needed, or
+**Restart** in the confirm), every main window shows a modal *Installing MQTT
+Scope x.y.z* dialog: an animated, indeterminate bar (a sliding segment; a
+pulse with reduced motion) and no buttons, since it cannot be stopped. This
+is the one modal an update shows, and only after the user asked for the
+restart. Main broadcasts this state, then starts the install 300 ms later so
+every window can draw it before the main process may block (starting the
+unsigned Windows installer took 5–15 s in a Windows 11 VM). A failed install
+closes the dialog and shows its error as before. On Windows the installer
+then runs with its window instead of silently (silent, the screen stayed
+empty for the 25–50 s the install took): its progress bar shows the install,
+it keeps the existing installation's mode without asking, and starts the new
+version and closes itself instead of waiting on its Finish page
+(`build/installer.nsh`; a fresh install is unchanged). Each version's
+installer is run that way by the version before it, so that file stays in the
+build for good. The AppImage restarts within seconds. Installing on quit
+stays silent.
+
 **AppImage file names** keep the version (`MQTT-Scope-0.3.0-linux-x86_64.AppImage`).
 electron-updater writes the update under the new versioned name and removes
 the old file, which breaks launchers pointing at the old path; an AppImage

@@ -22,6 +22,10 @@ All notable changes to MQTT Scope. The format follows
   (which asks first if brokers are connected), or when you quit. Tar.gz,
   Windows portable and macOS builds open the release page instead; Arch Linux
   packages show a command to copy.
+- **Restart to update** shows an *Installing MQTT Scope x.y.z* dialog with a
+  moving progress bar in every window until the app closes. On Windows the
+  installer's window then shows the install's progress and opens the new
+  version when it is done; the AppImage restarts into it within seconds.
 - Releases now include `PKGBUILD` and `mqtt-scope.desktop` for Arch Linux, so
   `makepkg -si` works from the release files alone.
 - After a self-update the AppImage has the new version in its file name:

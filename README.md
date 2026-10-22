@@ -187,6 +187,14 @@ What the button does depends on how you installed:
 | `.tar.gz`, Windows portable, macOS | **Download** opens the release page. |
 | Arch package | The panel shows a command to copy and paste into a terminal. |
 
+On **Restart to update** every window shows an *Installing MQTT Scope x.y.z*
+dialog with a moving progress bar, and the app closes. On Windows the
+installer then shows its own window with the install's progress (starting it
+can take several seconds) and opens the new version when done; a per-machine
+installation asks for administrator rights first, as any install there does.
+The AppImage restarts into the new version within seconds. Installing on quit
+happens silently.
+
 Tip: electron-updater replaces a versioned AppImage name
 (`MQTT-Scope-0.3.0-linux-x86_64.AppImage`) with the new versioned name, which
 breaks launchers and shortcuts that point at the old file. Rename it to e.g.
