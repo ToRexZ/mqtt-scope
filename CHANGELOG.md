@@ -26,6 +26,11 @@ All notable changes to MQTT Scope. The format follows
   `makepkg -si` works from the release files alone.
 - After a self-update the AppImage has the new version in its file name:
   rename it (e.g. `MQTT-Scope.AppImage`) to keep launchers working.
+- The AppImage shows the MQTT Scope icon in the dock and app grid on GNOME
+  (Ubuntu) instead of a generic one. For that it adds a menu entry when it
+  first starts, which follows self-updates and disappears from the menus
+  once the AppImage is deleted (none is added when the Arch package or an
+  AppImage manager already provides one).
 
 ## [0.2.1] - 2026-10-21
 

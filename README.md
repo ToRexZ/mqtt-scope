@@ -147,6 +147,13 @@ The AppImage needs FUSE 2 (`sudo pacman -S fuse2` on Arch, `sudo apt install
 libfuse2` on Ubuntu 22.04+); without it run it with
 `APPIMAGE_EXTRACT_AND_RUN=1`, or use the `.tar.gz`.
 
+So that GNOME shows its icon in the dock, the AppImage adds itself to the app
+menu when it starts: `~/.local/share/applications/mqtt-scope.desktop` and
+`~/.local/share/icons/hicolor/*/apps/mqtt-scope.png` (not when the Arch
+package, AppImageLauncher or Gear Lever already provide an entry). The entry
+disappears from the menus once the AppImage is deleted; delete those files
+to remove it completely.
+
 Builds are not code-signed yet: on macOS right-click → Open the first time; on
 Windows choose "More info → Run anyway".
 
@@ -315,6 +322,7 @@ main/          Electron main process (CommonJS)
   updater.js     update state: periodic checks, skip, download, restart
   updateEngine.js  downloads and installs for AppImage / Windows installer (electron-updater)
   fetchRelease.js  the one request a check makes: GitHub's latest release
+  desktopIntegration.js  the AppImage's menu entry and icons, so GNOME shows its logo
   preload.js     the only API the UI can call (contextIsolation + sandbox)
 renderer/      UI (plain ES modules, no framework or build step)
   app.js         wiring; topicTree.js data model; treeView.js virtual list

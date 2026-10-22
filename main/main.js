@@ -10,6 +10,7 @@ const { Updater } = require('./updater');
 const { createEngine } = require('./updateEngine');
 const { releaseUrl, createFetchRelease } = require('./fetchRelease');
 const { installKind, releasePageUrl } = require('./updateCheck');
+const { integrateDesktop } = require('./desktopIntegration');
 const log = require('./log');
 
 // Lets tests (and portable installs) keep their data in a chosen directory.
@@ -145,15 +146,18 @@ function broadcastChange(fromId, name) {
 // The Settings switch (on unless set to false) governs automatic checks only.
 const updateChecksOn = () => stores.get('settings')?.checkForUpdates !== false;
 
+// How this build was installed. Without MQTTSCOPE_UPDATE_URL, unpackaged runs
+// (npm start, tests) are 'dev', whatever MQTTSCOPE_UPDATE_KIND says.
+function currentInstallKind() {
+  if (!app.isPackaged && !process.env.MQTTSCOPE_UPDATE_URL) return 'dev';
+  return installKind({ platform: process.platform, env: process.env, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, exists: fs.existsSync });
+}
+
 // The update notice. MQTTSCOPE_UPDATE_URL (tests, the release gate) stands in
 // for GitHub and for electron-updater's feed. Without it, unpackaged runs
-// (npm start, tests) never contact anything, whatever MQTTSCOPE_UPDATE_KIND says.
-function createUpdater() {
+// (npm start, tests) never contact anything.
+function createUpdater(kind) {
   const base = process.env.MQTTSCOPE_UPDATE_URL || '';
-  const kind =
-    !app.isPackaged && !base
-      ? 'dev'
-      : installKind({ platform: process.platform, env: process.env, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, exists: fs.existsSync });
   log.info('update', `install kind: ${kind}`);
   const u = new Updater({
     currentVersion: app.getVersion(),
@@ -453,7 +457,10 @@ function start() {
     },
   });
   stores = createJsonStore(userData);
-  updater = createUpdater();
+  const kind = currentInstallKind();
+  // Before the first window, so the desktop finds the entry for it.
+  integrateDesktop({ kind, isPackaged: app.isPackaged, log });
+  updater = createUpdater(kind);
   registerIpc();
   createMainWindow();
   updater.start();

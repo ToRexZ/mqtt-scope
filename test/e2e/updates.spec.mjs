@@ -4,7 +4,7 @@
 // that show it. A local release server stands in for GitHub
 // (MQTTSCOPE_UPDATE_URL); nothing here touches the network.
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { test, expect, makeUserData, toast, clipboard, waitForFile } from './fixtures.mjs';
@@ -90,6 +90,19 @@ test('unpackaged run without override never contacts anything', async ({ env }) 
 
 test('unpackaged run with only MQTTSCOPE_UPDATE_KIND set never contacts anything either', async ({ env }) => {
   await expectNoContact(env, { MQTTSCOPE_UPDATE_KIND: 'appimage' });
+});
+
+// The AppImage's menu entry (main/desktopIntegration.js) is for packaged
+// builds only: these tests never write into a home folder. (No system data
+// dirs, so an installed MQTT Scope cannot be why nothing is written.)
+test('unpackaged run reported as an AppImage adds no menu entry', async ({ env }) => {
+  const server = await env.releaseServer(release(VERSION));
+  const userData = makeUserData();
+  const dataHome = path.join(userData, 'share');
+  const appImage = { APPIMAGE: '/nowhere/MQTT-Scope.AppImage', XDG_DATA_HOME: dataHome, XDG_DATA_DIRS: path.join(userData, 'none') };
+  const { page } = await env.launch({ userData, env: overrides(server, { MQTTSCOPE_UPDATE_KIND: 'appimage', ...appImage }) });
+  expect((await updateState(page)).kind).toBe('appimage');
+  expect(existsSync(dataHome)).toBe(false);
 });
 
 test('override: startup check finds a newer release and every window gets it', async ({ env }) => {
