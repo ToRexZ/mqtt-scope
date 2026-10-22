@@ -243,7 +243,8 @@ describe('integrateDesktop (files)', () => {
     error: (...a) => logs.push(['error', ...a]),
   };
   const entryPath = () => path.join(dataHome, 'applications', 'mqtt-scope.desktop');
-  const iconPath = (size) => path.join(dataHome, 'icons', 'hicolor', size, 'apps', 'mqtt-scope.png');
+  const themeDir = () => path.join(dataHome, 'icons', 'hicolor');
+  const iconPath = (size) => path.join(themeDir(), size, 'apps', 'mqtt-scope.png');
   const writeFile = (file, data) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, data);
@@ -311,11 +312,22 @@ describe('integrateDesktop (files)', () => {
     assert.equal(logs.length, 1);
   });
 
-  test('a new logo in a later version replaces the icons', () => {
+  test('a new logo in a later version replaces the icons and marks the icon theme changed', () => {
     run();
+    fs.utimesSync(themeDir(), new Date(1000), new Date(1000));
     shipIcon('512x512', 'new512');
     run();
     assert.equal(fs.readFileSync(iconPath('512x512'), 'utf8'), 'new512');
+    // GTK reloads an icon theme only when the theme folder's mtime changes.
+    assert.ok(fs.statSync(themeDir()).mtimeMs > 1000);
+  });
+
+  test('the icon theme is not touched when no icon changed', () => {
+    run();
+    fs.utimesSync(themeDir(), new Date(1000), new Date(1000));
+    run({ env: { APPIMAGE: path.join(root, 'MQTT-Scope-0.3.1.AppImage'), APPDIR: appDir, XDG_DATA_HOME: dataHome, XDG_DATA_DIRS: sysDir } });
+    run();
+    assert.equal(fs.statSync(themeDir()).mtimeMs, 1000);
   });
 
   test('without APPDIR, the icons come from the folder of the executable', () => {

@@ -168,6 +168,9 @@ function integrateDesktop({ kind, isPackaged, log, platform = process.platform, 
     });
     if (result.skip) return log.info('desktop', `no menu entry: ${result.skip}`);
     for (const { file, data } of result.write) writeAtomic(file, data);
+    // GTK reloads an icon theme only when the theme folder's mtime changes
+    // (xdg-icon-resource touches it too).
+    if (result.write.some((w) => w.file !== where.entry)) fs.utimesSync(where.iconDir, new Date(), new Date());
     if (result.write.length) log.info('desktop', `menu entry for ${appImage}: wrote ${result.write.map((w) => path.relative(where.dataHome, w.file)).join(', ')} in ${where.dataHome}`);
   } catch (err) {
     log.warn('desktop', `could not add the menu entry: ${err.message}`);

@@ -150,9 +150,10 @@ libfuse2` on Ubuntu 22.04+); without it run it with
 So that GNOME shows its icon in the dock, the AppImage adds itself to the app
 menu when it starts: `~/.local/share/applications/mqtt-scope.desktop` and
 `~/.local/share/icons/hicolor/*/apps/mqtt-scope.png` (not when the Arch
-package, AppImageLauncher or Gear Lever already provide an entry). The entry
-disappears from the menus once the AppImage is deleted; delete those files
-to remove it completely.
+package, AppImageLauncher or Gear Lever already provide an entry). Once the
+AppImage is deleted the entry disappears from the menus; delete those files
+as well to remove it completely (the AppImage writes them again whenever it
+starts).
 
 Builds are not code-signed yet: on macOS right-click → Open the first time; on
 Windows choose "More info → Run anyway".
