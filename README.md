@@ -288,7 +288,8 @@ size. After changing `build/icon.svg`, regenerate them with
 `for n in 16 32 48 64 128 256 512; do rsvg-convert -w $n -h $n build/icon.svg -o build/icons/${n}x${n}.png; done`.
 
 CI (`.github/workflows/ci.yml`) runs the linter and all tests on every push and
-pull request.
+pull request. Pull requests also build and smoke-test the installers on Linux,
+Windows and macOS and build the Arch package from them, publishing nothing.
 
 ### Releasing
 
@@ -302,7 +303,8 @@ git push --follow-tags
 
 The tag must equal `package.json`'s version, or CI fails the release. The tag
 makes CI build installers on Linux, Windows and macOS, smoke-test each packaged
-app, fill in the PKGBUILD for the tag, and attach everything to a GitHub Release
+app, fill in the PKGBUILD for the tag and check the package builds from it (as
+on every pull request), and attach everything to a GitHub Release
 whose notes are the version's CHANGELOG section (`scripts/release-notes.mjs`)
 plus the generated list of changes. Besides the installers the release carries
 the update files (`latest*.yml`, `*.blockmap`), `PKGBUILD` and
