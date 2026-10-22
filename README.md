@@ -283,6 +283,13 @@ npm run dist:mac     # dmg + zip (build on macOS)
 npm run verify:package   # launch the packaged app and check it connects
 ```
 
+`build/installer.nsh` (the `nsis.include` in package.json) makes the Windows
+installer skip its questions and Finish page when an update runs it with its
+window, as Restart to update does from 0.3.0 on. Each version's installer is
+run that way by the version before it, so keep it in the build config for
+every later version (electron-builder fails the build if the file is
+missing).
+
 The Linux builds take their icon from `build/icons/`, one PNG per icon theme
 size. After changing `build/icon.svg`, regenerate them with
 `for n in 16 32 48 64 128 256 512; do rsvg-convert -w $n -h $n build/icon.svg -o build/icons/${n}x${n}.png; done`.
@@ -309,11 +316,13 @@ whose notes are the version's CHANGELOG section (`scripts/release-notes.mjs`)
 plus the generated list of changes. Besides the installers the release carries
 the update files (`latest*.yml`, `*.blockmap`), `PKGBUILD` and
 `mqtt-scope.desktop`; their names are part of the updater's contract (installed
-apps fetch them by name), so do not rename them. `packaging/aur/PKGBUILD` in the
-repository is a template that CI fills in per tag: do not edit `pkgver` or
-`sha256sums` by hand. CI pushes the package to the AUR itself when the
-`AUR_SSH_PRIVATE_KEY` secret is set. Job order: test, package, pkgbuild,
-release, aur (see the comment in `.github/workflows/ci.yml`).
+apps fetch them by name), so do not rename them. Installed Windows apps also
+rely on the installer's update behaviour from `build/installer.nsh` (see
+Packaging). `packaging/aur/PKGBUILD` in the repository is a template that CI
+fills in per tag: do not edit `pkgver` or `sha256sums` by hand. CI pushes the
+package to the AUR itself when the `AUR_SSH_PRIVATE_KEY` secret is set. Job
+order: test, package, pkgbuild, release, aur (see the comment in
+`.github/workflows/ci.yml`).
 
 `node scripts/screenshots.mjs` regenerates the screenshots in `docs/`.
 

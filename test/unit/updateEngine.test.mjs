@@ -1,7 +1,8 @@
 // The update engine: which builds get one, the test fake, and the
-// electron-updater adapter, run against a stand-in autoUpdater. The last part
-// runs the real electron-updater too, with stand-ins for the app and its HTTP
-// client (so nothing leaves the process), for what its requests send.
+// electron-updater adapter, run against a stand-in autoUpdater. The last parts
+// run the real electron-updater too, with stand-ins for the app and its HTTP
+// client (so nothing leaves the process), for what its requests send and what
+// it runs the Windows installer with.
 
 import { test, describe, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
@@ -228,6 +229,7 @@ describe('electron-updater engine', () => {
     assert.equal(loads(), 1);
     assert.equal(updater.autoDownload, false);
     assert.equal(updater.autoInstallOnAppQuit, true);
+    assert.equal(updater.autoRunAppAfterInstall, true, 'the Windows installer starts the new version (--force-run)');
     assert.deepEqual(updater.requestHeaders, { 'x-user-staging-id': NIL_UUID }, 'update requests carry no install ID');
     assert.deepEqual(
       updater.calls.filter(([name]) => name === 'setFeedURL'),
@@ -343,10 +345,17 @@ describe('electron-updater engine', () => {
     }
   });
 
-  test('install quits and relaunches the new version (silently on Windows)', () => {
-    const { engine, updater } = realEngine();
-    engine.quitAndInstall();
-    assert.deepEqual(updater.calls.at(-1), ['quitAndInstall', true, true]);
+  // quitAndInstall(isSilent, isForceRunAfter): a silent install runs the new
+  // version if isForceRunAfter, one with its window if autoRunAppAfterInstall.
+  test('install quits and relaunches the new version: the Windows installer with its window, the AppImage silently', () => {
+    for (const [kind, call] of [
+      ['nsis', ['quitAndInstall', false, true]],
+      ['appimage', ['quitAndInstall', true, true]],
+    ]) {
+      const { engine, updater } = realEngine({ kind });
+      engine.quitAndInstall();
+      assert.deepEqual(updater.calls.at(-1), call, kind);
+    }
   });
 
   test("an install under a new file name (electron-updater's appimage-filename-updated) is passed to onRenamed", async () => {
@@ -499,5 +508,75 @@ describe('electron-updater engine with the real electron-updater', () => {
       assert.equal(headers['x-user-staging-id'], NIL_UUID);
       assert.ok(!Object.values(headers).some((v) => String(v).includes(savedId())), JSON.stringify(headers));
     }
+  });
+});
+
+// electron-updater's Windows updater, with a downloaded installer and a
+// stand-in for starting it. build/installer.nsh relies on these arguments:
+// --updated without /S shows the progress and skips the questions, and
+// --force-run then starts the new version and closes the installer.
+function realNsisUpdater(t) {
+  const { NsisUpdater } = requireFromRoot('electron-updater/out/NsisUpdater');
+  const dir = mkdtempSync(path.join(tmpdir(), 'mqttscope-nsis-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const app = {
+    version: '0.3.0',
+    name: 'MQTT Scope',
+    isPackaged: true,
+    appUpdateConfigPath: path.join(dir, 'app-update.yml'),
+    userDataPath: path.join(dir, 'data'),
+    baseCachePath: path.join(dir, 'cache'),
+    whenReady: () => Promise.resolve(),
+    relaunch() {},
+    quits: 0,
+    quit() {
+      this.quits++;
+    },
+    onQuit(handler) {
+      this.quitHandler = handler;
+    },
+  };
+  const updater = new NsisUpdater(null, app);
+  updater.logger = null;
+  const installer = path.join(dir, 'cache', 'pending', 'MQTT-Scope-0.3.1-win-x64-setup.exe');
+  updater.downloadedUpdateHelper = { file: installer, packageFile: null, downloadedFileInfo: { isAdminRightsRequired: false } };
+  const started = [];
+  updater.spawnLog = async (cmd, args) => {
+    started.push([cmd, ...args]);
+    return true;
+  };
+  // After starting the installer, quitAndInstall announces the quit through
+  // Electron's own autoUpdater, which plain Node does not have: stand in for
+  // the electron module while the test runs.
+  const electronId = requireFromRoot.resolve('electron');
+  const saved = requireFromRoot.cache[electronId];
+  requireFromRoot.cache[electronId] = { id: electronId, filename: electronId, loaded: true, exports: { autoUpdater: new EventEmitter() } };
+  t.after(() => {
+    if (saved) requireFromRoot.cache[electronId] = saved;
+    else delete requireFromRoot.cache[electronId];
+  });
+  return { updater, app, installer, started };
+}
+
+describe('the Windows installer as the real electron-updater runs it', () => {
+  test('Restart to update runs it with its window and has it start the new version; then the app quits', async (t) => {
+    const { updater, app, installer, started } = realNsisUpdater(t);
+    const engine = createEngine({ kind: 'nsis', feedUrl: null, log: fakeLog(), env: {}, loadUpdater: () => updater });
+    engine.quitAndInstall();
+    assert.deepEqual(started, [[installer, '--updated', '--force-run']]);
+    assert.equal(app.quits, 0, 'quits on the next turn');
+    await flush();
+    assert.equal(app.quits, 1);
+  });
+
+  test('a downloaded update installs silently on quit and does not start the new version', async (t) => {
+    const { updater, app, installer, started } = realNsisUpdater(t);
+    updater.checkForUpdates = async () => ({ isUpdateAvailable: true, updateInfo: { version: '0.3.1' } });
+    updater.downloadUpdate = async () => [installer];
+    const engine = createEngine({ kind: 'nsis', feedUrl: null, log: fakeLog(), env: {}, loadUpdater: () => updater });
+    await engine.download(() => {});
+    updater.addQuitHandler(); // what electron-updater does once a download completes
+    app.quitHandler(0);
+    assert.deepEqual(started, [[installer, '--updated', '/S']]);
   });
 });

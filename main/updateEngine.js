@@ -24,7 +24,7 @@ const NO_INSTALL_ID = { 'x-user-staging-id': '00000000-0000-0000-0000-0000000000
 function createEngine({ kind, feedUrl, log, onRenamed = () => {}, env = process.env, loadUpdater = () => require('electron-updater').autoUpdater }) {
   if (!SELF_UPDATING.has(kind)) return null;
   if (env.MQTTSCOPE_UPDATE_FAKE === '1') return fakeEngine();
-  return electronUpdaterEngine({ feedUrl, log, onRenamed, loadUpdater });
+  return electronUpdaterEngine({ kind, feedUrl, log, onRenamed, loadUpdater });
 }
 
 // Reports 0, 50 and 100 % over ~300 ms. At 50 % a test can hold the download
@@ -53,7 +53,7 @@ function fakeEngine() {
 
 const asError = (err) => (err instanceof Error ? err : new Error(String(err)));
 
-function electronUpdaterEngine({ feedUrl, log, onRenamed, loadUpdater }) {
+function electronUpdaterEngine({ kind, feedUrl, log, onRenamed, loadUpdater }) {
   let updater = null;
   // Kept only once fully configured, so a failure here is retried next time.
   const get = () => {
@@ -61,6 +61,7 @@ function electronUpdaterEngine({ feedUrl, log, onRenamed, loadUpdater }) {
     const u = loadUpdater();
     u.autoDownload = false; // nothing downloads until the user asks
     u.autoInstallOnAppQuit = true; // a downloaded update installs when the user quits
+    u.autoRunAppAfterInstall = true; // the installer, run with its window, starts the new version (--force-run)
     u.requestHeaders = { ...NO_INSTALL_ID };
     u.logger = {
       info: (m) => log.info('update', m),
@@ -107,8 +108,10 @@ function electronUpdaterEngine({ feedUrl, log, onRenamed, loadUpdater }) {
         u.off('error', onError);
       }
     },
-    // Quits, installs and starts the new version (silently on Windows). A
-    // failed install is reported as an 'error' event, not thrown; throw it.
+    // Quits, installs and starts the new version. The Windows installer runs
+    // with its window, so its progress shows (build/installer.nsh skips its
+    // questions and Finish page on an update); install on quit stays silent.
+    // A failed install is reported as an 'error' event, not thrown; throw it.
     quitAndInstall() {
       const u = get();
       let failure = null;
@@ -117,7 +120,7 @@ function electronUpdaterEngine({ feedUrl, log, onRenamed, loadUpdater }) {
       };
       u.on('error', onError);
       try {
-        u.quitAndInstall(true, true);
+        u.quitAndInstall(kind !== 'nsis', true);
       } finally {
         u.off('error', onError);
       }

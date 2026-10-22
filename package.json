@@ -60,6 +60,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh",
       "artifactName": "MQTT-Scope-${version}-win-${arch}-setup.${ext}"
     },
     "mac": {
