@@ -1,10 +1,11 @@
-// The top-bar update button and the panel it opens (anchored under it, not a
-// modal). Draws updateView.js's views of the UpdateState that main broadcasts
-// to every main window, and sends the user's intents back over IPC. Nothing
-// here decides anything about updates: that all happens in main.
+// The top-bar update button, the panel it opens (anchored under it, not a
+// modal) and the Installing dialog shown while a restart installs the update.
+// Draws updateView.js's views of the UpdateState that main broadcasts to every
+// main window, and sends the user's intents back over IPC. Nothing here
+// decides anything about updates: that all happens in main.
 
-import { el, button, toast } from './ui.js';
-import { buttonView, panelView, checkedView } from './updateView.js';
+import { el, button, toast, overlayHost } from './ui.js';
+import { buttonView, panelView, installingView, checkedView } from './updateView.js';
 
 const PANEL_ID = 'update-panel';
 const MARGIN = 8; // px kept clear of the window's edges
@@ -37,6 +38,8 @@ export function initUpdateButton(api, buttonEl) {
   panel.append(title, current, notes, message, command, actions, links);
   // Right after the button, so Tab goes from the button into the panel.
   buttonEl.after(panel);
+  // Should the install fail, focus goes back to the panel if open, else the button.
+  const installing = installingDialog(() => (isOpen ? panel : buttonEl.hidden ? null : buttonEl));
 
   // Download/Retry reject only when the panel was out of date (nothing to
   // download any more); the broadcast that changed that redraws it.
@@ -188,6 +191,7 @@ export function initUpdateButton(api, buttonEl) {
     state = next;
     if (state?.status !== 'ready') confirm = null;
     render();
+    installing.render(installingView(state));
   }
 
   // Toggles the panel, except once the update is downloaded: then it restarts.
@@ -223,4 +227,63 @@ export function initUpdateButton(api, buttonEl) {
   // Listen first, then read, so no change falls in between (see preload.js).
   api.onUpdateState(apply);
   api.updateState().then(apply, () => {});
+}
+
+// The Installing dialog: modal, above everything including the panel, with an
+// animated bar and no buttons (the install cannot be stopped). Focus moves into
+// it; if it closes (a failed install), focus returns to where it was, or to
+// fallbackFocus() when that is gone.
+function installingDialog(fallbackFocus) {
+  const title = el('h3', 'installing-title');
+  title.id = 'update-installing-title';
+  const text = el('p', 'installing-text');
+  text.id = 'update-installing-text';
+  // No aria-valuenow: indeterminate. The bar moves by a CSS animation of
+  // transform (opacity with reduced motion), which the compositor keeps
+  // running even while the main process is busy starting the install.
+  const bar = el('div', 'installing-bar');
+  bar.setAttribute('role', 'progressbar');
+  bar.setAttribute('aria-labelledby', title.id);
+  bar.append(el('div', 'installing-bar-fill'));
+  const box = el('div', 'modal installing');
+  box.tabIndex = -1;
+  box.setAttribute('role', 'dialog');
+  box.setAttribute('aria-modal', 'true');
+  box.setAttribute('aria-labelledby', title.id);
+  box.setAttribute('aria-describedby', text.id);
+  box.append(title, bar, text);
+  const overlay = el('div', 'modal-overlay installing-overlay');
+  overlay.append(box);
+  // Nothing under it reacts: keys and clicks stop here (menu shortcuts still
+  // work), and Tab cannot move focus out.
+  overlay.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Tab' || e.key === 'Escape') e.preventDefault();
+  });
+  overlay.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+  });
+  let returnTo = null;
+
+  // view: installingView's, or null to close.
+  function render(view) {
+    if (view) {
+      if (title.textContent !== view.title) title.textContent = view.title;
+      if (text.textContent !== view.text) text.textContent = view.text;
+      if (!overlay.isConnected) {
+        returnTo = document.activeElement;
+        overlayHost().append(overlay);
+        box.focus();
+      }
+      return;
+    }
+    if (!overlay.isConnected) return;
+    const hadFocus = overlay.contains(document.activeElement);
+    overlay.remove();
+    const back = returnTo?.isConnected && !returnTo.closest('[hidden]') && !returnTo.disabled ? returnTo : fallbackFocus();
+    returnTo = null;
+    if (hadFocus) back?.focus();
+  }
+  return { render };
 }

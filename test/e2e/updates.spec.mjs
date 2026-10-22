@@ -1,8 +1,9 @@
 // The update check as the main process wires it (when it may contact
 // anything, the state every main window gets, Help → Check for Updates…, the
 // release page and the settings switch), then the top-bar button and panel
-// that show it. A local release server stands in for GitHub
-// (MQTTSCOPE_UPDATE_URL); nothing here touches the network.
+// that show it, and the Installing dialog of Restart to update. A local
+// release server stands in for GitHub (MQTTSCOPE_UPDATE_URL); nothing here
+// touches the network.
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -371,6 +372,38 @@ const releaseDownloads = (app) =>
   });
 const installed = (app) => app.evaluate(() => globalThis.__updateInstalled === true);
 
+const installingDialog = (page, version = '9.9.9') => page.getByRole('dialog', { name: `Installing MQTT Scope ${version}`, exact: true });
+
+// Records every time the Installing dialog opens or closes.
+async function recordInstalling(page) {
+  await page.evaluate(() => {
+    window.__installingLog = [];
+    let shown = false;
+    new MutationObserver(() => {
+      const now = !!document.querySelector('.installing-overlay');
+      if (now === shown) return;
+      shown = now;
+      window.__installingLog.push(now ? 'shown' : 'hidden');
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  return () => page.evaluate(() => window.__installingLog.slice());
+}
+
+// The Installing dialog's bar: its running CSS animations and three samples
+// of what they animate, 200 ms apart.
+const installingBar = (page) =>
+  page.evaluate(async () => {
+    const fill = document.querySelector('.installing-overlay .installing-bar-fill');
+    const samples = [];
+    for (let i = 0; i < 3; i++) {
+      if (i) await new Promise((resolve) => setTimeout(resolve, 200));
+      const { transform, opacity } = getComputedStyle(fill);
+      samples.push({ transform, opacity });
+    }
+    const animations = fill.getAnimations().map((a) => ({ name: a.animationName, playState: a.playState }));
+    return { animations, transforms: [...new Set(samples.map((x) => x.transform))], opacities: [...new Set(samples.map((x) => x.opacity))] };
+  });
+
 // Replaces shell.openExternal; returns a reader of the URLs it was asked to open.
 async function stubOpenExternal(app) {
   await app.evaluate(({ shell }) => {
@@ -516,7 +549,9 @@ test('self-updating: download progress, confirm while connected, restart install
   expect(await installed(app)).toBe(false);
 
   await panelButton(page, 'Restart to update').click();
+  await expect(installingDialog(page)).toHaveCount(0); // not while it asks
   await panelButton(page, 'Restart').click();
+  await expect(installingDialog(page)).toBeVisible();
   await expect.poll(() => installed(app)).toBe(true);
   expect(errors).toEqual([]);
 });
@@ -544,11 +579,16 @@ test('Restart to update on the top bar restarts at once when nothing is connecte
   await expect(button).toHaveAttribute('aria-controls', 'update-panel');
   await expect(button).toHaveAttribute('aria-expanded', 'false');
   const panelShown = await recordPanel(page);
+  const installingShown = await recordInstalling(page);
 
-  // A failed install shows on the button (the error broadcast), still without the panel.
+  // A failed install closes the Installing dialog and shows on the button (the
+  // error broadcast), still without the panel; focus is back on the button.
   await app.evaluate(() => (globalThis.__updateInstallError = 'mv: cannot move'));
   await button.click();
   await expect(button).toHaveText('Update failed');
+  await expect(installingDialog(page)).toHaveCount(0);
+  expect(await installingShown()).toEqual(['shown', 'hidden']);
+  await expect(button).toBeFocused();
   expect(await installed(app)).toBe(false);
   expect(await panelShown()).toEqual([]);
 
@@ -561,6 +601,7 @@ test('Restart to update on the top bar restarts at once when nothing is connecte
   await expect(panel(page)).toBeHidden();
   const before = (await panelShown()).length;
   await button.click();
+  await expect(installingDialog(page)).toBeVisible();
   await expect.poll(() => installed(app)).toBe(true);
   expect((await panelShown()).slice(before)).toEqual([]);
   await expect(panel(page)).toBeHidden();
@@ -586,6 +627,7 @@ test('Restart to update on the top bar asks in the panel while a broker is conne
   // A screen reader hears what is being confirmed along with the button.
   await expect(panelButton(page, 'Cancel')).toHaveAccessibleDescription('Restarting disconnects 1 broker.');
   await expect(panelButton(page, 'Restart')).toHaveAccessibleDescription('Restarting disconnects 1 broker.');
+  await expect(installingDialog(page)).toHaveCount(0);
   expect(await installed(app)).toBe(false);
 
   // Cancel goes back to the ready view; nothing is described by a message any more.
@@ -600,8 +642,89 @@ test('Restart to update on the top bar asks in the panel while a broker is conne
   await expect(panel(page)).toBeHidden();
   await button.click();
   await expect(panelButton(page, 'Cancel')).toBeFocused();
+  await expect(installingDialog(page)).toHaveCount(0);
   await panelButton(page, 'Restart').click();
+  await expect(installingDialog(page)).toBeVisible();
   await expect.poll(() => installed(app)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+// The app cannot report the install's progress: it has to quit for the
+// install to replace it. Until then, every main window says what is happening.
+test('Restart to update: every window shows the Installing dialog, its bar moving, then the install starts', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const { app, page, errors } = await env.launch({ env: overrides(server, { MQTTSCOPE_UPDATE_KIND: 'nsis', MQTTSCOPE_UPDATE_FAKE: '1' }) });
+  await closeConnectionDialog(page);
+  const second = await newWindow(app);
+  await closeConnectionDialog(second);
+  await second.emulateMedia({ reducedMotion: 'reduce' });
+  await page.evaluate(() => window.api.updateDownload());
+  for (const p of [page, second]) await expect(updateButton(p)).toHaveText('Restart to update');
+  await expect(installingDialog(page)).toHaveCount(0);
+
+  await updateButton(page).click();
+  for (const p of [page, second]) {
+    const dialog = installingDialog(p);
+    await expect(dialog).toBeVisible();
+    await expect(dialog).toHaveAttribute('aria-modal', 'true');
+    await expect(dialog).toHaveAccessibleDescription('MQTT Scope closes now. The installer shows its progress, then MQTT Scope opens again.');
+    await expect(dialog.getByRole('progressbar', { name: 'Installing MQTT Scope 9.9.9' })).toBeVisible();
+    await expect(dialog.getByRole('button')).toHaveCount(0); // it cannot be stopped
+    await expect(dialog).toBeFocused();
+    await expect(updateButton(p)).toHaveText('Installing…');
+  }
+  // The bar moves: a sliding segment, or with reduced motion a pulse in place.
+  const sliding = await installingBar(page);
+  expect(sliding.animations).toEqual([{ name: 'installing-slide', playState: 'running' }]);
+  expect(sliding.transforms.length).toBeGreaterThan(1);
+  const pulsing = await installingBar(second);
+  expect(pulsing.animations).toEqual([{ name: 'installing-pulse', playState: 'running' }]);
+  expect(pulsing.opacities.length).toBeGreaterThan(1);
+  expect(pulsing.transforms).toEqual(['none']);
+
+  await expect.poll(() => installed(app)).toBe(true);
+  // The real app now quits; this one stays, and so does the dialog, also in a
+  // window opened now. Keys stay in it.
+  const third = await newWindow(app);
+  await expect(installingDialog(third)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Tab');
+  for (const p of [page, second]) await expect(installingDialog(p)).toBeVisible();
+  await expect(installingDialog(page)).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
+test('AppImage: the Installing dialog says the app restarts', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const { page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
+  await closeConnectionDialog(page);
+  await page.evaluate(() => window.api.updateDownload());
+  await expect(updateButton(page)).toHaveText('Restart to update');
+  await updateButton(page).click();
+  await expect(installingDialog(page)).toHaveAccessibleDescription('MQTT Scope restarts in a moment.');
+  expect(errors).toEqual([]);
+});
+
+test('a failed install from the panel closes the Installing dialog; the panel shows the error and Retry', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const { app, page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
+  await closeConnectionDialog(page);
+  // Opened while offered: once downloaded, the top-bar button restarts instead.
+  await openPanel(page);
+  await panelButton(page, 'Download update').click();
+  await expect(updateButton(page)).toHaveText('Restart to update');
+  const installingShown = await recordInstalling(page);
+  await app.evaluate(() => (globalThis.__updateInstallError = 'mv: cannot move'));
+
+  await panelButton(page, 'Restart to update').click();
+  await expect(updateButton(page)).toHaveText('Update failed');
+  await expect(installingDialog(page)).toHaveCount(0);
+  expect(await installingShown()).toEqual(['shown', 'hidden']);
+  await expect(panel(page)).toBeVisible();
+  await expect(panel(page).locator('.update-message')).toHaveText('mv: cannot move');
+  await expect(panelButtons(page)).toHaveText(['Retry', 'Later', 'Skip this version', 'Open release page']);
+  await expect(panel(page)).toBeFocused();
+  expect(await installed(app)).toBe(false);
   expect(errors).toEqual([]);
 });
 

@@ -4,15 +4,24 @@
 // electron-updater, storage and settings are injected, so there is no Electron
 // dependency and the whole state machine runs under plain Node.
 //
-// UpdateState = { status: 'none'|'available'|'downloading'|'ready'|'error',
+// UpdateState = { status: 'none'|'available'|'downloading'|'ready'|'installing'|'error',
 //   current, kind, latest: { version, notes } | null, progress: whole percent
 //   while downloading, else null, error: string|null, pacmanCommand: string|null }
+// 'installing': a restart is going ahead; the app quits once it has started.
 // Emits 'state' with a copy of the new UpdateState whenever it changes.
 
 const { EventEmitter } = require('node:events');
 const { CHECK_INTERVAL_MS, SELF_UPDATING, parseVersion, isNewer, parseRelease, pacmanCommand } = require('./updateCheck');
 
 const NOTHING = { status: 'none', latest: null, progress: null, error: null, pacmanCommand: null };
+
+// From broadcasting 'installing' to starting the install: time for every
+// window to draw its Installing dialog before the main process may block (on
+// Windows, starting the unsigned installer took seconds) and the app quits.
+// An IPC message and a frame take a few ms. A fixed delay, not waiting for
+// each window to say it drew: a hidden or minimised window never draws, so
+// that would need a timeout anyway.
+const INSTALL_DELAY_MS = 300;
 
 const messageOf = (err) => err?.message || String(err);
 
@@ -21,7 +30,8 @@ class Updater extends EventEmitter {
   // engine: { download(onProgress(percent)): Promise<void>, quitAndInstall(): void } | null;
   // download() must settle too, or the state stays 'downloading'.
   // store: { get(): { skipped?: string } | null, set(obj) }.
-  constructor({ currentVersion, kind, fetchRelease, engine = null, store, isEnabled, connectedCount, log }) {
+  // later(fn, ms): runs fn once after ms (a setTimeout; injectable for tests).
+  constructor({ currentVersion, kind, fetchRelease, engine = null, store, isEnabled, connectedCount, log, later = (fn, ms) => setTimeout(fn, ms) }) {
     super();
     this._kind = kind;
     this._fetchRelease = fetchRelease;
@@ -30,12 +40,13 @@ class Updater extends EventEmitter {
     this._isEnabled = isEnabled;
     this._connectedCount = connectedCount;
     this._log = log;
+    this._later = later;
     this._state = { ...NOTHING, current: currentVersion, kind };
     this._skipped = this._loadSkipped();
     this._request = null; // in-flight release fetch, shared by concurrent checks
     this._download = null; // in-flight download, shared by concurrent calls
     this._downloadId = 0;
-    this._installing = false; // quitAndInstall() was called; never call it twice
+    this._installing = null; // the restart under way (its answer), so the install starts once
     this._timer = null;
   }
 
@@ -110,25 +121,33 @@ class Updater extends EventEmitter {
     if (!SELF_UPDATING.has(this._kind) || !this._engine) return Promise.reject(new Error('This build cannot update itself'));
     const { status } = this._state;
     if (status === 'downloading') return this._download;
-    if (status === 'ready') return Promise.resolve();
+    if (status === 'ready' || status === 'installing') return Promise.resolve();
     if (status !== 'available' && status !== 'error') return Promise.reject(new Error('No update to download'));
     this._set({ status: 'downloading', progress: 0, error: null });
     this._download = this._runDownload(++this._downloadId);
     return this._download;
   }
 
-  // { ok: false } unless an update is ready; { confirm: n } while n brokers are
-  // connected, unless force is exactly true; otherwise quits and installs.
+  // Resolves { ok: false } unless an update is ready; { confirm: n } while n
+  // brokers are connected, unless force is exactly true. Otherwise every window
+  // hears 'installing' at once, and INSTALL_DELAY_MS later the engine quits and
+  // installs: { ok: true }, or { ok: false } with the failure in state
+  // ('error'). Calls while a restart is under way get its answer.
   restart({ force = false } = {}) {
-    if (this._state.status !== 'ready') return { ok: false };
-    if (this._installing) return { ok: true };
+    if (this._installing) return this._installing;
+    if (this._state.status !== 'ready') return Promise.resolve({ ok: false });
     const connected = this._connectedCount();
-    if (connected > 0 && force !== true) return { confirm: connected };
-    this._installing = true;
+    if (connected > 0 && force !== true) return Promise.resolve({ confirm: connected });
+    this._set({ status: 'installing' });
+    this._installing = new Promise((resolve) => this._later(() => resolve(this._install()), INSTALL_DELAY_MS));
+    return this._installing;
+  }
+
+  _install() {
     try {
       this._engine.quitAndInstall();
     } catch (err) {
-      this._installing = false;
+      this._installing = null;
       this._log.warn('update', `install failed: ${messageOf(err)}`);
       this._set({ status: 'error', error: messageOf(err) });
       return { ok: false };
@@ -175,10 +194,11 @@ class Updater extends EventEmitter {
   }
 
   // Shows `release` (or no notice for null), leaving a download in progress or
-  // done alone, and keeping a failed download's error for that same version.
+  // done (or installing) alone, and keeping a failed download's error for that
+  // same version.
   _offer(release) {
     const { status, latest } = this._state;
-    if (status === 'downloading' || status === 'ready') return;
+    if (status === 'downloading' || status === 'ready' || status === 'installing') return;
     if (!release) {
       this._set(NOTHING);
       return;
@@ -232,4 +252,4 @@ class Updater extends EventEmitter {
   }
 }
 
-module.exports = { Updater };
+module.exports = { Updater, INSTALL_DELAY_MS };

@@ -4,6 +4,7 @@
   --z-fill-window: 500;
   --z-modal: 1000;
   --z-menu: 1100; /* above dialogs, for menus opened from one */
+  --z-installing: 1150; /* the Installing dialog, above the update panel too */
   --z-toast: 1200;
   color-scheme: dark;
   --bg: #0f1115;
@@ -369,6 +370,65 @@ span.icon {
   color: var(--accent);
   background: none;
   text-decoration: underline;
+}
+/* The Installing dialog (updateButton.js) while a restart installs the update. */
+.modal-overlay.installing-overlay {
+  z-index: var(--z-installing);
+}
+.modal.installing {
+  width: min(420px, calc(100vw - 32px));
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.modal.installing:focus {
+  outline: none;
+}
+.modal.installing .installing-title {
+  margin: 0;
+}
+.installing-text {
+  margin: 0;
+  color: var(--muted);
+}
+/* Indeterminate: a segment slides across, animating transform only so the
+   compositor keeps it moving while the main process is busy. */
+.installing-bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--panel-3);
+  overflow: hidden;
+}
+.installing-bar-fill {
+  width: 40%;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  animation: installing-slide 1.4s ease-in-out infinite;
+}
+@keyframes installing-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(250%);
+  }
+}
+/* Without movement, but still visibly working: the full bar pulses. */
+@media (prefers-reduced-motion: reduce) {
+  .installing-bar-fill {
+    width: 100%;
+    animation: installing-pulse 1.2s ease-in-out infinite alternate;
+  }
+}
+@keyframes installing-pulse {
+  from {
+    opacity: 0.3;
+  }
+  to {
+    opacity: 1;
+  }
 }
 
 /* ------------------------------------------------------------ layout */

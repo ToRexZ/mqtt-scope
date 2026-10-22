@@ -1,13 +1,14 @@
-// What the top-bar update button and its panel show, from the UpdateState the
-// main process broadcasts (see main/updater.js). Pure: no DOM, no IPC, and no
-// update logic (versions, URLs and what may be skipped are decided in main).
-// updateButton.js draws these views and maps their action ids to intents.
+// What the top-bar update button, its panel and the Installing dialog show,
+// from the UpdateState the main process broadcasts (see main/updater.js).
+// Pure: no DOM, no IPC, and no update logic (versions, URLs and what may be
+// skipped are decided in main). updateButton.js draws these views and maps
+// their action ids to intents.
 
 // The builds that download and install updates themselves. Must match
 // SELF_UPDATING in main/updateCheck.js (a unit test checks).
 export const SELF_UPDATING_KINDS = new Set(['appimage', 'nsis']);
 
-const STATUSES = new Set(['available', 'downloading', 'ready', 'error']);
+const STATUSES = new Set(['available', 'downloading', 'ready', 'installing', 'error']);
 const percent = (state) => state.progress ?? 0;
 
 // { icon, text, tone, click } for the button, or null while it is hidden. The
@@ -23,6 +24,8 @@ export function buttonView(state) {
       return { icon: null, text: `Downloading ${percent(state)}%`, tone: 'progress', click: 'panel' };
     case 'ready':
       return { icon: null, text: 'Restart to update', tone: 'ready', click: 'restart' };
+    case 'installing':
+      return { icon: null, text: 'Installing…', tone: 'progress', click: 'panel' };
     default:
       return { icon: null, text: 'Update failed', tone: 'failed', click: 'panel' };
   }
@@ -67,6 +70,8 @@ export function panelView(state, { confirm = null } = {}) {
     view.actions = [action('confirmRestart', 'Restart', { primary: true }), action('cancel', 'Cancel')];
   } else if (status === 'ready') {
     view.actions = [action('restart', 'Restart to update', { primary: true }), LATER];
+  } else if (status === 'installing') {
+    view.actions = [action('progress', 'Installing…', { primary: true, disabled: true })];
   } else if (status === 'error') {
     view.message = { text: state.error, tone: 'error' };
     view.actions = [action('retry', 'Retry', { primary: true }), LATER];
@@ -75,6 +80,19 @@ export function panelView(state, { confirm = null } = {}) {
   }
   view.links.push({ id: 'openRelease', label: 'Open release page' });
   return view;
+}
+
+// The dialog every main window shows while a restart installs the update
+// ({ title, text }), or null. It has no actions: the install cannot be
+// stopped once started. The button and panel stay under it (the panel open or
+// closed as it was), so a failed install shows its error and Retry there.
+export function installingView(state) {
+  if (state?.status !== 'installing' || !state.latest || !SELF_UPDATING_KINDS.has(state.kind)) return null;
+  return {
+    title: `Installing MQTT Scope ${state.latest.version}`,
+    // The Windows installer shows its own progress window once this app has closed.
+    text: state.kind === 'nsis' ? 'MQTT Scope closes now. The installer shows its progress, then MQTT Scope opens again.' : 'MQTT Scope restarts in a moment.',
+  };
 }
 
 // What a window does with the answer to Help → Check for Updates…:

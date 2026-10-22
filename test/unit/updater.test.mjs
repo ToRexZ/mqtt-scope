@@ -1,15 +1,20 @@
 // Updater state machine with fake fetch, engine, store and log. Intervals run
-// on mock timers; everything else settles through promises the tests await.
+// on mock timers; the install restart() schedules waits in w.timers until the
+// test fires it; everything else settles through promises the tests await.
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { requireFromRoot } from './_util.mjs';
 
-const { Updater } = requireFromRoot('./main/updater.js');
+const { Updater, INSTALL_DELAY_MS } = requireFromRoot('./main/updater.js');
 const { CHECK_INTERVAL_MS, pacmanCommand } = requireFromRoot('./main/updateCheck.js');
 
 const rel = (version, body = `Notes for ${version}`) => ({ tag_name: `v${version}`, body });
 const flush = () => new Promise((resolve) => setImmediate(resolve));
+// Runs what restart() scheduled (the install, INSTALL_DELAY_MS later).
+const fire = (w) => {
+  for (const { fn } of w.timers.splice(0)) fn();
+};
 
 function deferred() {
   let resolve, reject;
@@ -37,7 +42,7 @@ function fakeEngine() {
 
 // `w` is the fake world: set w.release (an Error rejects) before a check.
 function make({ saved = null, ...over } = {}) {
-  const w = { release: rel('0.3.1'), fetches: 0, saved, sets: 0, enabled: true, enabledReads: 0, connected: 0, logs: [], events: [] };
+  const w = { release: rel('0.3.1'), fetches: 0, saved, sets: 0, enabled: true, enabledReads: 0, connected: 0, logs: [], events: [], timers: [] };
   const u = new Updater({
     currentVersion: '0.3.0',
     kind: 'appimage',
@@ -59,6 +64,7 @@ function make({ saved = null, ...over } = {}) {
       return w.enabled;
     },
     connectedCount: () => w.connected,
+    later: (fn, ms) => w.timers.push({ fn, ms }),
     log: {
       info: (...a) => w.logs.push(['info', ...a]),
       warn: (...a) => w.logs.push(['warn', ...a]),
@@ -555,33 +561,98 @@ describe('download', () => {
 });
 
 describe('restart', () => {
+  // restart() answers once the install it starts has been asked for.
+  const restarted = (u, w, opts) => {
+    const answer = u.restart(opts);
+    fire(w);
+    return answer;
+  };
+
   test('restart asks to confirm while connected, force installs', async () => {
     const { u, w, engine } = await readyToInstall();
     w.connected = 2;
-    assert.deepEqual(u.restart(), { confirm: 2 });
-    assert.deepEqual(u.restart({ force: 'false' }), { confirm: 2 }, 'only a real true forces');
+    assert.deepEqual(await u.restart(), { confirm: 2 });
+    assert.deepEqual(await u.restart({ force: 'false' }), { confirm: 2 }, 'only a real true forces');
+    assert.equal(u.state.status, 'ready', 'a confirm changes nothing');
+    assert.equal(w.timers.length, 0);
     assert.equal(engine.installs, 0);
-    assert.deepEqual(u.restart({ force: true }), { ok: true });
+    assert.deepEqual(await restarted(u, w, { force: true }), { ok: true });
     assert.equal(engine.installs, 1);
 
     const idle = await readyToInstall();
-    assert.deepEqual(idle.u.restart(), { ok: true });
+    assert.deepEqual(await restarted(idle.u, idle.w), { ok: true });
     assert.equal(idle.engine.installs, 1);
+  });
+
+  test('every window hears "installing" first; the install starts INSTALL_DELAY_MS later', async () => {
+    const { u, w, engine } = await readyToInstall();
+    const order = [];
+    u.on('state', (s) => order.push(s.status));
+    engine.quitAndInstall = () => {
+      engine.installs++;
+      order.push('quitAndInstall');
+    };
+    let answer = null;
+    u.restart().then((a) => (answer = a));
+    const installing = {
+      status: 'installing',
+      current: '0.3.0',
+      kind: 'appimage',
+      latest: { version: '0.3.1', notes: 'Notes for 0.3.1' },
+      progress: null,
+      error: null,
+      pacmanCommand: null,
+    };
+    assert.deepEqual(u.state, installing);
+    assert.deepEqual(w.events.at(-1), installing);
+    assert.deepEqual(order, ['installing'], 'broadcast before anything can block');
+    assert.deepEqual(
+      w.timers.map((t) => t.ms),
+      [INSTALL_DELAY_MS],
+    );
+    await flush();
+    assert.equal(engine.installs, 0);
+    assert.equal(answer, null, 'answers only once the install was asked for');
+
+    fire(w);
+    await flush();
+    assert.deepEqual(answer, { ok: true });
+    assert.deepEqual(order, ['installing', 'quitAndInstall']);
+    assert.equal(u.state.status, 'installing', 'stays so while the app quits');
+  });
+
+  test('the delay is short and, without an injected timer, a real setTimeout', async (t) => {
+    assert.ok(INSTALL_DELAY_MS >= 100 && INSTALL_DELAY_MS <= 1000, String(INSTALL_DELAY_MS));
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const engine = fakeEngine();
+    const { u } = make({ engine, later: undefined });
+    await u.check();
+    const p = u.download();
+    engine.pending.resolve();
+    await p;
+    const answer = u.restart();
+    t.mock.timers.tick(INSTALL_DELAY_MS - 1);
+    assert.equal(engine.installs, 0);
+    t.mock.timers.tick(1);
+    assert.equal(engine.installs, 1);
+    assert.deepEqual(await answer, { ok: true });
   });
 
   test('restart does nothing unless an update is ready', async () => {
     const engine = fakeEngine();
     const { u, w } = make({ engine });
     w.connected = 1;
-    assert.deepEqual(u.restart({ force: true }), { ok: false });
+    assert.deepEqual(await u.restart({ force: true }), { ok: false });
     await u.check();
-    assert.deepEqual(u.restart({ force: true }), { ok: false });
+    assert.deepEqual(await u.restart({ force: true }), { ok: false });
     const p = u.download();
-    assert.deepEqual(u.restart({ force: true }), { ok: false });
+    assert.deepEqual(await u.restart({ force: true }), { ok: false });
     engine.pending.reject(new Error('x'));
     await p;
-    assert.deepEqual(u.restart(), { ok: false });
+    assert.deepEqual(await u.restart(), { ok: false });
+    assert.equal(w.timers.length, 0);
     assert.equal(engine.installs, 0);
+    assert.ok(!w.events.some((s) => s.status === 'installing'));
   });
 
   test('an install that throws shows its error and can be retried', async () => {
@@ -590,9 +661,13 @@ describe('restart', () => {
     engine.quitAndInstall = () => {
       throw new Error('cannot replace the AppImage');
     };
-    assert.deepEqual(u.restart(), { ok: false });
+    assert.deepEqual(await restarted(u, w), { ok: false });
     assert.equal(u.state.status, 'error');
     assert.equal(u.state.error, 'cannot replace the AppImage');
+    assert.deepEqual(
+      w.events.slice(-2).map((s) => s.status),
+      ['installing', 'error'],
+    );
     assert.match(w.logs.map((l) => l.join(' ')).join('\n'), /cannot replace the AppImage/);
 
     engine.quitAndInstall = installOk;
@@ -600,17 +675,57 @@ describe('restart', () => {
     engine.pending.resolve();
     await p;
     assert.equal(u.state.status, 'ready');
-    assert.deepEqual(u.restart(), { ok: true });
+    assert.deepEqual(await restarted(u, w), { ok: true });
     assert.equal(engine.installs, 1, 'the retry installs');
   });
 
-  test('restart installs only once', async () => {
+  test('restart installs only once; calls while it is under way get its answer', async () => {
     const { u, w, engine } = await readyToInstall();
     w.connected = 1;
-    assert.deepEqual(u.restart({ force: true }), { ok: true });
-    assert.deepEqual(u.restart({ force: true }), { ok: true });
-    assert.deepEqual(u.restart(), { ok: true }, 'already installing: no confirm');
+    const first = u.restart({ force: true });
+    const again = u.restart({ force: true });
+    const unforced = u.restart();
+    assert.equal(w.timers.length, 1, 'one install scheduled');
+    fire(w);
+    assert.deepEqual(await first, { ok: true });
+    assert.deepEqual(await again, { ok: true });
+    assert.deepEqual(await unforced, { ok: true }, 'already installing: no confirm');
+    assert.deepEqual(await u.restart(), { ok: true }, 'nor after it started');
+    assert.equal(w.timers.length, 0);
     assert.equal(engine.installs, 1);
+  });
+
+  test('while installing, checks, skip and download leave the state alone', async () => {
+    const { u, w, engine } = await readyToInstall();
+    u.restart();
+    const during = w.events.length;
+    w.release = rel('0.3.2');
+    assert.deepEqual(await u.check({ manual: true }), { result: 'available', version: '0.3.2' });
+    await u.tick();
+    w.release = rel('0.3.0');
+    assert.deepEqual(await u.check({ manual: true }), { result: 'latest' });
+    u.skip();
+    await u.download();
+    assert.equal(engine.downloads, 1);
+    assert.equal(w.sets, 0);
+    assert.equal(w.events.length, during);
+    assert.equal(u.state.status, 'installing');
+    assert.equal(u.state.latest.version, '0.3.1');
+  });
+
+  test('a listener that throws on "installing" is logged and cannot stop the install', async () => {
+    const { u, w, engine } = await readyToInstall();
+    u.prependListener('state', (s) => {
+      if (s.status === 'installing') throw new Error('window gone');
+    });
+    let answer;
+    assert.doesNotThrow(() => {
+      answer = restarted(u, w);
+    });
+    assert.deepEqual(await answer, { ok: true });
+    assert.equal(engine.installs, 1);
+    assert.equal(w.events.at(-1).status, 'installing', 'the listener after it heard it');
+    assert.ok(w.logs.some((l) => l[0] === 'error' && l.join(' ').includes('window gone')));
   });
 });
 
@@ -652,7 +767,9 @@ describe('state listeners', () => {
       assert.ok(w.logs.some((l) => l[0] === 'error' && l.join(' ').includes(`listener broke on ${name}`)));
 
       await u.check();
-      assert.deepEqual(u.restart(), { ok: true });
+      const answer = u.restart();
+      fire(w);
+      assert.deepEqual(await answer, { ok: true });
       assert.equal(engine.installs, 1);
     });
   }

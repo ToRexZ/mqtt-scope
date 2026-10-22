@@ -266,8 +266,9 @@ function registerIpc() {
   // The renderer only sends intents; main builds every URL it opens.
   ipcMain.handle('update:state', () => updater.state);
   ipcMain.handle('update:download', () => updater.download());
-  ipcMain.handle('update:restart', (_e, force) => {
-    const res = updater.restart({ force });
+  // Answers once the install has started (the Installing dialog shows meanwhile).
+  ipcMain.handle('update:restart', async (_e, force) => {
+    const res = await updater.restart({ force });
     if (res.ok) quitForUpdate();
     return res;
   });

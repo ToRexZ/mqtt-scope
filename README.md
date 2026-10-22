@@ -341,7 +341,7 @@ renderer/      UI (plain ES modules, no framework or build step)
     mosaic.js      split layout on screen: resizing gaps, dragging plots around
     plotSettings.js  settings panel; plotPicker.js, fields.js  choosing values to plot
     chart.js, plotMath.js  drawing a plot; plotWindow.js  a plot in its own window
-  updateView.js  what the update button and panel show (no DOM); updateButton.js  draws them
+  updateView.js  what the update button, panel and Installing dialog show (no DOM); updateButton.js  draws them
   icons.js       monochrome line icons
   keys.js        keyboard shortcuts (defaults, rebinding, matching)
   publisher.js, connectionDialog.js, subscriptionsDialog.js, settings.js

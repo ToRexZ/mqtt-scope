@@ -1,10 +1,11 @@
-// What the top-bar update button and its panel show for each UpdateState
-// (renderer/updateView.js). The DOM side (renderer/updateButton.js) only
-// draws these and sends the intents; see test/e2e/updates.spec.mjs.
+// What the top-bar update button, its panel and the Installing dialog show
+// for each UpdateState (renderer/updateView.js). The DOM side
+// (renderer/updateButton.js) only draws these and sends the intents; see
+// test/e2e/updates.spec.mjs.
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { SELF_UPDATING_KINDS, buttonView, panelView, checkedView } from '../../renderer/updateView.js';
+import { SELF_UPDATING_KINDS, buttonView, panelView, installingView, checkedView } from '../../renderer/updateView.js';
 import { requireFromRoot } from './_util.mjs';
 
 const { SELF_UPDATING } = requireFromRoot('./main/updateCheck.js');
@@ -33,6 +34,7 @@ describe('buttonView', () => {
     assert.deepEqual(buttonView(state()), { icon: '↑', text: 'Update 0.3.1', tone: 'available', click: 'panel' });
     assert.deepEqual(buttonView(state({ status: 'downloading', progress: 42 })), { icon: null, text: 'Downloading 42%', tone: 'progress', click: 'panel' });
     assert.deepEqual(buttonView(state({ status: 'ready' })), { icon: null, text: 'Restart to update', tone: 'ready', click: 'restart' });
+    assert.deepEqual(buttonView(state({ status: 'installing' })), { icon: null, text: 'Installing…', tone: 'progress', click: 'panel' });
     assert.deepEqual(buttonView(state({ status: 'error', error: 'boom' })), { icon: null, text: 'Update failed', tone: 'failed', click: 'panel' });
   });
 
@@ -130,6 +132,13 @@ describe('panelView', () => {
       }
     });
 
+    test('installing: progress in place of the actions, nothing to skip or postpone', () => {
+      const v = panelView(state({ status: 'installing' }), { confirm: 1 });
+      assert.deepEqual(v.actions, [{ id: 'progress', label: 'Installing…', primary: true, disabled: true }]);
+      assert.deepEqual(ids(v.links), ['openRelease']);
+      assert.equal(v.message, null, 'the confirm is over');
+    });
+
     test('error: the message, retry or later; skip and the release page', () => {
       const v = panelView(state({ status: 'error', error: 'net::ERR_CONNECTION_RESET' }));
       assert.deepEqual(v.message, { text: 'net::ERR_CONNECTION_RESET', tone: 'error' });
@@ -170,6 +179,7 @@ describe('panelView', () => {
       panelView(state({ status: 'downloading', progress: 1 })),
       panelView(state({ status: 'ready' })),
       panelView(state({ status: 'ready' }), { confirm: 1 }),
+      panelView(state({ status: 'installing' })),
       panelView(state({ status: 'error', error: 'x' })),
       panelView(state({ kind: 'manual' })),
       panelView(state({ kind: 'pacman', pacmanCommand: 'c' })),
@@ -178,6 +188,32 @@ describe('panelView', () => {
       const all = ids([...v.actions, ...v.links]);
       assert.equal(new Set(all).size, all.length, all.join());
     }
+  });
+});
+
+describe('installingView (the dialog every main window shows while a restart installs)', () => {
+  test('title and what happens next, per build', () => {
+    assert.deepEqual(installingView(state({ status: 'installing', kind: 'nsis' })), {
+      title: 'Installing MQTT Scope 0.3.1',
+      text: 'MQTT Scope closes now. The installer shows its progress, then MQTT Scope opens again.',
+    });
+    assert.deepEqual(installingView(state({ status: 'installing', kind: 'appimage' })), {
+      title: 'Installing MQTT Scope 0.3.1',
+      text: 'MQTT Scope restarts in a moment.',
+    });
+  });
+
+  test('no dialog in any other state', () => {
+    for (const status of ['none', 'available', 'downloading', 'ready', 'error', 'checking']) {
+      assert.equal(installingView(state({ status, kind: 'nsis' })), null, status);
+    }
+    assert.equal(installingView(null), null);
+    assert.equal(installingView(undefined), null);
+    assert.equal(installingView(state({ status: 'installing', latest: null })), null);
+  });
+
+  test('only builds that install updates themselves', () => {
+    for (const kind of ['manual', 'portable', 'pacman', 'dev']) assert.equal(installingView(state({ status: 'installing', kind })), null, kind);
   });
 });
 

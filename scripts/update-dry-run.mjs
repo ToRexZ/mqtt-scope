@@ -2,7 +2,8 @@
 // of this version to a fake next patch release, end to end, and checks it comes
 // back as the new version under the new file name with its settings intact.
 // Two passes, each in a fresh folder: Restart to update (connected to a broker,
-// so through the inline confirm), and install on quit.
+// so through the inline confirm, then the Installing dialog), and install on
+// quit.
 // The app's menu entry and icons (main/desktopIntegration.js) go to the pass
 // folder too (XDG_DATA_HOME): this version must add them, and in both passes
 // the entry must point at the new file once the update is installed.
@@ -478,13 +479,30 @@ async function expectInstalled(ctx) {
   step(`${appImage(TO)} is executable and matches latest-linux.yml's sha512`);
 }
 
-// Restart to update while connected: the inline confirm, then Restart; the app
-// must come back as TO from the new file, with its settings, within 60 s.
+// Restart to update while connected: the inline confirm, then Restart; the
+// Installing dialog shows before FROM quits, and the app must come back as TO
+// from the new file, with its settings, within 60 s.
 async function restartToUpdate(ctx) {
   const page = await upToRestart(ctx);
   await page.click('#btn-update', { timeout: STEP_MS });
   await page.waitForFunction((t) => document.querySelector('#update-panel .update-message')?.textContent === t, CONFIRM, { timeout: STEP_MS, polling: 250 });
   step(`clicked Restart to update; the panel asks "${CONFIRM}"`);
+  // The page reports the dialog's title on the console as it opens: polling
+  // from here is throttled in the hidden window, and the window soon closes.
+  const dialogTitle = new Promise((resolve) => {
+    page.on('console', (m) => {
+      const [, title] = /^installing dialog: (.*)$/.exec(m.text()) || [];
+      if (title !== undefined) resolve(title);
+    });
+  });
+  await page.evaluate(() => {
+    new MutationObserver((_records, observer) => {
+      const title = document.querySelector('.installing-overlay .installing-title');
+      if (!title) return;
+      observer.disconnect();
+      console.log(`installing dialog: ${title.textContent}`);
+    }).observe(document.body, { childList: true, subtree: true });
+  });
   const settingsBefore = JSON.parse(readText(ctx.settingsFile) || 'null');
   if (!Object.entries(SETTINGS).every(([k, v]) => settingsBefore?.[k] === v)) throw new Error(`settings.json lost the seeded values before the update: ${JSON.stringify(settingsBefore)}`);
   const clicked = Date.now();
@@ -495,6 +513,9 @@ async function restartToUpdate(ctx) {
       if (!/closed/i.test(err.message)) throw err;
     });
   step('clicked Restart');
+  const shownTitle = await withTimeout(dialogTitle, STEP_MS, 'the Installing dialog');
+  if (shownTitle !== `Installing MQTT Scope ${TO}`) throw new Error(`The Installing dialog says "${shownTitle}"`);
+  step(`the window showed the dialog "${shownTitle}"`);
   await until(() => startLine.test(readText(ctx.log)), {
     timeout: Math.max(0, clicked + RELAUNCH_MS - Date.now()), // RELAUNCH_MS from the click
     interval: 100,
