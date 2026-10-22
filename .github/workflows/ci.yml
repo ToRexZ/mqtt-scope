@@ -6,6 +6,18 @@ on:
     tags: ['v*']
   pull_request:
 
+# Read-only by default; release (and the read-only pkgbuild and aur) declare
+# their own.
+permissions:
+  contents: read
+
+# A new push to a pull request cancels that pull request's run in progress.
+# Pushes to main and tags get a group of their own (the run id), so they are
+# never queued behind, or cancelled by, another run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 # Pushes to main run `test` only. Pull requests also run package and pkgbuild
 # as a dry run (installers built and smoke-tested on all three OSes, the Arch
 # package built from them; nothing is published). Pushing any v* tag cuts a
@@ -144,10 +156,13 @@ jobs:
       # file name must be unique across OSes: installers and blockmaps carry
       # the OS in their name, and each OS writes a differently named latest*.yml.
       # The Linux AppImage embeds its blockmap, so Linux uploads no .blockmap.
+      # A pull request's installers are kept 7 days; a tag's for the repository
+      # default (0), so failed release jobs can still be re-run.
       - uses: actions/upload-artifact@v4
         with:
           name: installers-${{ matrix.os }}
           if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 0 }}
           path: |
             dist/*.AppImage
             dist/*.tar.gz
@@ -184,11 +199,12 @@ jobs:
       # names, so it uses them instead (as it does for mqtt-scope.desktop) and
       # the checksums are of exactly what users will download: the tar.gz that
       # release attaches, and LICENSE and icon.svg, which
-      # raw.githubusercontent.com serves byte for byte from the tag. makepkg
+      # raw.githubusercontent.com serves byte for byte from the tag (on a pull
+      # request: this commit's, as a dry run). makepkg
       # refuses to run as root, hence the builder user. The version is the
       # tag's (package checked it matches package.json); a pull request's ref
       # (e.g. 4/merge) has none, so there it is package.json's.
-      - name: Fill in PKGBUILD for this release
+      - name: Fill in PKGBUILD for this version
         run: |
           case "$GITHUB_REF" in
             refs/tags/v*) version="${GITHUB_REF_NAME#v}" ;;
@@ -226,6 +242,7 @@ jobs:
         with:
           name: aur-package
           if-no-files-found: error
+          retention-days: ${{ github.event_name == 'pull_request' && 7 || 0 }} # as the installers
           include-hidden-files: true # .SRCINFO; upload-artifact skips dotfiles otherwise
           path: |
             /home/builder/pkg/PKGBUILD
