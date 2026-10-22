@@ -3,6 +3,9 @@
 // back as the new version under the new file name with its settings intact.
 // Two passes, each in a fresh folder: Restart to update (connected to a broker,
 // so through the inline confirm), and install on quit.
+// The app's menu entry and icons (main/desktopIntegration.js) go to the pass
+// folder too (XDG_DATA_HOME): this version must add them, and after Restart
+// to update the new version must point the entry at its new file.
 //
 // The app's update traffic only goes to a feed on 127.0.0.1 (through
 // MQTTSCOPE_UPDATE_URL), which logs every request with its headers; a request
@@ -23,12 +26,15 @@ import { execFileSync, spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, copyFileSync, createReadStream, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readlinkSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { profile } from '../test/helpers/app.mjs';
 import { startBroker, sleep, until } from '../test/helpers/broker.mjs';
+
+const { desktopEntry, providesApp, isOurs } = createRequire(import.meta.url)('../main/desktopIntegration.js');
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FROM = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
@@ -346,6 +352,46 @@ async function waitForUpdateButton(page, text, timeout) {
   }
 }
 
+// The menu entry in the pass's share/ must be the one for `file` (Exec and
+// TryExec point at it). Returns its Exec and TryExec lines.
+function expectEntry(ctx, file) {
+  const text = readText(ctx.entryFile);
+  const lines = (text.match(/^(Exec|TryExec)=.*$/gm) || []).join(', ') || '(no entry)';
+  if (text !== desktopEntry({ appImage: file })) throw new Error(`${path.relative(ctx.dir, ctx.entryFile)} is not the entry for app/${path.basename(file)}: ${lines}`);
+  return lines;
+}
+
+// share/icons/hicolor has the icon at every size the AppImage ships. Returns the sizes.
+function expectIcons(ctx) {
+  const sizes = (dir) =>
+    (existsSync(dir) ? readdirSync(dir) : []).filter((size) => existsSync(path.join(dir, size, 'apps', 'mqtt-scope.png'))).sort((a, b) => parseInt(a) - parseInt(b));
+  const shipped = sizes(path.join(ctx.dir, 'extract', 'squashfs-root', 'usr', 'share', 'icons', 'hicolor'));
+  const copied = sizes(path.join(ctx.dir, 'share', 'icons', 'hicolor'));
+  if (!shipped.length || !isDeepStrictEqual(copied, shipped)) throw new Error(`share/icons/hicolor has ${copied.join(', ') || 'no icons'}; the AppImage ships ${shipped.join(', ') || 'none'}`);
+  return copied;
+}
+
+// An installed MQTT Scope's desktop entry (the Arch package's) in the data
+// dirs AppRun always appends to XDG_DATA_DIRS. The relaunched version sees
+// it and, by design, leaves its menu entry alone.
+function installedLauncher() {
+  for (const dir of ['/usr/share/gnome', '/usr/local/share', '/usr/share']) {
+    const apps = path.join(dir, 'applications');
+    let names = [];
+    try {
+      names = readdirSync(apps).filter((n) => n.endsWith('.desktop'));
+    } catch {}
+    for (const name of names) {
+      let text = '';
+      try {
+        text = readFileSync(path.join(apps, name), 'utf8');
+      } catch {}
+      if (providesApp(text) && !isOurs(text)) return path.join(apps, name);
+    }
+  }
+  return null;
+}
+
 // Steps 3 and 4 up to the downloaded update: connects to the broker, then
 // ↑ Update <TO> → Download update → Restart to update.
 async function upToRestart(ctx) {
@@ -354,6 +400,8 @@ async function upToRestart(ctx) {
   await page.click('.conn-dialog .connect-btn', { timeout: STEP_MS });
   await page.waitForFunction(() => window.__mqttscope.status.state === 'connected', null, { timeout: STEP_MS, polling: 250 });
   step(`${FROM} is up and connected to the broker`);
+  // The app writes them before its first window.
+  step(`${FROM} added its menu entry (${expectEntry(ctx, ctx.oldFile)}) and icons ${expectIcons(ctx).join(', ')}`);
   await waitForUpdateButton(page, `↑ Update ${TO}`, STEP_MS);
   step(`the top bar shows "↑ Update ${TO}"; opening the panel and clicking Download update`);
   await page.click('#btn-update', { timeout: STEP_MS });
@@ -416,6 +464,21 @@ async function restartToUpdate(ctx) {
     message: `${TO}'s startup update check at the feed`,
   });
   step(`${TO} is running: its startup update check reached the feed`);
+  // TO wrote its menu entry before that check.
+  const installed = installedLauncher();
+  if (!installed) {
+    step(`${TO} pointed the menu entry at its new file: ${expectEntry(ctx, ctx.newFile)}`);
+  } else {
+    const kept = expectEntry(ctx, ctx.oldFile);
+    const why = readText(ctx.log)
+      .split('\n')
+      .find((l) => / INFO desktop no menu entry: .* provides the app$/.test(l));
+    if (!why) throw new Error(`${installed} provides the app, but ${TO} logged no reason for leaving the menu entry alone`);
+    step(
+      `menu entry NOT CHECKED to follow the update on this machine: ${installed} (an installed MQTT Scope) provides the app, so ${TO} ` +
+        `left the entry alone as designed (${kept}). main.log: ${why}`,
+    );
+  }
   const settingsAfter = JSON.parse(readText(ctx.settingsFile) || 'null');
   if (!isDeepStrictEqual(settingsAfter, settingsBefore)) throw new Error(`settings.json changed across the update: ${JSON.stringify(settingsBefore)} -> ${JSON.stringify(settingsAfter)}`);
   step(`settings intact: ${JSON.stringify(settingsAfter)}`);
@@ -441,11 +504,13 @@ async function installOnQuit(ctx) {
 // One pass in a fresh folder (<scratch>/<folder>): app/ (the AppImage the update replaces), data/
 // (user data), tmp/ (where the AppImages unpack themselves), cache/
 // (electron-updater's download), extract/ (the unpacked FROM binary Playwright
-// starts). `finish(ctx)` drives it from the launched app onwards.
+// starts), share/ (XDG_DATA_HOME: the menu entry and icons), sys/ (FROM's
+// XDG_DATA_DIRS, empty: no installed launcher keeps it from adding its entry).
+// `finish(ctx)` drives it from the launched app onwards.
 async function runPass({ folder, finish }) {
   const dir = path.join(scratch, folder);
   const sub = (d) => path.join(dir, d);
-  for (const d of ['app', 'data', 'tmp', 'cache', 'extract']) mkdirSync(sub(d), { recursive: true });
+  for (const d of ['app', 'data', 'tmp', 'cache', 'extract', 'share', 'sys']) mkdirSync(sub(d), { recursive: true });
   const ctx = {
     dir,
     appDir: sub('app'),
@@ -454,6 +519,7 @@ async function runPass({ folder, finish }) {
     newFile: path.join(sub('app'), appImage(TO)),
     settingsFile: path.join(sub('data'), 'settings.json'),
     log: path.join(sub('data'), 'logs', 'main.log'),
+    entryFile: path.join(sub('share'), 'applications', 'mqtt-scope.desktop'),
   };
   copyFileSync(path.join(root, 'dist', appImage(FROM)), ctx.oldFile);
   step(`app/ before: ${readdirSync(ctx.appDir).join(', ')}`);
@@ -478,6 +544,8 @@ async function runPass({ folder, finish }) {
       MQTTSCOPE_HIDDEN: '1',
       TMPDIR: ctx.tmpDir,
       XDG_CACHE_HOME: sub('cache'),
+      XDG_DATA_HOME: sub('share'),
+      XDG_DATA_DIRS: sub('sys'),
     };
     ctx.app = await electron.launch({ executablePath: path.join(sub('extract'), 'squashfs-root', 'mqtt-scope'), args: ['--ozone-platform=headless'], env, timeout: STEP_MS });
     const proc = ctx.app.process();

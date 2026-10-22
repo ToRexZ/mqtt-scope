@@ -31,7 +31,8 @@ const userData = makeUserData({ profiles: [profile(broker.port)], settings: { ch
 const app = await electron.launch({
   executablePath: path.resolve(exe),
   args: process.platform === 'linux' ? ['--ozone-platform=headless'] : [],
-  env: { ...process.env, MQTTSCOPE_USER_DATA: userData, MQTTSCOPE_HIDDEN: '1' },
+  // XDG_DATA_HOME: where a packaged AppImage adds its menu entry; never the real ~/.local/share.
+  env: { ...process.env, MQTTSCOPE_USER_DATA: userData, MQTTSCOPE_HIDDEN: '1', XDG_DATA_HOME: path.join(userData, 'share') },
 });
 try {
   const page = await app.firstWindow();
