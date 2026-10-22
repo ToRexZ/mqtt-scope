@@ -153,7 +153,10 @@ menu when it starts: `~/.local/share/applications/mqtt-scope.desktop` and
 package, AppImageLauncher or Gear Lever already provide an entry). Once the
 AppImage is deleted the entry disappears from the menus; delete those files
 as well to remove it completely (the AppImage writes them again whenever it
-starts).
+starts). Switching to the Arch package: the AppImage removes its entry the
+next time it starts; if you delete the AppImage before that, delete
+`~/.local/share/applications/mqtt-scope.desktop` yourself, or it hides the
+package from the menus.
 
 Builds are not code-signed yet: on macOS right-click → Open the first time; on
 Windows choose "More info → Run anyway".

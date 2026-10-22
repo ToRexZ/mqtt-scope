@@ -91,10 +91,14 @@ const isOurs = (text) => text.split(/\r?\n/).includes(MARKER);
 // (ours, a user entry, would hide a package's entry of the same name). Our
 // icons stay: they are the same logo.
 // icons: [{ file, want, have (null if missing) }]; current: the text at
-// entryFile, or null. launcher() returns another launcher's entry or null; it
-// is only asked when something would be written.
-function plan({ entryFile, entry, current, icons, launcher }) {
+// entryFile, or null. sameName() returns a desktop entry with our file name in
+// a system data dir (ours would hide it), or null: cheap, asked on every
+// start. launcher() returns another launcher's entry or null: a scan, only
+// asked when something would be written.
+function plan({ entryFile, entry, current, icons, launcher, sameName = () => null }) {
   if (current !== null && !isOurs(current)) return { skip: `${entryFile} is not ours` };
+  const hidden = sameName();
+  if (hidden) return current === null ? { skip: `${hidden} provides the app` } : { remove: entryFile, reason: `${hidden} provides the app` };
   const write = icons.filter((i) => !i.have || !i.have.equals(i.want)).map((i) => ({ file: i.file, data: i.want }));
   if (current !== entry) write.push({ file: entryFile, data: entry });
   if (!write.length) return { write };
@@ -146,6 +150,16 @@ function otherLauncher(applicationDirs) {
   return null;
 }
 
+// A desktop entry named like ours in one of these dirs (one read per dir, and
+// only if the file exists). An empty file is none.
+function entryNamedLikeOurs(applicationDirs) {
+  for (const dir of applicationDirs) {
+    const file = path.join(dir, ENTRY_FILE);
+    if (/^\[Desktop Entry\]/m.test(readOrNull(file, 'utf8') || '')) return file;
+  }
+  return null;
+}
+
 // The desktop watches these folders: it must never see half a file.
 function writeAtomic(file, data) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -172,6 +186,7 @@ function integrateDesktop({ kind, isPackaged, log, platform = process.platform, 
       current: readOrNull(where.entry, 'utf8'),
       icons: shippedIcons(appDir, where.iconDir),
       launcher: () => otherLauncher(where.applicationDirs),
+      sameName: () => entryNamedLikeOurs(where.applicationDirs.filter((d) => d !== path.dirname(where.entry))),
     });
     if (result.skip) return log.info('desktop', `no menu entry: ${result.skip}`);
     if (result.remove) {

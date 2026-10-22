@@ -226,6 +226,25 @@ describe('plan', () => {
     const current = '[Desktop Entry]\nExec=mqtt-scope\n';
     assert.deepEqual(plan({ entryFile, entry, current, icons: icons(), launcher: never }), { skip: `${entryFile} is not ours` });
   });
+  test('an entry with our name in a system data dir (the Arch package): ours goes even when nothing changed', () => {
+    const sameName = () => '/usr/share/applications/mqtt-scope.desktop';
+    assert.deepEqual(plan({ entryFile, entry, current: entry, icons: icons([png('16'), png('512')]), launcher: never, sameName }), {
+      remove: entryFile,
+      reason: '/usr/share/applications/mqtt-scope.desktop provides the app',
+    });
+  });
+  test('an entry with our name in a system data dir and none of ours: nothing written', () => {
+    const sameName = () => '/usr/share/applications/mqtt-scope.desktop';
+    assert.deepEqual(plan({ entryFile, entry, current: null, icons: icons(), launcher: never, sameName }), {
+      skip: '/usr/share/applications/mqtt-scope.desktop provides the app',
+    });
+  });
+  test('a hand-made mqtt-scope.desktop of the user wins over the same-name check', () => {
+    const current = '[Desktop Entry]\nExec=mqtt-scope\n';
+    const sameName = () => '/usr/share/applications/mqtt-scope.desktop';
+    assert.deepEqual(plan({ entryFile, entry, current, icons: icons(), launcher: never, sameName }), { skip: `${entryFile} is not ours` });
+  });
+
   test('another launcher provides the app: nothing written', () => {
     const launcher = () => '/usr/share/applications/mqtt-scope.desktop';
     assert.deepEqual(plan({ entryFile, entry, current: null, icons: icons(), launcher }), { skip: '/usr/share/applications/mqtt-scope.desktop provides the app' });
@@ -363,6 +382,32 @@ describe('integrateDesktop (files)', () => {
     run(update);
     assert.equal(fs.existsSync(entryPath()), false);
     assert.deepEqual(logs, [['info', 'desktop', `no menu entry: ${theirs} provides the app`]]);
+  });
+
+  test('the Arch package installed after our entry, with no update since: ours is removed at the next start, once', () => {
+    run();
+    const theirs = path.join(sysDir, 'applications', 'mqtt-scope.desktop');
+    writeFile(theirs, '[Desktop Entry]\nExec=mqtt-scope %U\n'); // same name; no StartupWMClass needed to be hidden by ours
+    logs = [];
+    run();
+    assert.equal(fs.existsSync(entryPath()), false);
+    assert.deepEqual(logs, [['info', 'desktop', `removed the menu entry ${entryPath()}: ${theirs} provides the app`]]);
+    logs = [];
+    run();
+    run();
+    assert.equal(fs.existsSync(entryPath()), false, 'not written again');
+    assert.deepEqual(logs, [
+      ['info', 'desktop', `no menu entry: ${theirs} provides the app`],
+      ['info', 'desktop', `no menu entry: ${theirs} provides the app`],
+    ]);
+  });
+
+  test('an empty file with our name in a system data dir is no entry (the release gate hides one that way)', () => {
+    writeFile(path.join(sysDir, 'applications', 'mqtt-scope.desktop'), '');
+    run();
+    assert.ok(fs.existsSync(entryPath()));
+    run();
+    assert.ok(fs.existsSync(entryPath()));
   });
 
   test('AppImageLauncher or Gear Lever already added it to the user menu: nothing written', () => {
