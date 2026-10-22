@@ -226,12 +226,19 @@ describe('plan', () => {
     const current = '[Desktop Entry]\nExec=mqtt-scope\n';
     assert.deepEqual(plan({ entryFile, entry, current, icons: icons(), launcher: never }), { skip: `${entryFile} is not ours` });
   });
-  test('another launcher provides the app: left alone, also when our entry is out of date', () => {
+  test('another launcher provides the app: nothing written', () => {
     const launcher = () => '/usr/share/applications/mqtt-scope.desktop';
-    const skip = { skip: '/usr/share/applications/mqtt-scope.desktop provides the app' };
-    assert.deepEqual(plan({ entryFile, entry, current: null, icons: icons(), launcher }), skip);
+    assert.deepEqual(plan({ entryFile, entry, current: null, icons: icons(), launcher }), { skip: '/usr/share/applications/mqtt-scope.desktop provides the app' });
+  });
+  test('another launcher appeared after ours: ours goes (it would hide theirs, which has the same name), icons stay', () => {
+    const launcher = () => '/usr/share/applications/mqtt-scope.desktop';
     const before = desktopEntry({ appImage: '/old.AppImage' });
-    assert.deepEqual(plan({ entryFile, entry, current: before, icons: icons([png('16'), png('512')]), launcher }), skip);
+    for (const have of [[png('16'), png('512')], [null, png('old')]]) {
+      assert.deepEqual(plan({ entryFile, entry, current: before, icons: icons(have), launcher }), {
+        remove: entryFile,
+        reason: '/usr/share/applications/mqtt-scope.desktop provides the app',
+      });
+    }
   });
 });
 
@@ -340,6 +347,22 @@ describe('integrateDesktop (files)', () => {
     run();
     assert.deepEqual(files(dataHome), []);
     assert.deepEqual(logs, [['info', 'desktop', `no menu entry: ${path.join(sysDir, 'applications', 'mqtt-scope.desktop')} provides the app`]]);
+  });
+
+  test('the Arch package installed after our entry: ours is removed at the next change (logged once), icons stay', () => {
+    run();
+    writeFile(path.join(sysDir, 'applications', 'mqtt-scope.desktop'), '[Desktop Entry]\nExec=mqtt-scope %U\nStartupWMClass=mqtt-scope\n');
+    logs = [];
+    const update = { env: { APPIMAGE: path.join(root, 'MQTT-Scope-0.3.1.AppImage'), APPDIR: appDir, XDG_DATA_HOME: dataHome, XDG_DATA_DIRS: sysDir } };
+    run(update);
+    assert.equal(fs.existsSync(entryPath()), false);
+    assert.equal(fs.readFileSync(iconPath('512x512'), 'utf8'), 'png512');
+    const theirs = path.join(sysDir, 'applications', 'mqtt-scope.desktop');
+    assert.deepEqual(logs, [['info', 'desktop', `removed the menu entry ${entryPath()}: ${theirs} provides the app`]]);
+    logs = [];
+    run(update);
+    assert.equal(fs.existsSync(entryPath()), false);
+    assert.deepEqual(logs, [['info', 'desktop', `no menu entry: ${theirs} provides the app`]]);
   });
 
   test('AppImageLauncher or Gear Lever already added it to the user menu: nothing written', () => {

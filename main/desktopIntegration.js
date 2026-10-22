@@ -7,7 +7,8 @@
 // <data home>/applications and copies its icons to <data home>/icons/hicolor,
 // and rewrites them when they change (a self-update renames the AppImage file).
 // It leaves both alone when another launcher already provides the app (the
-// Arch package, AppImageLauncher, Gear Lever, a hand-made entry).
+// Arch package, AppImageLauncher, Gear Lever, a hand-made entry), and removes
+// its entry when such a launcher turns up after it.
 // The first part is pure; integrateDesktop() does the file work and never throws.
 
 const fs = require('node:fs');
@@ -84,8 +85,11 @@ function locations({ env, home, appDir }) {
 const providesApp = (text) => /^[ \t]*StartupWMClass[ \t]*=[ \t]*mqtt-scope[ \t\r]*$/m.test(text);
 const isOurs = (text) => text.split(/\r?\n/).includes(MARKER);
 
-// What to write, given what is there now: { write: [{ file, data }] }, icons
-// first so the entry never shows without them, or { skip: reason }.
+// What to do, given what is there now: { write: [{ file, data }] }, icons
+// first so the entry never shows without them; { skip: reason }; or
+// { remove: entryFile, reason } when another launcher appeared after our entry
+// (ours, a user entry, would hide a package's entry of the same name). Our
+// icons stay: they are the same logo.
 // icons: [{ file, want, have (null if missing) }]; current: the text at
 // entryFile, or null. launcher() returns another launcher's entry or null; it
 // is only asked when something would be written.
@@ -95,7 +99,9 @@ function plan({ entryFile, entry, current, icons, launcher }) {
   if (current !== entry) write.push({ file: entryFile, data: entry });
   if (!write.length) return { write };
   const other = launcher();
-  return other ? { skip: `${other} provides the app` } : { write };
+  if (!other) return { write };
+  const reason = `${other} provides the app`;
+  return current === null ? { skip: reason } : { remove: entryFile, reason };
 }
 
 // --- file work ---
@@ -168,6 +174,10 @@ function integrateDesktop({ kind, isPackaged, log, platform = process.platform, 
       launcher: () => otherLauncher(where.applicationDirs),
     });
     if (result.skip) return log.info('desktop', `no menu entry: ${result.skip}`);
+    if (result.remove) {
+      fs.rmSync(result.remove, { force: true });
+      return log.info('desktop', `removed the menu entry ${result.remove}: ${result.reason}`);
+    }
     for (const { file, data } of result.write) writeAtomic(file, data);
     // GTK reloads an icon theme only when the theme folder's mtime changes
     // (xdg-icon-resource touches it too).
