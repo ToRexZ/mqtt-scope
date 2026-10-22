@@ -4,8 +4,14 @@
 // Two passes, each in a fresh folder: Restart to update (connected to a broker,
 // so through the inline confirm), and install on quit.
 // The app's menu entry and icons (main/desktopIntegration.js) go to the pass
-// folder too (XDG_DATA_HOME): this version must add them, and after Restart
-// to update the new version must point the entry at its new file.
+// folder too (XDG_DATA_HOME): this version must add them, and in both passes
+// the entry must point at the new file once the update is installed.
+//
+// On a machine with MQTT Scope installed (the Arch package's
+// /usr/share/applications/mqtt-scope.desktop), the relaunched version would
+// see that launcher (AppRun always adds /usr/share to XDG_DATA_DIRS) and, by
+// design, make way for it. So the gate then runs itself in a user and mount
+// namespace (unshare, as the same user) where an empty file hides it.
 //
 // The app's update traffic only goes to a feed on 127.0.0.1 (through
 // MQTTSCOPE_UPDATE_URL), which logs every request with its headers; a request
@@ -35,6 +41,72 @@ import { profile } from '../test/helpers/app.mjs';
 import { startBroker, sleep, until } from '../test/helpers/broker.mjs';
 
 const { desktopEntry, providesApp, isOurs } = createRequire(import.meta.url)('../main/desktopIntegration.js');
+
+// Desktop entries of an installed MQTT Scope (the Arch package's) in the data
+// dirs AppRun always appends to XDG_DATA_DIRS.
+function installedLaunchers() {
+  const found = [];
+  for (const dir of ['/usr/share/gnome', '/usr/local/share', '/usr/share']) {
+    const apps = path.join(dir, 'applications');
+    let names = [];
+    try {
+      names = readdirSync(apps).filter((n) => n.endsWith('.desktop'));
+    } catch {}
+    for (const name of names) {
+      let text = '';
+      try {
+        text = readFileSync(path.join(apps, name), 'utf8');
+      } catch {}
+      if (providesApp(text) && !isOurs(text)) found.push(path.join(apps, name));
+    }
+  }
+  return found;
+}
+
+// Runs the gate again with the installed launchers hidden, and exits with its
+// code; returns the hidden files in that run ([] when nothing needs hiding).
+// Step 1: unshare makes this user root in a new user and mount namespace,
+// where `mount --bind /dev/null` hides each file. Step 2: a nested user
+// namespace maps the user back to itself, so the app does not run as root.
+// MQTTSCOPE_GATE_MASK carries the step (the app never gets MQTTSCOPE_ variables).
+async function hideInstalledLaunchers() {
+  const stage = process.env.MQTTSCOPE_GATE_MASK ? JSON.parse(process.env.MQTTSCOPE_GATE_MASK) : null;
+  if (stage?.step === 'hidden') return stage.files;
+  const files = stage ? stage.files : installedLaunchers();
+  if (!files.length) return [];
+  const self = [...process.execArgv, process.argv[1], ...process.argv.slice(2)];
+  let args;
+  let next;
+  if (!stage) {
+    args = ['--user', '--map-root-user', '--mount', process.execPath, ...self];
+    next = { step: 'mount', files, uid: process.getuid(), gid: process.getgid() };
+  } else {
+    try {
+      for (const file of files) execFileSync('mount', ['--bind', '/dev/null', file], { stdio: 'pipe' });
+    } catch (err) {
+      console.log(`FAIL: could not hide ${files.join(', ')} (an installed MQTT Scope) from the app: ${String(err.stderr || err.message).trim()}`);
+      process.exit(1);
+    }
+    args = ['--user', `--map-user=${stage.uid}`, `--map-group=${stage.gid}`, process.execPath, ...self];
+    next = { step: 'hidden', files };
+  }
+  const child = spawn('unshare', args, { stdio: 'inherit', env: { ...process.env, MQTTSCOPE_GATE_MASK: JSON.stringify(next) } });
+  // Ctrl+C and a closed terminal reach the whole process group, the gate
+  // included; a SIGTERM to this process is passed on.
+  process.on('SIGINT', () => {});
+  process.on('SIGHUP', () => {});
+  process.on('SIGTERM', () => child.kill('SIGTERM'));
+  const code = await new Promise((resolve) => {
+    child.on('error', (err) => {
+      console.log(`FAIL: could not hide ${files.join(', ')} (an installed MQTT Scope) from the app: unshare: ${err.message}`);
+      resolve(1);
+    });
+    child.on('exit', (exitCode, signal) => resolve(exitCode ?? (signal ? 1 : 0)));
+  });
+  process.exit(code);
+}
+
+const hidden = await hideInstalledLaunchers();
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FROM = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).version;
@@ -371,26 +443,11 @@ function expectIcons(ctx) {
   return copied;
 }
 
-// An installed MQTT Scope's desktop entry (the Arch package's) in the data
-// dirs AppRun always appends to XDG_DATA_DIRS. The relaunched version sees
-// it and, by design, leaves its menu entry alone.
-function installedLauncher() {
-  for (const dir of ['/usr/share/gnome', '/usr/local/share', '/usr/share']) {
-    const apps = path.join(dir, 'applications');
-    let names = [];
-    try {
-      names = readdirSync(apps).filter((n) => n.endsWith('.desktop'));
-    } catch {}
-    for (const name of names) {
-      let text = '';
-      try {
-        text = readFileSync(path.join(apps, name), 'utf8');
-      } catch {}
-      if (providesApp(text) && !isOurs(text)) return path.join(apps, name);
-    }
-  }
-  return null;
-}
+// The lines of main.log where the app wrote the menu entry for `file`.
+const entryWrites = (ctx, file) =>
+  readText(ctx.log)
+    .split('\n')
+    .filter((l) => l.includes(` INFO desktop menu entry for ${file}: wrote `));
 
 // Steps 3 and 4 up to the downloaded update: connects to the broker, then
 // ↑ Update <TO> → Download update → Restart to update.
@@ -464,21 +521,16 @@ async function restartToUpdate(ctx) {
     message: `${TO}'s startup update check at the feed`,
   });
   step(`${TO} is running: its startup update check reached the feed`);
-  // TO wrote its menu entry before that check.
-  const installed = installedLauncher();
-  if (!installed) {
-    step(`${TO} pointed the menu entry at its new file: ${expectEntry(ctx, ctx.newFile)}`);
-  } else {
-    const kept = expectEntry(ctx, ctx.oldFile);
-    const why = readText(ctx.log)
-      .split('\n')
-      .find((l) => / INFO desktop no menu entry: .* provides the app$/.test(l));
-    if (!why) throw new Error(`${installed} provides the app, but ${TO} logged no reason for leaving the menu entry alone`);
-    step(
-      `menu entry NOT CHECKED to follow the update on this machine: ${installed} (an installed MQTT Scope) provides the app, so ${TO} ` +
-        `left the entry alone as designed (${kept}). main.log: ${why}`,
-    );
+  // FROM moved the entry to the new file while installing, before TO started;
+  // TO (which checks it before its startup check) found it current.
+  const lines = readText(ctx.log).split('\n');
+  const writes = entryWrites(ctx, ctx.newFile);
+  const started = lines.findIndex((l) => startLine.test(l));
+  if (writes.length !== 1 || lines.indexOf(writes[0]) > started) {
+    throw new Error(`main.log should show ${FROM} writing the entry for app/${appImage(TO)} once, before \`start ${TO}\`: ${writes.join(' | ') || 'no such line'}`);
   }
+  step(`the menu entry follows the update: ${expectEntry(ctx, ctx.newFile)}`);
+  step(`main.log: ${writes[0]} (before \`start ${TO}\`; ${TO} found it current)`);
   const settingsAfter = JSON.parse(readText(ctx.settingsFile) || 'null');
   if (!isDeepStrictEqual(settingsAfter, settingsBefore)) throw new Error(`settings.json changed across the update: ${JSON.stringify(settingsBefore)} -> ${JSON.stringify(settingsAfter)}`);
   step(`settings intact: ${JSON.stringify(settingsAfter)}`);
@@ -497,6 +549,11 @@ async function installOnQuit(ctx) {
   const installLine = log.split('\n').find((l) => l.includes('Auto install update on quit'));
   if (installLine) step(`main.log: ${installLine}`);
   if (startLine.test(log)) throw new Error(`Installing on quit also started ${TO}`);
+  // The new version does not start, so FROM moved the entry while installing.
+  const writes = entryWrites(ctx, ctx.newFile);
+  if (writes.length !== 1) throw new Error(`main.log should show ${FROM} writing the entry for app/${appImage(TO)} once: ${writes.join(' | ') || 'no such line'}`);
+  step(`the menu entry follows the update: ${expectEntry(ctx, ctx.newFile)}`);
+  step(`main.log: ${writes[0]}`);
   if (!(await settle(() => processesUnder(ctx.dir).length === 0, 10_000))) throw new Error(`Still running after the quit: ${describeProcesses(processesUnder(ctx.dir))}`);
   step('nothing left running');
 }
@@ -590,10 +647,13 @@ function sourceState() {
 
 console.log(`MQTT Scope AppImage update dry run, ${FROM} -> ${TO} (scratch: ${scratch})`);
 console.log(sourceState());
+if (hidden.length) console.log(`Hidden from the app in this run (an installed MQTT Scope): ${hidden.join(', ')}`);
 let failed = false;
 try {
   if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error(`Linux x64 only (this is ${process.platform} ${process.arch})`);
   if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) throw new Error('Needs a desktop session (DISPLAY or WAYLAND_DISPLAY) for the version electron-updater starts');
+  const visible = installedLaunchers();
+  if (visible.length) throw new Error(`The app would see ${visible.join(', ')} (an installed MQTT Scope), which makes it leave its menu entry alone`);
   if (longestTmp > MAX_SOCKET_PATH) throw new Error(`TMPDIR is too long (${tmpdir()}): the app's sockets under it would exceed ${MAX_SOCKET_PATH} characters. Run with a shorter one, e.g. TMPDIR=/tmp`);
   console.log('\n== builds');
   stepClock = Date.now();
