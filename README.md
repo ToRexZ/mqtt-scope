@@ -137,15 +137,26 @@ Download the file for your platform from the
 | macOS | `MQTT-Scope-<version>-mac-arm64.dmg` (Apple silicon) or `.zip` |
 
 **Arch Linux**: `yay -S mqtt-scope-bin` once the AUR package is published; until
-then build the same package from this repository:
+then build the package from the release's `PKGBUILD` and `mqtt-scope.desktop`:
 
 ```sh
-git clone https://github.com/ToRexZ/mqtt-scope && cd mqtt-scope/packaging/aur && makepkg -si
+mkdir -p ~/.cache/mqtt-scope-pkg/latest && cd ~/.cache/mqtt-scope-pkg/latest && curl -fLO https://github.com/ToRexZ/mqtt-scope/releases/latest/download/PKGBUILD -fLO https://github.com/ToRexZ/mqtt-scope/releases/latest/download/mqtt-scope.desktop && makepkg -sic
 ```
 
 The AppImage needs FUSE 2 (`sudo pacman -S fuse2` on Arch, `sudo apt install
 libfuse2` on Ubuntu 22.04+); without it run it with
 `APPIMAGE_EXTRACT_AND_RUN=1`, or use the `.tar.gz`.
+
+So that GNOME shows its icon in the dock, the AppImage adds itself to the app
+menu when it starts: `~/.local/share/applications/mqtt-scope.desktop` and
+`~/.local/share/icons/hicolor/*/apps/mqtt-scope.png` (not when the Arch
+package, AppImageLauncher or Gear Lever already provide an entry). Once the
+AppImage is deleted the entry disappears from the menus; delete those files
+as well to remove it completely (the AppImage writes them again whenever it
+starts). Switching to the Arch package: the AppImage removes its entry the
+next time it starts; if you delete the AppImage before that, delete
+`~/.local/share/applications/mqtt-scope.desktop` yourself, or it hides the
+package from the menus.
 
 Builds are not code-signed yet: on macOS right-click → Open the first time; on
 Windows choose "More info → Run anyway".
@@ -157,6 +168,51 @@ showing it was built by this repository's CI from the tagged commit:
 ```sh
 gh attestation verify MQTT-Scope-<version>-linux-x86_64.AppImage --repo ToRexZ/mqtt-scope
 ```
+
+## Updates
+
+MQTT Scope checks GitHub for a newer release at startup and every 6 hours
+(switch it off in **Settings → General → Check for updates**). When there is
+one, an **Update x.y.z** button appears in the top bar and opens a panel with
+the release notes. **Later** closes it; **Skip this version** hides that
+version until a newer one comes out. **Help → Check for Updates…** always asks,
+is the only check that says "latest version" or reports an error (automatic
+checks stay silent, e.g. when offline), and un-skips a skipped version.
+
+What the button does depends on how you installed:
+
+| Install | Update |
+|---|---|
+| AppImage, Windows installer | **Download update**, then **Restart to update** (asks first if brokers are connected). A downloaded update you did not restart into installs when you quit. |
+| `.tar.gz`, Windows portable, macOS | **Download** opens the release page. |
+| Arch package | The panel shows a command to copy and paste into a terminal. |
+
+On **Restart to update** every main window shows an *Installing MQTT Scope
+x.y.z* dialog with a moving progress bar until the app closes. On Windows the
+installer's own window then shows the install's progress, and MQTT Scope opens
+again in front when it is done, about half a minute in all. A per-machine
+installation asks for administrator rights first; declining leaves MQTT Scope
+closed and not updated (start it again, and the notice comes back). With both
+a per-user and a per-machine copy installed, the update goes to the
+per-machine one. The AppImage restarts into the new version within seconds.
+Installing on quit happens silently.
+
+Tip: electron-updater replaces a versioned AppImage name
+(`MQTT-Scope-0.3.0-linux-x86_64.AppImage`) with the new versioned name, which
+breaks launchers and shortcuts that point at the old file. Rename it to e.g.
+`MQTT-Scope.AppImage` for a stable path.
+
+Privacy: automatic and manual checks make one request to GitHub's
+latest-release API for ToRexZ/mqtt-scope. The app adds only the `Accept` and
+`User-Agent` (`MQTT-Scope/<version>`) headers to it, and no identifiers or
+cookies; the browser engine adds its standard headers (such as
+`Accept-Language`). On the AppImage and the Windows installer, **Download
+update** then has electron-updater (`User-Agent: electron-builder`) fetch
+GitHub's release list for the repository, the latest release's update
+description file (`latest-linux.yml` or `latest.yml`) and the new build (only
+its changed blocks where it can). These requests carry no install identifier
+either: electron-updater's staging ID header is the same all-zero value on
+every install.
 
 ## Keyboard shortcuts
 
@@ -187,15 +243,17 @@ new keys; clashes are flagged). Defaults (Ctrl is Cmd on macOS):
 ## Settings and data
 
 Settings → General: messages kept per topic (default 100), history size per
-topic (default 64 MB; the latest message is always kept), and whether clicking
-a topic in the tree also expands it one level (default on).
+topic (default 64 MB; the latest message is always kept), whether clicking a
+topic in the tree also expands it one level (default on), and whether to check
+for updates (default on).
 
 Data lives in the app data folder (File → Open Data Folder):
 `profiles.json` (connections), `savedMessages.json`, `plotTabs.json` (plot
 tabs; `plots.json` keeps the tab on screen in the 0.1 format for older
 versions),
-`settings.json`, `logs/main.log`. Set `MQTTSCOPE_USER_DATA=/some/dir` to use a
-different folder (e.g. a portable install).
+`settings.json`, `updates.json` (the version you skipped), `logs/main.log`. Set
+`MQTTSCOPE_USER_DATA=/some/dir` to use a different folder (e.g. a portable
+install).
 
 ## Development
 
@@ -217,6 +275,12 @@ npm run lint               # ESLint
 npm test                   # all of the above
 ```
 
+The update notice's tests point the app at a local feed with
+`MQTTSCOPE_UPDATE_URL` (serves `release.json`), pick the install type with
+`MQTTSCOPE_UPDATE_KIND` (`appimage`, `nsis`, `portable`, `pacman`, `manual`) and
+fake the download with `MQTTSCOPE_UPDATE_FAKE=1`. Without `MQTTSCOPE_UPDATE_URL`
+an unpackaged run never contacts anything.
+
 The MQTT 5 integration test runs against `eclipse-mosquitto:2` in Docker and is
 skipped when Docker is unavailable.
 
@@ -229,8 +293,23 @@ npm run dist:mac     # dmg + zip (build on macOS)
 npm run verify:package   # launch the packaged app and check it connects
 ```
 
+`build/installer.nsh` (the `nsis.include` in package.json) makes the Windows
+installer skip its questions and Finish page when an update runs it with its
+window, as Restart to update does from 0.3.0 on. Each version's installer is
+run that way by the version before it, so keep it in the build config for every
+later version (electron-builder fails the build if the file is missing; a unit
+test checks the config and the hooks). After upgrading electron-builder, check
+that its NSIS templates still call the `customInstallMode` and
+`customFinishPage` hooks, and add no installer page that does not skip itself
+on `--updated`.
+
+The Linux builds take their icon from `build/icons/`, one PNG per icon theme
+size. After changing `build/icon.svg`, regenerate them with
+`for n in 16 32 48 64 128 256 512; do rsvg-convert -w $n -h $n build/icon.svg -o build/icons/${n}x${n}.png; done`.
+
 CI (`.github/workflows/ci.yml`) runs the linter and all tests on every push and
-pull request.
+pull request. Pull requests also build and smoke-test the installers on Linux,
+Windows and macOS and build the Arch package from them, publishing nothing.
 
 ### Releasing
 
@@ -242,12 +321,21 @@ npm version patch        # or minor / major: bumps package.json and creates a v*
 git push --follow-tags
 ```
 
-The tag makes CI build installers on Linux, Windows and macOS, smoke-test each
-packaged app, and attach them to a GitHub Release whose notes are the version's
-CHANGELOG section (`scripts/release-notes.mjs`) plus the generated list of
-changes. Update `pkgver` and `sha256sums` in `packaging/aur/PKGBUILD` once the
-release is out (CI publishes it to the AUR itself when the
-`AUR_SSH_PRIVATE_KEY` secret is set).
+The tag must equal `package.json`'s version, or CI fails the release. The tag
+makes CI build installers on Linux, Windows and macOS, smoke-test each packaged
+app, fill in the PKGBUILD for the tag and check the package builds from it (as
+on every pull request), and attach everything to a GitHub Release
+whose notes are the version's CHANGELOG section (`scripts/release-notes.mjs`)
+plus the generated list of changes. Besides the installers the release carries
+the update files (`latest*.yml`, `*.blockmap`), `PKGBUILD` and
+`mqtt-scope.desktop`; their names are part of the updater's contract (installed
+apps fetch them by name), so do not rename them. Installed Windows apps also
+rely on the installer's update behaviour from `build/installer.nsh` (see
+Packaging). `packaging/aur/PKGBUILD` in the repository is a template that CI
+fills in per tag: do not edit `pkgver` or `sha256sums` by hand. CI pushes the
+package to the AUR itself when the `AUR_SSH_PRIVATE_KEY` secret is set. Job
+order: test, package, pkgbuild, release, aur (see the comment in
+`.github/workflows/ci.yml`).
 
 `node scripts/screenshots.mjs` regenerates the screenshots in `docs/`.
 
@@ -258,6 +346,12 @@ main/          Electron main process (CommonJS)
   main.js        windows (one MQTT session each; child windows for pop-outs), menu, IPC
   mqttSession.js an MQTT connection; batches messages every 50 ms for the UI
   profileStore.js, jsonStore.js   persisted data (atomic writes)
+  updateCheck.js version compare, release parsing, install type, pacman command (pure)
+  updater.js     update state: periodic checks, skip, download, restart
+  updateEngine.js  downloads and installs for AppImage / Windows installer (electron-updater)
+  afterUpdate.js   the window comes to the front when the Windows installer starts the new version
+  fetchRelease.js  the one request a check makes: GitHub's latest release
+  desktopIntegration.js  the AppImage's menu entry and icons, so GNOME shows its logo
   preload.js     the only API the UI can call (contextIsolation + sandbox)
 renderer/      UI (plain ES modules, no framework or build step)
   app.js         wiring; topicTree.js data model; treeView.js virtual list
@@ -270,6 +364,7 @@ renderer/      UI (plain ES modules, no framework or build step)
     mosaic.js      split layout on screen: resizing gaps, dragging plots around
     plotSettings.js  settings panel; plotPicker.js, fields.js  choosing values to plot
     chart.js, plotMath.js  drawing a plot; plotWindow.js  a plot in its own window
+  updateView.js  what the update button, panel and Installing dialog show (no DOM); updateButton.js  draws them
   icons.js       monochrome line icons
   keys.js        keyboard shortcuts (defaults, rebinding, matching)
   publisher.js, connectionDialog.js, subscriptionsDialog.js, settings.js

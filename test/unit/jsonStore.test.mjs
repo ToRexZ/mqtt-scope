@@ -20,12 +20,13 @@ describe('createJsonStore', () => {
       savedMessages: [{ topic: 'a', payload: 'é😀 <b>', qos: 1 }],
       plots: [{ id: 'p', series: [{ topic: 't', segs: ['a', 0] }], windowSec: 60 }],
       settings: { historyLimit: 100, historyMB: 64 },
+      updates: { skipped: '0.3.1' },
     };
     for (const [name, value] of Object.entries(values)) {
       assert.deepEqual(store.set(name, value), { ok: true });
       assert.deepEqual(store.get(name), value);
     }
-    assert.deepEqual(fs.readdirSync(dir).sort(), ['plots.json', 'savedMessages.json', 'settings.json']);
+    assert.deepEqual(fs.readdirSync(dir).sort(), ['plots.json', 'savedMessages.json', 'settings.json', 'updates.json']);
   });
 
   test('scalar and null values round-trip', () => {

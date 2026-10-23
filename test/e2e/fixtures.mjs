@@ -1,14 +1,15 @@
 // Shared fixtures and helpers for the end-to-end suite.
 //
-// `env` owns every broker, app and test client a test creates and tears them
-// down afterwards (apps first, then clients, then brokers), even when the
-// test fails.
+// `env` owns every broker, release server, app and test client a test creates
+// and tears them down afterwards (apps first, then clients, then servers), even
+// when the test fails.
 
 import { test as base, expect } from '@playwright/test';
 import { readFileSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { startBroker, testClient } from '../helpers/broker.mjs';
+import { startReleaseServer } from '../helpers/releaseServer.mjs';
 import { launchApp, makeUserData, profile, connect } from '../helpers/app.mjs';
 
 export { expect };
@@ -23,6 +24,7 @@ export const test = base.extend({
     const apps = [];
     const clients = [];
     const brokers = [];
+    const releaseServers = [];
     const env = {
       async broker(opts) {
         const b = await startBroker(opts);
@@ -35,9 +37,16 @@ export const test = base.extend({
         await unthrottle(ctx.app);
         return ctx;
       },
+      // A fake release endpoint (see helpers/releaseServer.mjs).
+      async releaseServer(release) {
+        const s = await startReleaseServer(release);
+        releaseServers.push(s);
+        return s;
+      },
       // Starts an app whose only profile points at `broker` and connects it.
-      async connected(broker, { userData, extra, connectNow = true } = {}) {
-        const ctx = await env.launch({ userData: userData || makeUserData({ profiles: [profile(broker.port, extra)] }) });
+      // Other options (e.g. `env`) go to launchApp.
+      async connected(broker, { userData, extra, connectNow = true, ...launchOpts } = {}) {
+        const ctx = await env.launch({ ...launchOpts, userData: userData || makeUserData({ profiles: [profile(broker.port, extra)] }) });
         if (connectNow) await connect(ctx.page);
         return ctx;
       },
@@ -54,6 +63,7 @@ export const test = base.extend({
     for (const a of apps) await closeQuietly(a.app);
     for (const c of clients) await c.end().catch(() => {});
     for (const b of brokers) await b.close().catch(() => {});
+    for (const s of releaseServers) await s.close();
   },
 });
 

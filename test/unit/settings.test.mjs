@@ -2,7 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { DEFAULT_SETTINGS, normalizeSettings as normalizeAll } from '../../renderer/settings.js';
 
-// These tests cover the numeric limits; autoExpand and keys are tested below.
+// These tests cover the numeric limits; the switches and keys are tested below.
 const normalizeSettings = (raw) => {
   const { historyLimit, historyMB } = normalizeAll(raw);
   return { historyLimit, historyMB };
@@ -11,7 +11,7 @@ const NUMERIC_DEFAULTS = { historyLimit: DEFAULT_SETTINGS.historyLimit, historyM
 
 describe('normalizeSettings', () => {
   test('defaults', () => {
-    assert.deepEqual(DEFAULT_SETTINGS, { historyLimit: 100, historyMB: 64, autoExpand: true, keys: {} });
+    assert.deepEqual(DEFAULT_SETTINGS, { historyLimit: 100, historyMB: 64, autoExpand: true, checkForUpdates: true, keys: {} });
     assert.deepEqual(normalizeAll(undefined), DEFAULT_SETTINGS);
     assert.deepEqual(normalizeAll(null), DEFAULT_SETTINGS);
     assert.deepEqual(normalizeAll({}), DEFAULT_SETTINGS);
@@ -73,12 +73,21 @@ describe('normalizeSettings', () => {
   });
 });
 
-describe('normalizeSettings: autoExpand and keyboard shortcuts', () => {
+describe('normalizeSettings: switches and keyboard shortcuts', () => {
   test('autoExpand defaults to true and only accepts booleans', () => {
     assert.equal(normalizeAll({}).autoExpand, true);
     assert.equal(normalizeAll({ autoExpand: false }).autoExpand, false);
     assert.equal(normalizeAll({ autoExpand: 'false' }).autoExpand, true);
     assert.equal(normalizeAll({ autoExpand: 0 }).autoExpand, true);
+  });
+  // Main reads it from settings.json (off only when exactly false), so a
+  // saved Settings dialog must keep it.
+  test('checkForUpdates defaults to true, keeps false, and only accepts booleans', () => {
+    assert.equal(normalizeAll({}).checkForUpdates, true);
+    assert.equal(normalizeAll({ checkForUpdates: false }).checkForUpdates, false);
+    assert.equal(normalizeAll({ checkForUpdates: true }).checkForUpdates, true);
+    for (const bad of ['false', 0, null, 'off', [], {}]) assert.equal(normalizeAll({ checkForUpdates: bad }).checkForUpdates, true, JSON.stringify(bad));
+    assert.equal(normalizeAll({ checkForUpdates: false, historyLimit: 5 }).checkForUpdates, false, 'kept alongside other settings');
   });
   test('keys keeps overrides of known actions that differ from the default', () => {
     const k = normalizeAll({ keys: { connections: 'Mod+J', settings: 'Mod+,', bogus: 'Mod+B', clear: '', find: 5 } }).keys;

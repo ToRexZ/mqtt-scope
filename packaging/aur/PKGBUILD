@@ -30,6 +30,10 @@ package() {
   install -d "${pkgdir}/opt/${_pkgname}" "${pkgdir}/usr/bin"
   cp -a "MQTT-Scope-${pkgver}-linux-x64/." "${pkgdir}/opt/${_pkgname}/"
   ln -s "/opt/${_pkgname}/${_pkgname}" "${pkgdir}/usr/bin/${_pkgname}"
+  # Tells the app it was installed by pacman, so its update notice shows the
+  # makepkg command instead of self-updating. Never name it resources/package-type:
+  # electron-updater reads that file as a request to update the pacman install itself.
+  touch "${pkgdir}/opt/${_pkgname}/resources/pacman-package"
 
   install -Dm644 "${_pkgname}.desktop" "${pkgdir}/usr/share/applications/${_pkgname}.desktop"
   install -Dm644 "${_pkgname}-${pkgver}.svg" "${pkgdir}/usr/share/icons/hicolor/scalable/apps/${_pkgname}.svg"

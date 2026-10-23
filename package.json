@@ -1,7 +1,7 @@
 {
   "name": "mqtt-scope",
   "productName": "MQTT Scope",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Desktop MQTT client: live auto-subscribed topic tree, large message inspector, live plots and a publisher with saved messages",
   "main": "main/main.js",
   "license": "MIT",
@@ -23,6 +23,13 @@
     "appId": "io.github.torexz.mqtt-scope",
     "productName": "MQTT Scope",
     "artifactName": "MQTT-Scope-${version}-${os}-${arch}.${ext}",
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "ToRexZ",
+        "repo": "mqtt-scope"
+      }
+    ],
     "directories": {
       "buildResources": "build",
       "output": "dist"
@@ -39,7 +46,7 @@
         "tar.gz"
       ],
       "category": "Development",
-      "icon": "build/icon.png",
+      "icon": "build/icons",
       "synopsis": "MQTT client with live topic tree, inspector, plots and publisher",
       "syncDesktopName": true
     },
@@ -53,6 +60,7 @@
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
+      "include": "build/installer.nsh",
       "artifactName": "MQTT-Scope-${version}-win-${arch}-setup.${ext}"
     },
     "mac": {
@@ -73,6 +81,7 @@
     }
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "mqtt": "^5.16.1"
   },
   "devDependencies": {

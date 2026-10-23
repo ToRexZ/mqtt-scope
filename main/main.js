@@ -1,11 +1,17 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, safeStorage, session: electronSession, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, safeStorage, session: electronSession, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { MqttSession } = require('./mqttSession');
 const { createProfileStore } = require('./profileStore');
 const { createJsonStore } = require('./jsonStore');
+const { Updater } = require('./updater');
+const { createEngine } = require('./updateEngine');
+const { releaseUrl, createFetchRelease } = require('./fetchRelease');
+const { installKind, releasePageUrl } = require('./updateCheck');
+const { integrateDesktop } = require('./desktopIntegration');
+const { frontAfterUpdate } = require('./afterUpdate');
 const log = require('./log');
 
 // Lets tests (and portable installs) keep their data in a chosen directory.
@@ -20,6 +26,7 @@ const windows = new Map(); // webContents.id -> { win, session }
 const childWindows = new Map(); // webContents.id -> { win, ownerId, topics: Set, init } (see openChildWindow)
 let profiles;
 let stores;
+let updater;
 let quitting = false;
 let menuShortcuts = {}; // action id -> accelerator label, from the renderer's settings
 
@@ -137,6 +144,88 @@ function broadcastChange(fromId, name) {
   for (const [id, { win }] of windows) if (id !== fromId && !win.isDestroyed()) win.webContents.send('store:changed', name);
 }
 
+// The Settings switch (on unless set to false) governs automatic checks only.
+const updateChecksOn = () => stores.get('settings')?.checkForUpdates !== false;
+
+// How this build was installed. Without MQTTSCOPE_UPDATE_URL, unpackaged runs
+// (npm start, tests) are 'dev', whatever MQTTSCOPE_UPDATE_KIND says.
+function currentInstallKind() {
+  if (!app.isPackaged && !process.env.MQTTSCOPE_UPDATE_URL) return 'dev';
+  const realpath = (p) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  return installKind({
+    platform: process.platform,
+    env: process.env,
+    isPackaged: app.isPackaged,
+    resourcesPath: process.resourcesPath,
+    execPath: process.execPath,
+    exists: fs.existsSync,
+    realpath,
+  });
+}
+
+// The update notice. MQTTSCOPE_UPDATE_URL (tests, the release gate) stands in
+// for GitHub and for electron-updater's feed. Without it, unpackaged runs
+// (npm start, tests) never contact anything.
+function createUpdater(kind) {
+  const base = process.env.MQTTSCOPE_UPDATE_URL || '';
+  log.info('update', `install kind: ${kind}`);
+  const u = new Updater({
+    currentVersion: app.getVersion(),
+    kind,
+    fetchRelease: createFetchRelease({ fetch: (url, init) => net.fetch(url, init), url: releaseUrl(base), version: app.getVersion() }),
+    engine: createEngine({
+      kind,
+      feedUrl: base || null,
+      log,
+      // The menu entry follows the AppImage to its new name, also when the
+      // update installs on quit and the new version does not start.
+      onRenamed: (file) => integrateDesktop({ kind, isPackaged: app.isPackaged, log, env: { ...process.env, APPIMAGE: file } }),
+    }),
+    store: { get: () => stores.get('updates'), set: (value) => stores.set('updates', value) },
+    isEnabled: updateChecksOn,
+    // A restart drops brokers still connecting or reconnecting too.
+    connectedCount: () => [...windows.values()].filter(({ session }) => session.active).length,
+    log,
+  });
+  // Every main window shows the same state. A window closing mid-broadcast
+  // must not keep the others from hearing it.
+  u.on('state', (state) => {
+    for (const { win } of windows.values()) {
+      if (win.isDestroyed()) continue;
+      try {
+        win.webContents.send('update:state', state);
+      } catch (err) {
+        log.warn('update', `could not send the update state: ${err.message}`);
+      }
+    }
+  });
+  if (base) globalThis.__mqttscopeUpdater = u; // for tests, like the renderer's window.__mqttscope
+  return u;
+}
+
+// The install has started the new version, which comes up while this one
+// still closes its windows (each waits up to 1.5 s for its flush). Hand it the
+// single-instance lock now, or it would quit and leave this one opening a
+// window for it on the way out.
+function quitForUpdate() {
+  quitting = true;
+  app.releaseSingleInstanceLock();
+}
+
+// Help → Check for Updates…: always asks, and tells the window it came from.
+async function checkForUpdatesNow() {
+  const asked = focusedMain();
+  const result = await updater.check({ manual: true });
+  const w = asked && !asked.win.isDestroyed() ? asked : focusedMain();
+  if (w && !w.win.isDestroyed()) w.win.webContents.send('update:checked', result);
+}
+
 function storageSecurity() {
   let available = false;
   try {
@@ -167,9 +256,27 @@ function registerIpc() {
   ipcMain.handle('profiles:security', () => storageSecurity());
   ipcMain.handle('store:get', (_e, name) => stores.get(name));
   ipcMain.handle('store:set', (e, name, value) => {
+    const checkedBefore = name === 'settings' && updateChecksOn();
     const res = stores.set(name, value);
     broadcastChange(e.sender.id, name);
+    // Turning update checks back on checks now rather than in up to 6 hours.
+    if (name === 'settings' && !checkedBefore && updateChecksOn()) updater.tick();
     return res;
+  });
+
+  // The renderer only sends intents; main builds every URL it opens.
+  ipcMain.handle('update:state', () => updater.state);
+  ipcMain.handle('update:download', () => updater.download());
+  // Answers once the install has started (the Installing dialog shows meanwhile).
+  ipcMain.handle('update:restart', async (_e, force) => {
+    const res = await updater.restart({ force });
+    if (res.ok) quitForUpdate();
+    return res;
+  });
+  ipcMain.handle('update:skip', () => updater.skip());
+  ipcMain.handle('update:openRelease', async () => {
+    const version = updater.state.latest?.version;
+    if (version) await shell.openExternal(releasePageUrl(version));
   });
 
   ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(String(text)));
@@ -329,6 +436,7 @@ function buildMenu() {
       label: 'Help',
       submenu: [
         { label: 'Keyboard Shortcuts…', click: toRenderer('keyboardSettings') },
+        { label: 'Check for Updates…', click: () => checkForUpdatesNow() },
         {
           label: 'About MQTT Scope',
           click: () =>
@@ -373,15 +481,23 @@ function start() {
     },
   });
   stores = createJsonStore(userData);
+  const kind = currentInstallKind();
+  // Before the first window, so the desktop finds the entry for it.
+  integrateDesktop({ kind, isPackaged: app.isPackaged, log });
+  updater = createUpdater(kind);
   registerIpc();
-  createMainWindow();
+  // Started by the Windows installer after Restart to update: that window comes to the front.
+  frontAfterUpdate({ argv: process.argv, win: createMainWindow(), log });
+  updater.start();
+  // No check starts while the app shuts down.
+  app.on('will-quit', () => updater.stop());
   app.on('activate', () => {
     if (windows.size === 0) createMainWindow();
   });
 }
 
 if (app.requestSingleInstanceLock()) {
-  app.on('second-instance', () => app.isReady() && createMainWindow());
+  app.on('second-instance', () => app.isReady() && !quitting && createMainWindow());
   app.on('before-quit', () => (quitting = true));
   app.whenReady().then(start);
   app.on('window-all-closed', () => {
