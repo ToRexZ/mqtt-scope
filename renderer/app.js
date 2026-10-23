@@ -283,7 +283,6 @@ api.onStoreChanged(async (name) => {
     checkTabs();
   }
   else if (name === 'savedMessages') savedMessagesChanged();
-  else if (name === 'plotTabs') await Promise.all(stripTabs().map((t) => t.plots.reload()));
   else if (name === 'settings') applySettings(normalizeSettings(await api.storeGet('settings')));
 });
 

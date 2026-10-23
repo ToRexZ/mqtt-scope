@@ -9,11 +9,13 @@ import { fileURLToPath } from 'node:url';
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-export function makeUserData({ profiles, savedMessages, plots, settings } = {}) {
+// plotTabs and plots: the plot files of versions before 0.4.0.
+export function makeUserData({ profiles, savedMessages, plots, plotTabs, settings } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'mqttscope-e2e-'));
   if (profiles) writeFileSync(path.join(dir, 'profiles.json'), JSON.stringify(profiles));
   if (savedMessages) writeFileSync(path.join(dir, 'savedMessages.json'), JSON.stringify(savedMessages));
   if (plots) writeFileSync(path.join(dir, 'plots.json'), JSON.stringify(plots));
+  if (plotTabs) writeFileSync(path.join(dir, 'plotTabs.json'), JSON.stringify(plotTabs));
   if (settings) writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings));
   return dir;
 }

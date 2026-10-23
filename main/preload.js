@@ -37,6 +37,9 @@ contextBridge.exposeInMainWorld('api', {
   onStoreChanged: (cb) => ipcRenderer.on('store:changed', (_e, name) => cb(name)),
   storeGet: (name) => ipcRenderer.invoke('store:get', name),
   storeSet: (name, value) => ipcRenderer.invoke('store:set', name, value),
+  // The plot tabs of a profile (main/layoutStore.js): { doc, legacy }.
+  layoutGet: (profileId) => ipcRenderer.invoke('layouts:get', profileId),
+  layoutSet: (profileId, doc) => ipcRenderer.invoke('layouts:set', profileId, doc),
 
   // Update state lives in main. Register onUpdateState before reading
   // updateState(), so no change falls between the two.

@@ -57,6 +57,9 @@ export class PlotsPanel {
       },
     });
     this.data = new PlotData();
+    this.profileId = undefined; // the profile whose plots these are (see loadProfile)
+    this.saveTo = null; // the profile changes are saved for
+    this.loadSeq = 0;
     this.charts = new Map(); // plot id -> LineChart (the tab on screen)
     this.cards = new Map(); // plot id -> card element (the tab on screen)
     this.openSeries = new Set(); // series ids expanded in the settings panel
@@ -80,6 +83,7 @@ export class PlotsPanel {
     this.redrawTimer = null;
     clearTimeout(this.saveTimer);
     this.saveTimer = null;
+    this.loadSeq++; // a profile's plots still being read are not shown
     document.removeEventListener('fullscreenchange', this.onFullscreen);
     if (this.soloId) this.leaveSolo();
     this.disposeCharts();
@@ -113,26 +117,29 @@ export class PlotsPanel {
 
   // ------------------------------------------------------------ persistence
 
-  // keepActive: another window saved; stay on the tab shown here.
-  async load({ keepActive = false } = {}) {
+  // Shows the plots kept for a profile (main/layoutStore.js), which changes
+  // are saved to from then on. null, a tab without a profile, shows an empty
+  // tab and saves nothing. Changes not saved yet go to the profile they were
+  // made for first.
+  async loadProfile(profileId) {
+    const seq = ++this.loadSeq;
+    if (this.saveTimer) await this.flushSave();
+    if (seq !== this.loadSeq) return; // another profile was asked for meanwhile
+    this.profileId = profileId;
+    this.saveTo = null; // until its plots are read: saving could replace them
     try {
-      const [tabs, legacy] = await Promise.all([this.api.storeGet('plotTabs'), this.api.storeGet('plots')]);
-      this.model.load(tabs, { legacy, keepActive });
-      if (this.model.newer && !this.warnedNewer) {
-        this.warnedNewer = true;
-        toast('These plots were saved by a newer MQTT Scope. Changes made here are not saved, so nothing it added is lost.', 'error');
-      }
+      const { doc, legacy } = profileId === null ? { doc: null, legacy: null } : await this.api.layoutGet(profileId);
+      if (seq !== this.loadSeq) return; // another profile was asked for meanwhile
+      this.model.load(doc, { legacy });
+      this.saveTo = profileId;
+      if (this.model.newer) toast('These plots were saved by a newer MQTT Scope. Changes made here are not saved, so nothing it added is lost.', 'error');
     } catch (err) {
-      toast(`Could not load plots: ${err.message}`, 'error');
+      if (seq !== this.loadSeq) return;
+      this.model.load(null);
+      toast(`Could not load plots: ${err.message}. Changes made here are not saved.`, 'error');
     }
     this.trackSeries();
     this.renderAll();
-  }
-
-  // Picks up plot definitions saved by another window (collected data stays).
-  async reload() {
-    if (this.saveTimer) return; // this window has changes about to be saved
-    await this.load({ keepActive: true });
   }
 
   persist() {
@@ -140,15 +147,14 @@ export class PlotsPanel {
     this.saveTimer = setTimeout(() => this.flushSave(), SAVE_DELAY_MS);
   }
 
-  // Saves the tabs, and the tab on screen in the 0.1 format for older versions.
+  // Saves the tabs for the profile. Plots saved by a newer version are not:
+  // that could lose what it added.
   async flushSave() {
     clearTimeout(this.saveTimer);
     this.saveTimer = null;
-    if (this.model.newer) return;
+    if (this.saveTo === null || this.model.newer) return;
     try {
-      // The 0.1 copy first: other windows reload when plotTabs changes.
-      await this.api.storeSet('plots', this.model.legacyDoc());
-      await this.api.storeSet('plotTabs', this.model.toDoc());
+      await this.api.layoutSet(this.saveTo, this.model.toDoc());
     } catch (err) {
       toast(`Could not save plots: ${err.message}`, 'error');
     }

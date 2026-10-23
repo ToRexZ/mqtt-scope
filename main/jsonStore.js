@@ -6,9 +6,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-// plotTabs: the plot tabs; plots: the tab on screen in the 0.1 format;
-// updates: the update version the user skipped.
-const NAMES = new Set(['savedMessages', 'plots', 'plotTabs', 'settings', 'updates']);
+// profileLayouts: the plot tabs of each profile (see layoutStore.js);
+// plotTabs and plots: the plot tabs of every profile before 0.4.0, and the tab
+// on screen in the 0.1 format (only read now); windowState: the windows and
+// tabs to reopen; updates: the update version the user skipped.
+const NAMES = new Set(['savedMessages', 'plots', 'plotTabs', 'profileLayouts', 'windowState', 'settings', 'updates']);
 
 function createJsonStore(dir) {
   const fileFor = (name) => {

@@ -413,6 +413,7 @@ export class ConnectionDialog {
   async remove(p) {
     if (this.openIds.has(p.id)) return; // the button is disabled, but its tab may have opened since
     if (!(await this.api.confirm({ message: `Delete connection “${p.name}”?`, okLabel: 'Delete' }))) return;
+    if (this.openIds.has(p.id)) return; // it was opened while the question showed
     this.profiles = this.profiles.filter((x) => x !== p);
     if (!this.profiles.length) this.profiles.push(blankProfile('Local broker'));
     this.selectedId = this.firstClosed().id;

@@ -6,9 +6,10 @@
 // calls onChange() (the panel saves then). Plot, tab and layout objects
 // handed out are live: read them, but change them only through these methods.
 //
-// Saved as two documents (see plotsDocFrom in plotLayouts.js): toDoc() with
-// the tabs, and legacyDoc(), a copy of the tab on screen in the 0.1 format so
-// an older version opening the same data still finds its plots.
+// Saved as toDoc(), one per profile (main/layoutStore.js). Before 0.4.0 the
+// app also saved legacyDoc(), a copy of the tab on screen in the 0.1 format
+// for older versions; load() still reads both (see plotsDocFrom in
+// plotLayouts.js).
 
 import {
   WINDOWS,

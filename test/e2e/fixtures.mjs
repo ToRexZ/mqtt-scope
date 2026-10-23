@@ -251,6 +251,14 @@ export async function waitForFile(file, pred = () => true, message = file) {
   return readFileSync(file);
 }
 
+// The plot layout saved for a profile (see main/layoutStore.js), once
+// `pred(layout)` holds.
+export async function waitForLayout(userData, profileId, pred = () => true) {
+  const layoutOf = (b) => JSON.parse(b).byProfile?.[profileId];
+  const buf = await waitForFile(path.join(userData, 'profileLayouts.json'), (b) => !!layoutOf(b) && pred(layoutOf(b)), `the plot layout of ${profileId}`);
+  return layoutOf(buf);
+}
+
 // A port nothing listens on.
 export async function closedPort() {
   const { createServer } = await import('node:net');

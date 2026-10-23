@@ -159,9 +159,9 @@ export class ConnectionTab {
     this.tree.trimHistories();
   }
 
-  // Saved messages and plot tabs.
+  // Saved messages, and the plots of the tab's profile (none before it has one).
   load() {
-    return Promise.all([this.publisher.load(), this.plots.load()]);
+    return Promise.all([this.publisher.load(), this.plots.loadProfile(this.profile?.id ?? null)]);
   }
 
   // ---------------------------------------------------------------- views
@@ -368,6 +368,11 @@ export class ConnectionTab {
   // ---------------------------------------------------------------- connection
 
   async connect(profile) {
+    // The profile's plots first, so the session shows them from its start. A
+    // picker reads them on every attempt (nothing changes them there, and the
+    // profile may have been open in another tab meanwhile); a session keeps
+    // its own, and the data they collected.
+    if (this.mode === 'picker' || this.plots.profileId !== profile.id) await this.plots.loadProfile(profile.id ?? null);
     const res = await this.tabApi.connect(profile);
     // Open in another tab: two clients with one client ID would throw each
     // other off the broker. The shell shows that tab; this one stays as it was.
@@ -629,9 +634,7 @@ export class ConnectionTab {
 
   // ---------------------------------------------------------------- teardown
 
-  // Saves pending plot changes. Until plot layouts are kept per profile every
-  // tab saves to the same store, so a tab without changes writes nothing (it
-  // would undo another tab's).
+  // Saves pending plot changes (to the tab's profile).
   flush() {
     return this.plots.saveTimer ? this.plots.flushSave() : Promise.resolve();
   }

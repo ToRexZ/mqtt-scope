@@ -22,7 +22,7 @@ import {
   toast,
   viewerBody,
   viewerTab,
-  waitForFile,
+  waitForLayout,
 } from './fixtures.mjs';
 
 const card = (page, title) => page.locator('.plot-card').filter({ has: page.locator('.plot-title', { hasText: new RegExp(`^${title.replace(/[$.*+?()[\]]/g, '\\$&')}$`) }) });
@@ -183,8 +183,7 @@ test('plots: add from tree and inspector, live values, window, freeze, remove, C
   ]);
 
   // Plot definitions persist.
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => {
-    const d = JSON.parse(b);
+  await waitForLayout(userData, `p${broker.port}`, (d) => {
     const plots = d.tabs?.[0]?.plots || [];
     return plots.length === 2 && plots[0].title === 'Climate' && plots[0].windowSec === 60 && plots[0].series.length === 1;
   });

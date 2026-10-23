@@ -32,9 +32,17 @@ export function blankProfile(name = 'New connection') {
 // What a connection is made with: a tab whose snapshot differs from the saved
 // profile in this needs a reconnect to apply it. Not the name or subscriptions.
 const SIGNATURE_FIELDS = ['protocol', 'host', 'port', 'wsPath', 'mqttVersion', 'username', 'password', 'clientId', 'keepalive', 'clean', 'rejectUnauthorized', 'caFile', 'certFile', 'keyFile'];
+const NUMBER_FIELDS = new Set(['port', 'mqttVersion', 'keepalive']);
+
 export function connectSignature(profile) {
-  // Missing and empty count the same; the two flags are on unless false.
-  const value = (k) => (k === 'clean' || k === 'rejectUnauthorized' ? profile[k] !== false : (profile[k] ?? ''));
+  // Missing and empty count the same; the two flags are on unless false; a
+  // number counts the same as typed in the form ('5') and as saved (5).
+  const value = (k) => {
+    if (k === 'clean' || k === 'rejectUnauthorized') return profile[k] !== false;
+    const v = profile[k] ?? '';
+    if (!NUMBER_FIELDS.has(k)) return v;
+    return String(v).trim() === '' ? '' : Number(v);
+  };
   return JSON.stringify(SIGNATURE_FIELDS.map(value));
 }
 

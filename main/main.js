@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const { ConnectionRegistry } = require('./connections');
 const { createProfileStore } = require('./profileStore');
 const { createJsonStore } = require('./jsonStore');
+const { createLayoutStore } = require('./layoutStore');
 const { Updater } = require('./updater');
 const { createEngine } = require('./updateEngine');
 const { releaseUrl, createFetchRelease } = require('./fetchRelease');
@@ -28,6 +29,7 @@ const childWindows = new Map(); // webContents.id -> { win, ownerId, connId, top
 const registry = new ConnectionRegistry();
 let profiles;
 let stores;
+let layouts;
 let updater;
 let quitting = false;
 let menuShortcuts = {}; // action id -> accelerator label, from the renderer's settings
@@ -271,6 +273,10 @@ function storageSecurity() {
   return { available, secure: available && backend !== 'basic_text', backend };
 }
 
+// Stores a window may read but not write: main writes them, or (the plot
+// files of earlier versions) nothing does.
+const MAIN_STORES = new Set(['plots', 'plotTabs', 'profileLayouts', 'windowState']);
+
 function registerIpc() {
   const parent = (e) => BrowserWindow.fromWebContents(e.sender);
 
@@ -311,13 +317,25 @@ function registerIpc() {
 
   ipcMain.handle('profiles:list', () => profiles.load());
   ipcMain.handle('profiles:save', (e, list) => {
+    const before = profiles.load().map((p) => p.id);
     const res = profiles.save(list);
+    // A deleted profile's plots go with it; a renamed one keeps its id.
+    const kept = new Set(list.map((p) => p?.id));
+    try {
+      layouts.remove(before.filter((id) => !kept.has(id)));
+    } catch (err) {
+      log.error('layouts', err); // the profiles themselves are saved
+    }
     broadcastChange(e.sender.id, 'profiles');
     return res;
   });
   ipcMain.handle('profiles:security', () => storageSecurity());
+  // A profile is open in one tab app-wide, so its layout needs no broadcast.
+  ipcMain.handle('layouts:get', (_e, profileId) => layouts.get(profileId));
+  ipcMain.handle('layouts:set', (_e, profileId, doc) => layouts.set(profileId, doc));
   ipcMain.handle('store:get', (_e, name) => stores.get(name));
   ipcMain.handle('store:set', (e, name, value) => {
+    if (MAIN_STORES.has(name)) throw new Error(`"${name}" is kept by the main process`);
     const checkedBefore = name === 'settings' && updateChecksOn();
     const res = stores.set(name, value);
     broadcastChange(e.sender.id, name);
@@ -548,6 +566,13 @@ function start() {
     },
   });
   stores = createJsonStore(userData);
+  layouts = createLayoutStore({ stores, profileIds: () => profiles.load().map((p) => p.id) });
+  try {
+    // Every profile there is now starts with the plots of the version before.
+    layouts.migrate();
+  } catch (err) {
+    log.error('layouts', err);
+  }
   const kind = currentInstallKind();
   // Before the first window, so the desktop finds the entry for it.
   integrateDesktop({ kind, isPackaged: app.isPackaged, log });

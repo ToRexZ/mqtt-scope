@@ -181,4 +181,13 @@ describe('connectSignature', () => {
     const { clientId, caFile, ...rest } = p;
     assert.equal(connectSignature(rest), connectSignature(p));
   });
+
+  test('numbers typed in the form equal the saved numbers', () => {
+    // A form field gives '5'; the profile saved and loaded again has 5.
+    const p = blankProfile();
+    assert.equal(connectSignature({ ...p, port: '1883', mqttVersion: '4', keepalive: '60' }), connectSignature(p));
+    assert.equal(connectSignature({ ...p, mqttVersion: ' ' }), connectSignature({ ...p, mqttVersion: undefined }));
+    assert.notEqual(connectSignature({ ...p, mqttVersion: '5' }), connectSignature(p));
+    assert.notEqual(connectSignature({ ...p, port: '' }), connectSignature({ ...p, port: 0 }));
+  });
 });
