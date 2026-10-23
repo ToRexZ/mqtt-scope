@@ -139,11 +139,26 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
     }
     const saveBtn = Object.assign(el('button', 'btn primary', 'Save'), { type: 'submit' });
     const actions = el('div', 'modal-actions');
-    // The running version comes with the update state main already keeps.
+    actions.append(button('Cancel', '', () => done(null)), saveBtn);
+
+    // Footer: the version and what the native menu bar used to hold (there is
+    // no menu bar on Linux and Windows). Main knows every path and URL.
     const version = el('span', 'settings-version');
     api.updateState().then((u) => u?.current && (version.textContent = `MQTT Scope ${u.current}`), () => {});
-    actions.append(version, button('Cancel', '', () => done(null)), saveBtn);
-    form.append(el('h3', '', 'Settings'), tabs, general, keyboard, actions);
+    const link = (label, title, run) => button(label, title, run, 'btn link');
+    const footerLinks = el('div', 'settings-links');
+    footerLinks.append(
+      // The answer is a toast or the update panel, both hidden behind this dialog.
+      link('Check for updates', 'Ask GitHub for the latest version now', () => {
+        done(null);
+        api.checkForUpdates();
+      }),
+      link('Show log file', 'Show main.log in the file manager', () => api.showLogFile()),
+      link('Open data folder', 'Open the folder with profiles, settings and logs', () => api.openDataFolder()),
+    );
+    const footer = el('div', 'settings-footer');
+    footer.append(version, footerLinks);
+    form.append(el('h3', '', 'Settings'), tabs, general, keyboard, actions, footer);
 
     const done = (v) => {
       document.removeEventListener('keydown', onRecord, true);

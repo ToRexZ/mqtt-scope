@@ -59,6 +59,16 @@ function sessionOf(e) {
   return owner.session;
 }
 
+// Linux and Windows show no menu bar at all. The application menu stays set
+// though: its accelerators (Quit, zoom, full screen, dev tools) only fire while
+// a window has the menu, and they fire with the bar hidden. Not autoHideMenuBar:
+// that lets Alt bring the bar back. macOS has its system menu bar.
+const NO_MENU_BAR = process.platform === 'darwin' ? {} : { autoHideMenuBar: false, menuBarVisible: false };
+
+function hideMenuBar(win) {
+  if (process.platform !== 'darwin') win.setMenuBarVisibility(false);
+}
+
 function focusedMain() {
   const w = BrowserWindow.getFocusedWindow();
   return (w && ownerOf(w.webContents)) || windows.values().next().value || null;
@@ -72,12 +82,13 @@ function createMainWindow() {
     minHeight: 600,
     title: 'MQTT Scope',
     backgroundColor: '#0f1115',
-    autoHideMenuBar: true,
+    ...NO_MENU_BAR,
     icon: ICON,
     show: !process.env.MQTTSCOPE_HIDDEN,
     webPreferences: webPreferences(),
   });
   hardenWindow(win);
+  hideMenuBar(win);
   const id = win.webContents.id;
   const session = new MqttSession();
   windows.set(id, { win, session });
@@ -218,7 +229,7 @@ function quitForUpdate() {
   app.releaseSingleInstanceLock();
 }
 
-// Help → Check for Updates…: always asks, and tells the window it came from.
+// Settings → Check for updates (and macOS Help → Check for Updates…): always asks, and tells the window it came from.
 async function checkForUpdatesNow() {
   const asked = focusedMain();
   const result = await updater.check({ manual: true });
@@ -283,6 +294,10 @@ function registerIpc() {
   ipcMain.handle('app:newWindow', () => {
     createMainWindow();
   });
+  // The old Help menu's items, from the Settings footer. Main builds every path.
+  ipcMain.handle('app:checkForUpdates', () => checkForUpdatesNow());
+  ipcMain.handle('app:showLogFile', () => log.file && shell.showItemInFolder(log.file));
+  ipcMain.handle('app:openDataFolder', () => shell.openPath(app.getPath('userData')));
   ipcMain.on('menu:shortcuts', (_e, map) => {
     if (!map || typeof map !== 'object') return;
     menuShortcuts = Object.fromEntries(Object.entries(map).filter(([k, v]) => typeof k === 'string' && (typeof v === 'string' || v === null)));
@@ -374,12 +389,13 @@ function openChildWindow(owner, { page, title, size, topics, init }) {
     ...size,
     title,
     backgroundColor: '#0f1115',
-    autoHideMenuBar: true,
+    ...NO_MENU_BAR,
     icon: ICON,
     show: !process.env.MQTTSCOPE_HIDDEN,
     webPreferences: webPreferences(),
   });
   hardenWindow(win);
+  hideMenuBar(win);
   const id = win.webContents.id;
   childWindows.set(id, { win, ownerId: owner.win.webContents.id, topics: new Set(topics.filter((t) => typeof t === 'string')), init });
   win.on('closed', () => childWindows.delete(id));
@@ -404,8 +420,8 @@ function buildMenu() {
         { label: 'Connections…', click: toRenderer('connections'), ...keys('connections') },
         { label: 'Subscriptions…', click: toRenderer('subscriptions'), ...keys('subscriptions') },
         { label: 'Settings…', click: toRenderer('settings'), ...keys('settings') },
-        { type: 'separator' },
-        { label: 'Open Data Folder', click: () => shell.openPath(app.getPath('userData')) },
+        // Linux and Windows have no visible menu: these live in Settings.
+        ...(isMac ? [{ type: 'separator' }, { label: 'Open Data Folder', click: () => shell.openPath(app.getPath('userData')) }] : []),
         { type: 'separator' },
         isMac ? { role: 'close' } : { role: 'quit' },
       ],
@@ -432,24 +448,28 @@ function buildMenu() {
         { role: 'toggleDevTools' },
       ],
     },
-    {
-      label: 'Help',
-      submenu: [
-        { label: 'Keyboard Shortcuts…', click: toRenderer('keyboardSettings') },
-        { label: 'Check for Updates…', click: () => checkForUpdatesNow() },
+    ...(isMac
+      ? [
         {
-          label: 'About MQTT Scope',
-          click: () =>
-            dialog.showMessageBox(focusedMain()?.win, {
-              type: 'info',
-              message: `MQTT Scope ${app.getVersion()}`,
-              detail: `Electron ${process.versions.electron} · Chromium ${process.versions.chrome} · Node ${process.versions.node}\nData: ${app.getPath('userData')}`,
-              icon: ICON,
-            }),
+          label: 'Help',
+          submenu: [
+            { label: 'Keyboard Shortcuts…', click: toRenderer('keyboardSettings') },
+            { label: 'Check for Updates…', click: () => checkForUpdatesNow() },
+            {
+              label: 'About MQTT Scope',
+              click: () =>
+                dialog.showMessageBox(focusedMain()?.win, {
+                  type: 'info',
+                  message: `MQTT Scope ${app.getVersion()}`,
+                  detail: `Electron ${process.versions.electron} · Chromium ${process.versions.chrome} · Node ${process.versions.node}\nData: ${app.getPath('userData')}`,
+                  icon: ICON,
+                }),
+            },
+            { label: 'Show Log File', click: () => log.file && shell.showItemInFolder(log.file) },
+          ],
         },
-        { label: 'Show Log File', click: () => log.file && shell.showItemInFolder(log.file) },
-      ],
-    },
+        ]
+      : []),
   ];
   try {
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));

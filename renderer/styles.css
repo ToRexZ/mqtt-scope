@@ -2201,14 +2201,31 @@ body.popout .viewer-host {
 .settings-tabs {
   margin-bottom: 12px;
 }
+.settings-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--grid);
+}
 .settings-version {
-  margin-right: auto;
   color: var(--faint);
   font-size: 11.5px;
   user-select: text;
 }
-.settings-version:empty {
-  display: none;
+.settings-links {
+  display: flex;
+  gap: 16px;
+}
+.settings-links .btn.link {
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.settings-links .btn.link:hover {
+  color: var(--accent);
 }
 .settings-page {
   display: flex;

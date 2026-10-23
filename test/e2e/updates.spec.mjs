@@ -1,5 +1,5 @@
 // The update check as the main process wires it (when it may contact
-// anything, the state every main window gets, Help → Check for Updates…, the
+// anything, the state every main window gets, Settings → Check for updates, the
 // release page and the settings switch), then the top-bar button and panel
 // that show it, and the Installing dialog of Restart to update. A local
 // release server stands in for GitHub (MQTTSCOPE_UPDATE_URL); nothing here
@@ -58,7 +58,13 @@ async function clickMenu(app, menuLabel, itemLabel) {
     [menuLabel, itemLabel],
   );
 }
-const checkForUpdates = (app) => clickMenu(app, 'Help', 'Check for Updates…');
+// Settings → Check for updates, as a user does it. (The connection dialog is
+// modal and starts open in a window without a connection.)
+async function checkForUpdates(page) {
+  if (await page.locator('.conn-dialog .modal-close').count()) await closeConnectionDialog(page);
+  await page.locator('#btn-settings').click();
+  await page.locator('.modal.settings .settings-footer').getByRole('button', { name: 'Check for updates' }).click();
+}
 
 async function newWindow(app) {
   const opened = app.waitForEvent('window');
@@ -76,8 +82,8 @@ async function expectNoContact(env, extraEnv) {
   expect(await updateState(page)).toMatchObject({ status: 'none', kind: 'dev', current: VERSION, latest: null });
   expect(await app.evaluate(() => typeof globalThis.__mqttscopeUpdater)).toBe('undefined');
 
-  // The menu check says so instead of asking; re-enabling the setting asks nothing.
-  await checkForUpdates(app);
+  // The check from Settings says so instead of asking; re-enabling the setting asks nothing.
+  await checkForUpdates(page);
   await expect.poll(() => checkResults(page)).toEqual([{ result: 'disabled' }]);
   await page.evaluate(() => window.api.storeSet('settings', { checkForUpdates: false }));
   await page.evaluate(() => window.api.storeSet('settings', { checkForUpdates: true }));
@@ -147,24 +153,21 @@ test('override: startup check finds a newer release and every window gets it', a
   expect(errors).toEqual([]);
 });
 
-test('Help → Check for Updates reports latest and offline', async ({ env }) => {
+test('Check for updates reports latest and offline', async ({ env }) => {
   const server = await env.releaseServer(release(VERSION));
-  const { app, page, errors } = await env.launch({ env: overrides(server) });
+  const { page, errors } = await env.launch({ env: overrides(server) });
   await expect.poll(() => server.requests()).toBe(1); // the startup check
   await recordUpdates(page);
 
-  const help = await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.find((i) => i.label === 'Help').submenu.items.map((i) => i.label));
-  expect(help.indexOf('Check for Updates…')).toBe(help.indexOf('Keyboard Shortcuts…') + 1);
-
-  await checkForUpdates(app);
+  await checkForUpdates(page);
   await expect.poll(() => checkResults(page)).toEqual([{ result: 'latest' }]);
 
   server.setRelease(null); // the server answers 503
-  await checkForUpdates(app);
+  await checkForUpdates(page);
   await expect.poll(async () => (await checkResults(page)).at(-1)).toEqual({ result: 'error', error: 'HTTP 503' });
 
   await server.close(); // nothing listens any more
-  await checkForUpdates(app);
+  await checkForUpdates(page);
   await expect.poll(async () => (await checkResults(page)).length).toBe(3);
   expect((await checkResults(page)).at(-1)).toEqual({ result: 'error', error: expect.stringMatching(/\S/) });
 
@@ -504,8 +507,8 @@ test('notice: button, panel, Later keeps it, Skip hides it until a newer release
   await expect(panel(page)).toBeHidden();
   await expect(page.locator('#tree-filter')).toBeFocused();
 
-  // Help → Check for Updates… opens the panel in the window that asked.
-  await checkForUpdates(app);
+  // Settings → Check for updates opens the panel in the window that asked.
+  await checkForUpdates(page);
   await expect(page.getByRole('dialog', { name: 'MQTT Scope 9.9.10' })).toBeVisible();
   await expect(panel(page)).toBeFocused();
   await expect(notes(page)).toHaveText('More fixes');
@@ -696,9 +699,9 @@ test('Restart to update: every window shows the Installing dialog, its bar movin
   await expect(installingDialog(page)).toBeFocused();
 
   // Nothing opens over it or takes its focus: neither Connections… (the menu
-  // action allowed over other dialogs) nor Help → Check for Updates….
+  // action allowed over other dialogs) nor Check for updates (called directly: Settings is under the dialog).
   await clickMenu(app, 'File', 'Connections…');
-  await checkForUpdates(app);
+  await page.evaluate(() => window.api.checkForUpdates()); // the Settings button cannot be reached under the dialog
   await expect.poll(() => server.requests()).toBe(2);
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
   await expect(page.locator('.conn-dialog')).toHaveCount(0);
@@ -892,7 +895,7 @@ test('a new window shows the current update state', async ({ env }) => {
   expect(errors).toEqual([]);
 });
 
-test('turning the setting off stops automatic checks; Help still checks', async ({ env }) => {
+test('turning the setting off stops automatic checks; the Settings button still checks', async ({ env }) => {
   const server = await env.releaseServer(release(VERSION));
   const { app, page, userData, errors } = await env.launch({ env: overrides(server) });
   await expect.poll(() => server.requests()).toBe(1); // the startup check
@@ -915,8 +918,8 @@ test('turning the setting off stops automatic checks; Help still checks', async 
   await tick(app);
   expect(server.requests()).toBe(1);
 
-  // Help → Check for Updates… still asks, and says so.
-  await checkForUpdates(app);
+  // Settings → Check for updates still asks, and says so.
+  await checkForUpdates(page);
   await expect(toast(page).filter({ hasText: `You're on the latest version (${VERSION})` })).toBeVisible();
   expect(server.requests()).toBe(2);
 
@@ -953,23 +956,23 @@ test('a failed download shows its error in the panel, and Retry can succeed', as
   expect(errors).toEqual([]);
 });
 
-test('Help → Check for Updates… answers latest, failure and development builds with a toast', async ({ env }) => {
+test('Check for updates answers latest, failure and development builds with a toast', async ({ env }) => {
   const server = await env.releaseServer(release(VERSION));
-  const { app, page, errors } = await env.launch({ env: overrides(server) });
+  const { page, errors } = await env.launch({ env: overrides(server) });
   await expect.poll(() => server.requests()).toBe(1);
 
-  await checkForUpdates(app);
+  await checkForUpdates(page);
   await expect(toast(page, 'info').filter({ hasText: `You're on the latest version (${VERSION})` })).toBeVisible();
 
   server.setRelease(null); // 503
-  await checkForUpdates(app);
+  await checkForUpdates(page);
   await expect(toast(page, 'error').filter({ hasText: "Couldn't check for updates: HTTP 503" })).toBeVisible();
   await expect(updateButton(page)).toBeHidden();
   await expect(panel(page)).toBeHidden();
   expect(errors).toEqual([]);
 
   const dev = await env.launch({});
-  await checkForUpdates(dev.app);
+  await checkForUpdates(dev.page);
   await expect(toast(dev.page, 'info').filter({ hasText: 'Update checks are off in development builds' })).toBeVisible();
   await expect(updateButton(dev.page)).toBeHidden();
   expect(dev.errors).toEqual([]);
