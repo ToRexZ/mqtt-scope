@@ -63,7 +63,7 @@ function sessionOf(e) {
 // though: its accelerators (Quit, zoom, full screen, dev tools) only fire while
 // a window has the menu, and they fire with the bar hidden. Not autoHideMenuBar:
 // that lets Alt bring the bar back. macOS has its system menu bar.
-const NO_MENU_BAR = process.platform === 'darwin' ? {} : { autoHideMenuBar: false, menuBarVisible: false };
+const NO_MENU_BAR = process.platform === 'darwin' ? {} : { autoHideMenuBar: false };
 
 function hideMenuBar(win) {
   if (process.platform !== 'darwin') win.setMenuBarVisibility(false);
@@ -216,7 +216,11 @@ function createUpdater(kind) {
       }
     }
   });
-  if (base) globalThis.__mqttscopeUpdater = u; // for tests, like the renderer's window.__mqttscope
+  if (base) {
+    // For tests, like the renderer's window.__mqttscope.
+    globalThis.__mqttscopeUpdater = u;
+    globalThis.__checkForUpdatesNow = checkForUpdatesNow;
+  }
   return u;
 }
 
@@ -229,9 +233,10 @@ function quitForUpdate() {
   app.releaseSingleInstanceLock();
 }
 
-// Settings → Check for updates (and macOS Help → Check for Updates…): always asks, and tells the window it came from.
-// announce: tell the window (the macOS menu). The Settings button passes false
-// and shows the answer itself from the returned result.
+// A manual check (Settings → Check for updates, macOS Help → Check for
+// Updates…): always asks. announce: send the answer to the window that asked,
+// as update:checked (the macOS menu). The Settings button passes false and shows
+// the answer itself from the returned result.
 async function checkForUpdatesNow({ announce = true } = {}) {
   const asked = focusedMain();
   const result = await updater.check({ manual: true });
@@ -299,8 +304,23 @@ function registerIpc() {
   });
   // The old Help menu's items, from the Settings footer. Main builds every path.
   ipcMain.handle('app:checkForUpdates', () => checkForUpdatesNow({ announce: false }));
-  ipcMain.handle('app:showLogFile', () => log.file && shell.showItemInFolder(log.file));
-  ipcMain.handle('app:openDataFolder', () => shell.openPath(app.getPath('userData')));
+  // These answer '' when it worked, else why not (the renderer toasts it).
+  ipcMain.handle('app:showLogFile', () => {
+    if (!log.file || !fs.existsSync(log.file)) return 'there is no log file yet';
+    try {
+      shell.showItemInFolder(log.file);
+      return '';
+    } catch (err) {
+      return err.message;
+    }
+  });
+  ipcMain.handle('app:openDataFolder', async () => {
+    try {
+      return await shell.openPath(app.getPath('userData')); // an error message, '' when it opened
+    } catch (err) {
+      return err.message;
+    }
+  });
   ipcMain.on('menu:shortcuts', (_e, map) => {
     if (!map || typeof map !== 'object') return;
     menuShortcuts = Object.fromEntries(Object.entries(map).filter(([k, v]) => typeof k === 'string' && (typeof v === 'string' || v === null)));

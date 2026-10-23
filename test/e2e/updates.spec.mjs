@@ -1118,3 +1118,27 @@ test('Settings → Check for updates: with unsaved edits a newer version is a to
   await expect(panel(page)).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+// The macOS Help → Check for Updates… item (no menu bar elsewhere, so nothing
+// else reaches it) asks main to announce the answer to the window as
+// update:checked: a toast, or the panel.
+test('an announced check (the macOS menu item) shows its answer in the window that asked', async ({ env }) => {
+  const server = await env.releaseServer(release(VERSION));
+  const { app, page, errors } = await env.launch({ env: overrides(server) });
+  await expect.poll(() => server.requests()).toBe(1);
+  await closeConnectionDialog(page);
+  const announce = () => app.evaluate(() => globalThis.__checkForUpdatesNow({ announce: true }));
+
+  await announce();
+  await expect(toast(page, 'info').filter({ hasText: `You're on the latest version (${VERSION})` })).toBeVisible();
+
+  server.setRelease(release('9.9.9', 'Menu notes'));
+  await announce();
+  await expect(page.getByRole('dialog', { name: 'MQTT Scope 9.9.9' })).toBeVisible();
+  await expect(notes(page)).toHaveText('Menu notes');
+
+  server.setRelease(null); // 503
+  await announce();
+  await expect(toast(page, 'error').filter({ hasText: "Couldn't check for updates: HTTP 503" })).toBeVisible();
+  expect(errors).toEqual([]);
+});

@@ -4,7 +4,7 @@
 import { el, button, toast, overlayHost } from './ui.js';
 import { iconButton } from './icons.js';
 import { checkedView } from './updateView.js';
-import { ACTIONS, comboFromEvent, conflicts, displayCombo, normalizeOverrides, resolveBindings } from './keys.js';
+import { ACTIONS, comboFromEvent, conflicts, displayCombo, fixedShortcuts, normalizeOverrides, resolveBindings } from './keys.js';
 
 export const DEFAULT_SETTINGS = {
   historyLimit: 100, // messages kept per topic
@@ -102,7 +102,16 @@ export function openSettings(api, current, { tab = 'general', openUpdatePanel = 
       recording = null;
       renderKeys();
     });
-    keyboard.append(el('div', 'field-hint', 'Click a shortcut, then press the keys you want.'), table, conflictNote, resetAll);
+    // What the menu bar used to show: fixed by the app, not part of the table above.
+    const fixed = el('div', 'keys-fixed');
+    fixed.append(el('div', 'field-hint', 'Fixed shortcuts (not rebindable)'));
+    for (const { label, combo } of fixedShortcuts()) {
+      const row = el('div', 'keys-row');
+      row.append(el('span', 'keys-label', label), el('span', 'keys-fixed-combo', combo));
+      row.title = 'Fixed: this shortcut cannot be changed';
+      fixed.append(row);
+    }
+    keyboard.append(el('div', 'field-hint', 'Click a shortcut, then press the keys you want.'), table, conflictNote, resetAll, fixed);
 
     // Records the next key press for the selected action.
     const onRecord = (e) => {
@@ -147,15 +156,30 @@ export function openSettings(api, current, { tab = 'general', openUpdatePanel = 
     const version = el('span', 'settings-version');
     api.updateState().then((u) => u?.current && (version.textContent = `MQTT Scope ${u.current}`), () => {});
     const link = (label, title, run) => button(label, title, run, 'btn small');
+    // Runs a footer action that answers '' or why it failed.
+    const opens = (what, ask) => async () => {
+      let why;
+      try {
+        why = await ask();
+      } catch (err) {
+        why = err.message;
+      }
+      if (why) toast(`Couldn't open the ${what}: ${why}`, 'error');
+    };
     // Toasts show above this dialog, so it stays open with its edits. A newer
     // version opens the update panel, which this modal would cover: only when
     // nothing here is unsaved (then the dialog closes first).
     const checkNow = async () => {
+      checkBtn.disabled = true;
+      checkBtn.textContent = 'Checking…';
       let result;
       try {
         result = await api.checkForUpdates();
       } catch (err) {
         return toast(`Couldn't check for updates: ${err.message}`, 'error');
+      } finally {
+        checkBtn.disabled = false;
+        checkBtn.textContent = 'Check for updates';
       }
       const state = await api.updateState().catch(() => null);
       const reaction = checkedView(result, state);
@@ -168,10 +192,11 @@ export function openSettings(api, current, { tab = 'general', openUpdatePanel = 
       }
     };
     const footerLinks = el('div', 'settings-links');
+    const checkBtn = link('Check for updates', 'Ask GitHub for the latest version now', checkNow);
     footerLinks.append(
-      link('Check for updates', 'Ask GitHub for the latest version now', checkNow),
-      link('Show log file', 'Show main.log in the file manager', () => api.showLogFile()),
-      link('Open data folder', 'Open the folder with profiles, settings and logs', () => api.openDataFolder()),
+      checkBtn,
+      link('Show log file', 'Show main.log in the file manager', opens('log file', () => api.showLogFile())),
+      link('Open data folder', 'Open the folder with profiles, settings and logs', opens('data folder', () => api.openDataFolder())),
     );
     const footer = el('div', 'settings-footer');
     footer.append(version, footerLinks);

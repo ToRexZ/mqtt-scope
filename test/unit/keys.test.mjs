@@ -8,6 +8,7 @@ import {
   conflicts,
   bindingIndex,
   displayCombo,
+  fixedShortcuts,
   toAccelerator,
   isPlainKey,
   keyBelongsToTarget,
@@ -133,5 +134,29 @@ describe('keys the focused element uses itself', () => {
   test('anywhere else the shortcut gets the key', () => {
     assert.equal(keyBelongsToTarget('Space', elem('div')), false);
     assert.equal(keyBelongsToTarget('Space', null), false);
+  });
+});
+
+describe('fixedShortcuts', () => {
+  const combos = (platform) => Object.fromEntries(fixedShortcuts(platform).map((s) => [s.label, s.combo]));
+
+  test('the keys the menu bar used to show, per platform', () => {
+    assert.deepEqual(combos('Linux x86_64'), {
+      'Zoom in': 'Ctrl+Plus',
+      'Zoom out': 'Ctrl+Minus',
+      'Reset zoom': 'Ctrl+0',
+      'Full screen': 'Shift+F11',
+      'Developer tools': 'Ctrl+Shift+I',
+      Quit: 'Ctrl+Q',
+    });
+    assert.equal(combos('Win32').Quit, 'Alt+F4');
+    assert.equal(combos('Win32')['Zoom in'], 'Ctrl+Plus');
+    assert.equal(combos('MacIntel').Quit, '⌘Q');
+    assert.equal(combos('MacIntel')['Full screen'], '⌃⌘F');
+  });
+
+  test('none of them is also a rebindable action key', () => {
+    const bound = new Set(ACTIONS.map((a) => displayCombo(a.default, false)));
+    for (const { combo } of fixedShortcuts('Linux')) assert.ok(!bound.has(combo), combo);
   });
 });

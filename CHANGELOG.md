@@ -13,6 +13,10 @@ All notable changes to MQTT Scope. The format follows
   data folder are at the bottom of Settings, next to the version. Keyboard
   shortcuts work as before.
 
+### Removed
+
+- The About dialog on Linux and Windows (the version is in Settings).
+
 ## [0.3.0] - 2026-10-23
 
 ### Added

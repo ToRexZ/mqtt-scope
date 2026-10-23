@@ -249,8 +249,10 @@ topic in the tree also expands it one level (default on), and whether to check
 for updates (default on). The bottom of the dialog shows the MQTT Scope
 version and has **Check for updates**, **Show log file** and **Open data
 folder**. There is no menu bar on Linux and Windows; the shortcuts that used to
-live only in it still work (Ctrl+Q quit, Ctrl+Plus / Ctrl+Minus / Ctrl+0 zoom,
-Shift+F11 full screen, Ctrl+Shift+I developer tools).
+live only in it still work (Ctrl+Plus / Ctrl+Minus / Ctrl+0 zoom, Shift+F11 full
+screen, Ctrl+Shift+I developer tools, Ctrl+Q quit on Linux; on Windows close the
+window or press Alt+F4). Settings → Keyboard lists them under the changeable
+ones.
 
 Data lives in the app data folder (Settings → Open data folder):
 `profiles.json` (connections), `savedMessages.json`, `plotTabs.json` (plot

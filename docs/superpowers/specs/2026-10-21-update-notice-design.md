@@ -173,7 +173,7 @@ dry run; its fallback is the release-page link. The first real update
 - Exact panel layout and styling, following existing top-bar and menu styles.
 - Test design: unit tests for version comparison and install detection; an
   e2e test against a local fake release endpoint for the notice, Later, Skip,
-  the menu check and the offline case. The electron-updater download/install
+  the Settings check button and the offline case. The electron-updater download/install
   itself can be faked behind the module boundary.
 - README "Updates" section (including the AppImage rename tip and the
   release-attached PKGBUILD), CHANGELOG entry, version bump to 0.3.0 (new
