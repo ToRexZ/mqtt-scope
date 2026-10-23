@@ -3,7 +3,7 @@
 // draws it in the active New connection tab (mount), and it shows that tab's
 // connection status.
 
-import { el, button, toast, menuOpen } from './ui.js';
+import { el, button, toast } from './ui.js';
 import { comboFromEvent, isTypingTarget } from './keys.js';
 import { DEFAULT_PORTS, blankProfile, parseSubscriptions, formatSubscriptions, newId } from './profiles.js';
 
@@ -17,7 +17,7 @@ export class ConnectionDialog {
     this.selectedId = null;
     this.status = null;
     this.host = null; // the tab element it is drawn in
-    this.mounted = null; // mount()'s options: closable, onConnect(profile), onCancel()
+    this.mounted = null; // mount()'s options: closable, failed, onConnect(profile), onCancel()
     this.tabProfileId = undefined; // that tab's profile when last mounted
     this.box = el('div', 'conn-dialog');
     this.box.addEventListener('keydown', (e) => this.handleKey(e));
@@ -76,7 +76,8 @@ export class ConnectionDialog {
   // in the same tab again takes the new options. The tab's profile is
   // selected when the dialog is drawn in it and when the tab gets another one
   // (Connect, or a tab reopened for its profile), not while the user browses
-  // the list. opts: closable (× and Esc call onCancel), onConnect(profile),
+  // the list. opts: closable (× and Esc call onCancel), failed (the tab's last
+  // attempt failed: Connect reads Retry for its profile), onConnect(profile),
   // onCancel(), profileId, focus (false leaves the focus where it is, e.g.
   // in a dialog over the window).
   mount(host, { profileId = null, focus = true, ...opts }) {
@@ -92,7 +93,10 @@ export class ConnectionDialog {
     if (select) this.selectedId = profileId;
     if (moved) this.render(focus ? 'list' : null);
     else if (select) this.render(this.box.contains(document.activeElement) ? 'list' : null);
-    else this.renderClose();
+    else {
+      this.renderClose();
+      this.renderConnectLabel();
+    }
   }
 
   // Its tab was hidden, closed or connected.
@@ -110,14 +114,16 @@ export class ConnectionDialog {
     this.box.querySelector('.conn-item.active')?.focus();
   }
 
-  // Enter (rebindable) connects; arrow keys move through the list; Esc
-  // cancels, unless the tab is the window's only one.
+  // × and Esc (the shell's, see app.js): closes its tab, unless that is the
+  // window's only one. Returns whether it did.
+  cancel() {
+    if (!this.host || !this.mounted?.closable) return false;
+    this.mounted.onCancel();
+    return true;
+  }
+
+  // Enter (rebindable) connects; arrow keys move through the list.
   handleKey(e) {
-    if (e.key === 'Escape') {
-      if (!this.mounted?.closable || menuOpen()) return; // an open menu takes Esc first
-      e.stopPropagation(); // the dialog's Escape, not the window's
-      return this.mounted.onCancel();
-    }
     const t = e.target;
     const connectKey = this.opts.getBinding?.('connectSelected') ?? 'Enter';
     if (connectKey && comboFromEvent(e) === connectKey) {
@@ -157,6 +163,7 @@ export class ConnectionDialog {
   // 'name' on the name field (for a new connection), null leaves it.
   render(focus = 'list') {
     this.box.textContent = '';
+    this.connectBtn = null;
     const side = el('div', 'conn-list');
     const listHead = el('div', 'conn-list-head');
     listHead.append(
@@ -197,7 +204,15 @@ export class ConnectionDialog {
   renderClose() {
     const shown = this.box.querySelector(':scope > .modal-close');
     if (!this.mounted?.closable) return shown?.remove();
-    if (!shown) this.box.append(button('×', 'Close this tab (Esc)', () => this.mounted?.onCancel(), 'btn icon modal-close'));
+    if (!shown) this.box.append(button('×', 'Close this tab (Esc)', () => this.cancel(), 'btn icon modal-close'));
+  }
+
+  // Retry where the tab's last attempt with the selected profile failed.
+  renderConnectLabel() {
+    if (!this.connectBtn) return;
+    const retry = !!this.mounted?.failed && this.selectedId === this.tabProfileId;
+    this.connectBtn.textContent = retry ? 'Retry' : 'Connect';
+    this.connectBtn.title = retry ? 'Try connecting to this broker again' : 'Connect to this broker';
   }
 
   renderForm(form, p) {
@@ -347,11 +362,12 @@ export class ConnectionDialog {
         this.render('name');
       }),
       el('span', 'spacer'),
-      button('Connect', 'Connect to this broker', () => this.connect(), 'btn primary connect-btn'),
+      (this.connectBtn = button('Connect', 'Connect to this broker', () => this.connect(), 'btn primary connect-btn')),
     );
     form.append(el('h3', '', 'Connection'), grid, tlsBox, this.statusEl, actions);
     syncProtocol();
     this.renderStatus();
+    this.renderConnectLabel();
   }
 
   refreshListItem(p) {

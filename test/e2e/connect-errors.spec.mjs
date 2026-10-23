@@ -20,6 +20,7 @@ test('refused connection: the dialog reports the failure and keeps reporting it 
   await dlg.locator('.connect-btn').click();
   await expect(line).toHaveText(/Error: connect ECONNREFUSED|Reconnecting/);
   await expect(dlg).toBeVisible(); // stays so the user can fix the settings
+  await expect(dlg.locator('.connect-btn')).toHaveText('Retry');
   await expect(await tabMenuDisconnect(page)).not.toHaveClass(/disabled/);
   await page.keyboard.press('Escape'); // closes the menu
 
@@ -40,6 +41,7 @@ test('refused connection: the dialog reports the failure and keeps reporting it 
   await tabMenuDisconnect(page);
   await menu(page, 'Disconnect');
   await expect(line).toHaveText('');
+  await expect(dlg.locator('.connect-btn')).toHaveText('Connect'); // no longer Retry: stopped, not failed
   expect(await page.evaluate(() => window.__mqttscope.status)).toEqual({ state: 'disconnected', url: `mqtt://127.0.0.1:${port}` });
   await expect(page.locator('.conn-tab.active')).toHaveAttribute('data-state', 'new');
   await expect(dlg).toBeVisible();
@@ -60,6 +62,7 @@ test('wrong credentials show the broker error; fixing the password connects; Dis
   // The tab shows the failure on its dot, under the profile's name.
   await expect(page.locator('.conn-tab.active')).toHaveAttribute('data-state', 'error');
   await expect(activeTabName(page)).toHaveText(`Test broker ${broker.port}`);
+  await expect(dlg.locator('.connect-btn')).toHaveText('Retry');
 
   await dlg.locator('[name="password"]').fill('correct-horse');
   await dlg.locator('.connect-btn').click();

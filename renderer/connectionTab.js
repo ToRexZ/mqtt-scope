@@ -59,6 +59,7 @@ export class ConnectionTab {
     this.profile = null; // snapshot of the profile last connected
     this.status = { state: 'disconnected' };
     this.mode = 'picker'; // 'session' from the first 'connected' on, for good
+    this.failed = false; // the last attempt failed (a picker's dialog offers Retry)
     this.everConnected = false;
     this.canReconnect = false; // disconnected by the user after connecting
     this.active = false;
@@ -126,6 +127,12 @@ export class ConnectionTab {
       reset: (e) => !e?.repeat && this.reloadSession(),
       clear: () => this.clearTree(),
     };
+  }
+
+  // The shell's way to the handlers: a picker shows none of what they act
+  // on, but Subscriptions still says to connect first.
+  handlerFor(action) {
+    return this.mode === 'session' || action === 'subscriptions' ? this.handlers[action] : null;
   }
 
   $(sel) {
@@ -387,6 +394,10 @@ export class ConnectionTab {
   onStatus(s) {
     this.status = s;
     if (s.state === 'connected') this.everConnected = true;
+    // The client's own retries keep a failure; a new attempt, a connection or
+    // the user disconnecting end it.
+    if (s.state === 'error' || (s.state === 'disconnected' && s.unexpected)) this.failed = true;
+    else if (s.state !== 'reconnecting' && s.state !== 'offline') this.failed = false;
     // Disconnect while connected or trying to; Reconnect once the user
     // disconnected a tab that had connected. A tab that never did has nothing
     // to resume.

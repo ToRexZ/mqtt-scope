@@ -7,7 +7,7 @@
 
 import { ConnectionTab } from './connectionTab.js';
 import { ConnectionDialog } from './connectionDialog.js';
-import { closeMenu, showMenu, toast } from './ui.js';
+import { closeMenu, menuOpen, showMenu, toast } from './ui.js';
 import { DEFAULT_SETTINGS, normalizeSettings, openSettings } from './settings.js';
 import { TabSet } from './tabSet.js';
 import { TabStrip, dotState } from './tabStrip.js';
@@ -114,7 +114,8 @@ async function closeTab(id, { confirmed = false } = {}) {
   order.remove(id); // an active tab's right neighbour becomes active, else its left one
   const saved = tab.flush(); // before dispose stops its save timer
   tab.dispose();
-  if (tab.profile) order.pushClosed({ profileId: tab.profile.id });
+  // Reopen brings back what had worked: not a tab that never connected.
+  if (tab.mode === 'session' && tab.profile) order.pushClosed({ profileId: tab.profile.id });
   if (order.activeId) activate(order.activeId); // draws it, unless it already is
   refresh();
   await Promise.allSettled([saved, api.closeConnection(id)]);
@@ -198,6 +199,7 @@ function placeDialog(tab) {
   if (tab?.mode !== 'picker' || !tab.active) return connections.unmount();
   connections.mount(tab.pickerRoot, {
     closable: tabs.size > 1,
+    failed: tab.failed,
     profileId: tab.profile?.id,
     focus: !document.querySelector('.modal-overlay'),
     onConnect: (profile) => tab.connect(profile),
@@ -272,7 +274,7 @@ async function showSettings(page) {
 // ------------------------------------------------------------------ keyboard
 
 // Shortcuts of the window (see keys.js; rebindable in Settings → Keyboard).
-// The others act on the active tab (ConnectionTab.handlers).
+// The others act on the active tab (ConnectionTab.handlerFor).
 const goTo = (id) => id && activate(id);
 const WINDOW_ACTIONS = {
   // A tab that connected belongs to its profile: another broker gets a new
@@ -291,8 +293,21 @@ const WINDOW_ACTIONS = {
   settings: () => showSettings(),
   keyboardSettings: () => showSettings('keyboard'),
 };
-// A picker shows none of what the tab's own actions act on.
-const handlerFor = (action) => WINDOW_ACTIONS[action] || (activeTab()?.mode === 'session' ? activeTab().handlers[action] : null);
+const handlerFor = (action) => WINDOW_ACTIONS[action] || activeTab()?.handlerFor(action);
+
+// Esc closes a New connection tab (not the window's only one) wherever the
+// focus is, unless a menu, the update panel or a dialog is open: Esc closes
+// that. Caught before anything else sees it, while those are still open.
+document.addEventListener(
+  'keydown',
+  (e) => {
+    if (e.key !== 'Escape' || e.isComposing || menuOpen() || updates.panelOpen() || document.querySelector('.modal-overlay')) return;
+    if (!connections.cancel()) return;
+    e.preventDefault();
+    e.stopPropagation();
+  },
+  true,
+);
 
 // The connection dialog is part of its tab, not a dialog over the window, so
 // shortcuts work in it (its fields keep their plain keys).

@@ -12,7 +12,8 @@ const MARGIN = 8; // px kept clear of the window's edges
 const GAP = 6; // px between the button and the panel
 
 // Returns { installing() }: whether the Installing dialog shows, so the window
-// opens nothing over it.
+// opens nothing over it; { panelOpen() }: whether the panel shows (it takes
+// Escape first).
 export function initUpdateButton(api, buttonEl) {
   let state = null;
   let confirm = null; // brokers a restart disconnects, while the panel asks about it
@@ -229,7 +230,7 @@ export function initUpdateButton(api, buttonEl) {
   // Listen first, then read, so no change falls in between (see preload.js).
   api.onUpdateState(apply);
   api.updateState().then(apply, () => {});
-  return { installing: installing.isOpen };
+  return { installing: installing.isOpen, panelOpen: () => isOpen };
 }
 
 // The Installing dialog: modal, above everything including the panel, with an

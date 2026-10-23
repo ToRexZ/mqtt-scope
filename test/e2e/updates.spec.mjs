@@ -1001,6 +1001,35 @@ test('Escape closes the panel and returns focus to the button', async ({ env }) 
   expect(errors).toEqual([]);
 });
 
+test('in a New connection tab that Escape would close, Escape closes the open panel first', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const { page, errors } = await env.launch({ env: overrides(server) });
+  const button = updateButton(page);
+  const tabs = page.locator('.conn-tab');
+  await expect(button).toHaveText('↑ Update 9.9.9');
+  await page.locator('.tab-new').click();
+  await expect(tabs).toHaveCount(2);
+
+  // From the button, and from the tab's dialog: the panel closes, the tab stays.
+  await button.click();
+  await expect(panel(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await expect(tabs).toHaveCount(2);
+  const field = page.locator('.conn-dialog [name="name"]');
+  await button.click();
+  await expect(panel(page)).toBeVisible();
+  await field.focus();
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await expect(tabs).toHaveCount(2);
+  await expect(field).toBeFocused();
+  // With the panel closed, Escape closes the tab.
+  await page.keyboard.press('Escape');
+  await expect(tabs).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
 test('in a narrow window the button and panel stay inside the window', async ({ env }) => {
   const long = Array.from({ length: 2000 }, (_, i) => `- change ${i + 1}: ${'detail '.repeat(12)}`).join('\n');
   const server = await env.releaseServer(release('9.9.9', long));

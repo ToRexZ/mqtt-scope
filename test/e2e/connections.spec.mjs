@@ -242,7 +242,7 @@ test('edits made right before the window is closed are not lost (connections, pl
 test('the connection dialog lives in its tab; other tabs stay usable', async ({ env }) => {
   const broker = await env.broker();
   await broker.publish('a/first', '1', { retain: true });
-  const { page, errors } = await env.launch({ userData: makeUserData({ profiles: [profile(broker.port)] }) });
+  const { app, page, errors } = await env.launch({ userData: makeUserData({ profiles: [profile(broker.port)] }) });
   const dlg = page.locator('.conn-dialog');
   // A window starts with one New connection tab whose content is the dialog,
   // not a modal over the window.
@@ -276,6 +276,17 @@ test('the connection dialog lives in its tab; other tabs stay usable', async ({ 
   await tabEl(page, second).click();
   await expect(page.locator('#tab-host .conn-dialog')).toBeVisible();
 
+  // Subscriptions (shortcut or menu) says to connect first.
+  await page.keyboard.press(`${MOD}+Shift+S`);
+  await expect(toast(page, 'error')).toHaveText('Connect first to change subscriptions');
+  await app.evaluate(({ Menu }) =>
+    Menu.getApplicationMenu()
+      .items.find((m) => m.label === 'File')
+      .submenu.items.find((i) => i.label === 'Subscriptions…')
+      .click(),
+  );
+  await expect(toast(page, 'error')).toHaveText(['Connect first to change subscriptions', 'Connect first to change subscriptions']);
+
   // Mod+K in a New connection tab focuses its dialog instead of opening
   // another tab; Mod+T opens one, and so does Mod+K from a connected tab.
   await page.locator('#btn-settings').focus();
@@ -299,54 +310,84 @@ test("Esc closes a New connection tab but not the window's only tab", async ({ e
   const { app, page, errors } = await env.launch({ userData: makeUserData({ profiles: [profile(broker.port)] }) });
   const dlg = page.locator('.conn-dialog');
   const tabs = page.locator('.conn-tab');
-  // The window's only tab: no ×, and Esc does nothing.
+  const connections = () => app.evaluate(() => globalThis.__mqttscopeConnections.size);
+  // The window's only tab: no ×, and Esc does nothing, wherever the focus is
+  // (it does not swap the tab for a fresh one either).
+  const first = await activeId(page);
   await expect(dlg.locator('.conn-item.active')).toBeFocused();
   await expect(dlg.locator('.modal-close')).toHaveCount(0);
   await page.keyboard.press('Escape');
   await dlg.locator('[name="name"]').press('Escape');
-  await expect(tabs).toHaveCount(1);
+  await tabEl(page, first).focus();
+  await page.keyboard.press('Escape');
   await expect(dlg).toBeVisible();
+  await expect(tabs).toHaveCount(1);
+  expect(await activeId(page)).toBe(first);
+  expect(await connections()).toBe(1);
 
   await connect(page);
-  const first = await activeId(page);
   await page.keyboard.press('F11'); // maximizes the inspector
   await expect(page.locator('#layout')).toHaveClass(/max-viewer/);
 
-  // Another New connection tab closes with Esc (from the list or a field) or
-  // with ×, without asking.
+  // Another New connection tab closes with Esc wherever the focus is in the
+  // window (the list, a field, beside the dialog, the tab strip) or with ×,
+  // without asking.
   await mockDialogs(app, { confirm: false });
-  await page.locator('.tab-new').click();
-  await expect(tabs).toHaveCount(2);
+  const openOne = async () => {
+    await page.locator('.tab-new').click();
+    await expect(tabs).toHaveCount(2);
+  };
+  const closedBack = async () => {
+    await expect(tabs).toHaveCount(1);
+    expect(await activeId(page)).toBe(first);
+  };
+  await openOne();
   await expect(dlg.locator('.modal-close')).toBeVisible();
   await expect(dlg.locator('.conn-item.active')).toBeFocused();
   await page.keyboard.press('Escape');
-  await expect(tabs).toHaveCount(1);
-  expect(await activeId(page)).toBe(first);
-  await expect(page.locator('#layout')).toHaveClass(/max-viewer/); // the Esc was the dialog's
+  await closedBack();
+  await expect(page.locator('#layout')).toHaveClass(/max-viewer/); // the Esc was the closed tab's
   await page.keyboard.press(`${MOD}+T`);
   await dlg.locator('[name="host"]').press('Escape');
-  await expect(tabs).toHaveCount(1);
-  await page.locator('.tab-new').click();
-  // With the tab's menu open, Esc closes only the menu.
+  await closedBack();
+  await openOne();
+  await page.locator('.tab-picker').click({ position: { x: 5, y: 5 } });
+  await expect(page.locator('.conn-dialog :focus')).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await closedBack();
+  await openOne();
+  await page.locator('.conn-tab.active').focus();
+  await page.keyboard.press('Escape');
+  await closedBack();
+
+  // A menu or a dialog open over it takes the Esc instead.
+  await openOne();
   await page.locator('.conn-tab.active').click({ button: 'right' });
   await expect(page.locator('.ctx-menu')).toBeVisible();
   await expect(dlg.locator('.conn-item.active')).toBeFocused();
   await page.keyboard.press('Escape');
   await expect(page.locator('.ctx-menu')).toHaveCount(0);
   await expect(tabs).toHaveCount(2);
+  await page.locator('#btn-settings').click();
+  await expect(page.locator('.modal.settings')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.modal.settings')).toHaveCount(0);
+  await expect(tabs).toHaveCount(2);
   await dlg.locator('.modal-close').click();
-  await expect(tabs).toHaveCount(1);
-  expect(await activeId(page)).toBe(first);
+  await closedBack();
   expect(await dialogCalls(app)).toEqual([]);
 
   // Closing the connected tab leaves a New connection tab, the only one again.
   await tabEl(page, first).locator('.conn-tab-close').click();
   await expect(activeTabName(page)).toHaveText('New connection');
+  const fresh = await activeId(page);
   await expect(dlg).toBeVisible();
   await expect(dlg.locator('.modal-close')).toHaveCount(0);
   await page.keyboard.press('Escape');
-  await expect(tabs).toHaveCount(1);
   await expect(dlg).toBeVisible();
+  await expect(tabs).toHaveCount(1);
+  expect(await activeId(page)).toBe(fresh);
+  expect(await connections()).toBe(1);
   expect(errors).toEqual([]);
 });
 
@@ -360,41 +401,55 @@ test('a failed connect keeps the dialog with the error; Connect retries', async 
   const line = dlg.locator('.conn-status-line');
   const log = await recordDialogStatus(page);
   const id = await activeId(page);
+  const button = dlg.locator('.connect-btn');
+  const pick = (name) => dlg.locator('.conn-item', { hasText: name }).click();
 
-  await dlg.locator('.connect-btn').click();
+  await expect(button).toHaveText('Connect');
+  await button.click();
   await expect(line).toHaveText(/^Error: connect ECONNREFUSED/);
   await expect(line).toHaveClass(/\berror\b/);
   // The tab names its profile and shows the failure on its dot; the dialog
-  // stays, and the error is not repeated in a toast.
+  // stays with Retry, and the error is not repeated in a toast.
   await expect(dlg).toBeVisible();
+  await expect(button).toHaveText('Retry');
   await expect(activeTabName(page)).toHaveText('Down');
   await expect(page).toHaveTitle('MQTT Scope — Down');
   await expect(tabEl(page, id)).toHaveAttribute('data-state', /^(connecting|error)$/);
   expect(await mode(page)).toBe('picker');
   await expect(toast(page, 'error')).toHaveCount(0);
 
-  // Connect again starts a new attempt (the client's own retries say
-  // "Reconnecting").
+  // Retry starts a new attempt (the client's own retries say "Reconnecting").
   const attempts = async () => (await log()).filter((t) => t?.startsWith('Connecting… ')).length;
   const tries = await attempts();
-  await dlg.locator('.connect-btn').click();
+  await button.click();
   await expect.poll(attempts).toBe(tries + 1);
   await expect(line).toHaveText(/^Error: connect ECONNREFUSED/);
+  await expect(button).toHaveText('Retry');
 
   // Leaving the tab and coming back: the dialog shows the error again, still
-  // without a toast, also for the errors of later retries.
+  // without a toast, also for the errors of later retries. (Another New
+  // connection tab offers Connect.)
   await page.locator('.tab-new').click();
   await expect(line).toHaveText('');
+  await expect(button).toHaveText('Connect');
   await tabEl(page, id).click();
   await expect(line).toHaveText(/ECONNREFUSED|Reconnecting/);
+  await expect(button).toHaveText('Retry');
   const failures = async () => (await log()).filter((t) => t?.startsWith('Error: ')).length;
   const failed = await failures();
   await expect.poll(failures, { timeout: 8000 }).toBeGreaterThan(failed);
+  await expect(button).toHaveText('Retry'); // through the client's own retries
   await expect(toast(page, 'error')).toHaveCount(0);
 
+  // Retry is for the tab's profile; another one reads Connect.
+  await pick('Up');
+  await expect(button).toHaveText('Connect');
+  await pick('Down');
+  await expect(button).toHaveText('Retry');
+
   // Another profile from the list connects this same tab instead.
-  await dlg.locator('.conn-item', { hasText: 'Up' }).click();
-  await dlg.locator('.connect-btn').click();
+  await pick('Up');
+  await button.click();
   await expect(dlg).toHaveCount(0);
   expect(await activeId(page)).toBe(id);
   await expect(activeTabName(page)).toHaveText('Up');
@@ -409,7 +464,21 @@ test('a failed connect keeps the dialog with the error; Connect retries', async 
   await expect(line).toHaveText(/ECONNREFUSED|Reconnecting/);
   await expect(activeTabName(page)).toHaveText('Down');
   await expect(dlg.locator('.conn-item.active .conn-name')).toHaveText('Down');
+  await expect(button).toHaveText('Retry');
   await expect(toast(page, 'error')).toHaveCount(0);
+
+  // Reopen brings back the tab that had connected, not one that never did.
+  const down = await activeId(page);
+  await page.evaluate((i) => window.__mqttscope.shell.closeTab(i), id);
+  await expect(tabEl(page, id)).toHaveCount(0);
+  expect(await activeId(page)).toBe(down);
+  await dlg.locator('.modal-close').click();
+  await expect(tabEl(page, down)).toHaveCount(0);
+  await page.keyboard.press(`${MOD}+Shift+T`);
+  await expect(activeTabName(page)).toHaveText('Up');
+  await expect(page.locator('.conn-tab.active')).toHaveAttribute('data-state', 'connected');
+  expect(await page.evaluate(() => window.__mqttscope.shell.reopenClosed())).toBeNull();
+  await expect(page.locator('.conn-tab .conn-tab-name')).toHaveText(['New connection', 'Up']);
   expect(errors).toEqual([]);
 });
 
