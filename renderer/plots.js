@@ -132,7 +132,10 @@ export class PlotsPanel {
       if (seq !== this.loadSeq) return; // another profile was asked for meanwhile
       this.model.load(doc, { legacy });
       this.saveTo = profileId;
-      if (this.model.newer) toast('These plots were saved by a newer MQTT Scope. Changes made here are not saved, so nothing it added is lost.', 'error');
+      if (this.model.newer && !this.warnedNewer) {
+        this.warnedNewer = true; // once: a picker reads them again on every attempt
+        toast('These plots were saved by a newer MQTT Scope. Changes made here are not saved, so nothing it added is lost.', 'error');
+      }
     } catch (err) {
       if (seq !== this.loadSeq) return;
       this.model.load(null);

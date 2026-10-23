@@ -566,7 +566,7 @@ function start() {
     },
   });
   stores = createJsonStore(userData);
-  layouts = createLayoutStore({ stores, profileIds: () => profiles.load().map((p) => p.id) });
+  layouts = createLayoutStore({ stores, profileIds: () => profiles.load().map((p) => p.id), log });
   try {
     // Every profile there is now starts with the plots of the version before.
     layouts.migrate();

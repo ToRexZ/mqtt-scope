@@ -370,9 +370,10 @@ export class ConnectionTab {
   async connect(profile) {
     // The profile's plots first, so the session shows them from its start. A
     // picker reads them on every attempt (nothing changes them there, and the
-    // profile may have been open in another tab meanwhile); a session keeps
-    // its own, and the data they collected.
-    if (this.mode === 'picker' || this.plots.profileId !== profile.id) await this.plots.loadProfile(profile.id ?? null);
+    // profile may have been open in another tab meanwhile). A session only
+    // ever reconnects to its own profile and keeps its plots, and the data
+    // they collected.
+    if (this.mode === 'picker') await this.plots.loadProfile(profile.id ?? null);
     const res = await this.tabApi.connect(profile);
     // Open in another tab: two clients with one client ID would throw each
     // other off the broker. The shell shows that tab; this one stays as it was.

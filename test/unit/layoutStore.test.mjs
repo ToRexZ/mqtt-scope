@@ -27,9 +27,10 @@ const globalDocs = { plotTabs: doc('global'), plots: { plots: [] } };
 
 function setup({ initial = globalDocs, ids = ['a', 'b'] } = {}) {
   const stores = fakeStores(initial);
-  const layouts = createLayoutStore({ stores, profileIds: () => ids });
+  const errors = [];
+  const layouts = createLayoutStore({ stores, profileIds: () => ids, log: { error: (...args) => errors.push(args) } });
   layouts.migrate();
-  return { stores, layouts };
+  return { stores, layouts, errors };
 }
 
 test('migration remembers which profiles existed', () => {
@@ -53,7 +54,7 @@ test('a profile from before the upgrade starts with the global layout', () => {
 });
 
 test('a new profile starts with a copy of the last used layout', () => {
-  const { stores, layouts } = setup();
+  const { stores, layouts } = setup({ ids: ['a', 'b', 'c'] });
   layouts.set('a', doc('A'));
   layouts.set('b', doc('B'));
   layouts.get('b');
@@ -64,9 +65,45 @@ test('a new profile starts with a copy of the last used layout', () => {
   // The copy is the new profile's own: saving it leaves the original as it was.
   layouts.set('new', doc('New'));
   assert.deepEqual(layouts.get('a'), { doc: doc('A'), legacy: null });
-  // The last used profile never saved a layout of its own: the global one.
+  // Copies of copies: b3 starts with b2's, a copy of A's.
   layouts.get('b2');
-  assert.deepEqual(layouts.get('b3'), { doc: globalDocs.plotTabs, legacy: globalDocs.plots });
+  assert.deepEqual(layouts.get('b3'), { doc: doc('A'), legacy: null });
+  // The last used profile has no layout of its own (one from before the
+  // upgrade that never saved): the global one, which is not copied.
+  layouts.get('c');
+  assert.deepEqual(layouts.get('b4'), { doc: globalDocs.plotTabs, legacy: globalDocs.plots });
+  assert.ok(!Object.hasOwn(stores.data.profileLayouts.byProfile, 'b4'));
+  assert.ok(!stores.writes.includes('plotTabs') && !stores.writes.includes('plots'));
+});
+
+test('a copied layout is kept from the first opening on', () => {
+  const { stores, layouts } = setup();
+  layouts.set('a', doc('A'));
+  layouts.get('a');
+  const first = layouts.get('x');
+  assert.deepEqual(first, { doc: doc('A'), legacy: null });
+  assert.deepEqual(stores.data.profileLayouts.byProfile.x, doc('A'));
+  // Opened again (Retry, or a new tab) before anything was changed: the same.
+  assert.deepEqual(layouts.get('x'), first);
+  assert.deepEqual(layouts.get('x'), first);
+  // A profile opened after x starts with x's.
+  layouts.set('x', doc('X'));
+  assert.deepEqual(layouts.get('y'), { doc: doc('X'), legacy: null });
+});
+
+test('a layout is read even when remembering it cannot be written', () => {
+  const { stores, layouts, errors } = setup();
+  layouts.set('a', doc('A'));
+  layouts.get('a');
+  stores.set = () => {
+    throw new Error('disk full');
+  };
+  assert.deepEqual(layouts.get('x'), { doc: doc('A'), legacy: null });
+  assert.deepEqual(layouts.get('b'), { doc: globalDocs.plotTabs, legacy: globalDocs.plots });
+  assert.equal(errors.length, 2);
+  assert.match(String(errors[0][1]), /disk full/);
+  // Saving still reports it (the plots panel says it could not save).
+  assert.throws(() => layouts.set('a', doc('A2')), /disk full/);
 });
 
 test('set and get round-trip; other profiles are untouched', () => {

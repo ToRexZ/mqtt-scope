@@ -6,9 +6,9 @@
 // Before 0.4.0 every profile shared one layout (plotTabs, plus the 0.1
 // document plots). Those files are only read from now on: the profiles that
 // existed at the upgrade (legacyProfiles) start with them, a profile made
-// later with a copy of the layout opened last. Main does every
-// read-modify-write here, so windows saving at the same time never undo each
-// other's changes.
+// later with a copy of the layout opened last, kept as its own from then on.
+// Main does every read-modify-write here, so windows saving at the same time
+// never undo each other's changes.
 
 const VERSION = 1;
 
@@ -19,8 +19,8 @@ function checkId(id) {
 }
 
 // stores: get(name)/set(name, value) (see jsonStore.js); profileIds(): the
-// ids of the profiles saved now.
-function createLayoutStore({ stores, profileIds }) {
+// ids of the profiles saved now; log: error(...) (see log.js).
+function createLayoutStore({ stores, profileIds, log = { error() {} } }) {
   // The stored document with every field usable; fields a newer version
   // added are kept.
   function read() {
@@ -37,6 +37,8 @@ function createLayoutStore({ stores, profileIds }) {
   const write = (doc) => stores.set('profileLayouts', doc);
   // Own keys only: an id like "constructor" names no layout.
   const layoutOf = (doc, id) => (id !== null && Object.hasOwn(doc.byProfile, id) ? doc.byProfile[id] : null);
+  // Built as entries: a key like "__proto__" stays a plain key.
+  const withLayout = (byProfile, id, layout) => Object.fromEntries([...Object.entries(byProfile).filter(([key]) => key !== id), [id, layout]]);
 
   // Once, on the first start of a version that keeps layouts per profile.
   function migrate() {
@@ -45,15 +47,25 @@ function createLayoutStore({ stores, profileIds }) {
   }
 
   // The layout to show for a profile, as { doc, legacy } for the plots panel
-  // (legacy: the 0.1 document, for a layout of before 0.4.0).
+  // (legacy: the 0.1 document, for a layout of before 0.4.0). The profile
+  // becomes the last used. Remembering that may fail to be written; the
+  // layout is shown all the same.
   function get(profileId) {
     checkId(profileId);
     const doc = read();
+    const own = layoutOf(doc, profileId);
+    const copy = !own && !doc.legacyProfiles.includes(profileId) ? layoutOf(doc, doc.lastUsed) : null;
     let res;
-    if (layoutOf(doc, profileId)) res = { doc: layoutOf(doc, profileId), legacy: null };
-    else if (!doc.legacyProfiles.includes(profileId) && layoutOf(doc, doc.lastUsed)) res = { doc: layoutOf(doc, doc.lastUsed), legacy: null };
+    if (own) res = { doc: own, legacy: null };
+    else if (copy) res = { doc: copy, legacy: null };
     else res = { doc: stores.get('plotTabs'), legacy: stores.get('plots') };
-    if (doc.lastUsed !== profileId) write({ ...doc, lastUsed: profileId });
+    try {
+      // A copy is the profile's own at once: opening it again shows the same.
+      if (copy) write({ ...doc, byProfile: withLayout(doc.byProfile, profileId, copy), lastUsed: profileId });
+      else if (doc.lastUsed !== profileId) write({ ...doc, lastUsed: profileId });
+    } catch (err) {
+      log.error('layouts', err);
+    }
     return res;
   }
 
@@ -61,9 +73,7 @@ function createLayoutStore({ stores, profileIds }) {
     checkId(profileId);
     if (!isObject(layout)) throw new Error('A plots document is required');
     const doc = read();
-    // Built as entries: a key like "__proto__" stays a plain key.
-    const byProfile = Object.fromEntries([...Object.entries(doc.byProfile).filter(([id]) => id !== profileId), [profileId, layout]]);
-    write({ ...doc, byProfile });
+    write({ ...doc, byProfile: withLayout(doc.byProfile, profileId, layout) });
     return { ok: true };
   }
 

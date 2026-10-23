@@ -155,8 +155,10 @@ test('plot layouts are kept per profile', async ({ env }) => {
   await page.waitForFunction(() => window.__mqttscope.status.state === 'connected');
   await plotsTab(page).click();
   await expect(titles(page)).toHaveText(['Seeded', 'Battery']);
-  await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/state', ['speed'], { alias: 'Copy only' }));
+  // Kept as its own at once, so opening it again shows the same.
   const copyId = readJson(path.join(userData, 'profiles.json')).find((p) => p.name === 'Profile A (copy)').id;
+  await waitForLayout(userData, copyId, (d) => d.tabs[0].plots.length === 2);
+  await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/state', ['speed'], { alias: 'Copy only' }));
   await waitForLayout(userData, copyId, (d) => d.tabs[0].plots.length === 3);
   expect((await waitForLayout(userData, 'A')).tabs[0].plots.map((p) => p.title)).toEqual(['Seeded', 'Battery']);
 });
