@@ -8,6 +8,13 @@ import { stripLayout } from './tabLayout.js';
 // Name scrolling: px per second, and the pause at each end in seconds.
 const SCROLL_SPEED = 30;
 const SCROLL_PAUSE = 1.5;
+// What a tab's drag carries its id as: not text, so a text field it is let
+// go over gets nothing.
+export const TAB_TYPE = 'application/x-mqttscope-tab';
+// A drag that left the window this shortly before it ended ended over the
+// window: on Esc, or let go where nothing takes it, the browser has the
+// pointer leave it first. Leaving to let go outside takes longer.
+const END_LEAVE_MS = 200;
 
 // The dot of a tab: green when connected, amber while connecting or retrying,
 // red when the connection failed or dropped, grey when the user disconnected,
@@ -30,9 +37,10 @@ export function dotState(status, everConnected) {
 
 export class TabStrip {
   // handlers: onActivate(id), onClose(id), onNew(), onContextMenu(id, x, y),
-  //           onMove(id, toIndex)
-//           (dragging inside this strip only; a drag from or to another
-//           window would enter through dragover/drop below)
+  //           onMove(id, toIndex) (a tab dragged within this strip),
+  //           onDragStart(id), onDragEnd(id, { overSource }) (a tab of this
+  //           strip dragged; it may go to another window or out of every one),
+  //           onDrop(index) (a tab of another window let go here)
   constructor(header, handlers) {
     this.handlers = handlers;
     this.list = header.querySelector('.conn-tabs');
@@ -43,6 +51,8 @@ export class TabStrip {
     this.activeId = null;
     this.focusBefore = null; // the focused element when a tab was pressed
     this.dragId = null; // the tab being dragged inside this strip
+    this.outgoing = null; // a tab of this strip being dragged: { id, over, leftAt } (see dragEnded)
+    this.incoming = false; // main reports a tab being dragged, maybe of another window
     this.keyframes = new Set(); // ping-pong keyframes made so far, by name
     this.sheet = document.head.appendChild(document.createElement('style')).sheet;
     // The strip gives way to the window's width; the right-hand buttons
@@ -73,7 +83,22 @@ export class TabStrip {
       if (!item) return;
       this.dragId = item.dataset.id;
       e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', this.dragId);
+      e.dataTransfer.setData(TAB_TYPE, this.dragId);
+      this.outgoing = { id: this.dragId, over: true, leftAt: -Infinity };
+      // On the tab itself: it ends there also once the tab went to another window.
+      item.addEventListener('dragend', () => this.dragEnded(), { once: true });
+      handlers.onDragStart?.(this.dragId);
+    });
+    // Whether the pointer is over the window while its tab is dragged: it
+    // leaves the window to no element of it (relatedTarget). Counting enters
+    // and leaves would not do: an element re-rendered under the pointer gets
+    // its leave once it is out of the document, where it does not bubble.
+    for (const type of ['dragenter', 'dragover']) document.addEventListener(type, () => this.outgoing && (this.outgoing.over = true));
+    document.addEventListener('dragleave', (e) => {
+      const out = this.outgoing;
+      if (!out || e.relatedTarget) return;
+      out.over = false;
+      out.leftAt = performance.now();
     });
     this.list.addEventListener('dragover', (e) => {
       if (!this.dragId) return;
@@ -95,7 +120,21 @@ export class TabStrip {
       if (from < to) to--; // the dragged tab leaves its place first
       if (to !== from) handlers.onMove(id, to);
     });
-    this.list.addEventListener('dragend', () => this.endDrag());
+    // A tab of another window, while main reports it dragged (its data may
+    // not be readable here): anywhere on the top bar, it goes where it is let go.
+    header.addEventListener('dragover', (e) => {
+      if (!this.takesDrop(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.mark(this.dropTarget(e));
+    });
+    header.addEventListener('dragleave', (e) => !header.contains(e.relatedTarget) && this.mark(null));
+    header.addEventListener('drop', (e) => {
+      if (!this.takesDrop(e)) return;
+      e.preventDefault();
+      this.mark(null);
+      handlers.onDrop(this.dropIndex(e));
+    });
     this.list.addEventListener('click', (e) => {
       const item = e.target.closest('.conn-tab');
       if (!item) return;
@@ -119,6 +158,25 @@ export class TabStrip {
     return { item, after: e.clientX > r.left + r.width / 2 };
   }
 
+  // Where a tab let go at e goes in this strip: before the first tab whose
+  // middle is right of the pointer.
+  dropIndex(e) {
+    return [...this.list.children].filter((item) => {
+      const r = item.getBoundingClientRect();
+      return r.left + r.width / 2 < e.clientX;
+    }).length;
+  }
+
+  takesDrop(e) {
+    return !this.dragId && (this.incoming || !!e.dataTransfer?.types.includes(TAB_TYPE));
+  }
+
+  // Main reports a tab being dragged ({ connId }), or (null) that none is.
+  setDragging(drag) {
+    this.incoming = !!drag;
+    if (!drag) this.mark(null);
+  }
+
   // The insertion marker: a bar on the near edge of the target tab.
   mark(target) {
     for (const item of this.items.values()) {
@@ -139,6 +197,16 @@ export class TabStrip {
   endDrag() {
     this.dragId = null;
     this.mark(null);
+  }
+
+  // A drag of this strip's tab ended, over this window or outside it.
+  dragEnded() {
+    const out = this.outgoing;
+    this.outgoing = null;
+    this.endDrag();
+    if (!out) return;
+    const overSource = out.over || performance.now() - out.leftAt < END_LEAVE_MS;
+    this.handlers.onDragEnd?.(out.id, { overSource });
   }
 
   // Arrow keys, Home and End move focus and activate; Delete closes.

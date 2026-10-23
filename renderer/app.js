@@ -75,6 +75,11 @@ const strip = new TabStrip($('.topbar'), {
     order.move(id, to);
     refresh();
   },
+  // Dragged to another window's strip or out of every window (see
+  // main/tabDrag.js): main moves it, and the end answers for a new window.
+  onDragStart: (id) => api.tabDragStart(id).catch(() => {}),
+  onDragEnd: (_id, end) => settleMove(api.tabDragEnd(end)),
+  onDrop: (index) => dropTab(index),
 });
 let opening = false;
 
@@ -203,6 +208,32 @@ async function importTab({ connId, state, index, activate: show = true }) {
   return true;
 }
 
+// A tab of another window let go on this window's strip comes in at `index`
+// (main moves it); one of this window, should main say so, moves within it.
+function dropTab(index) {
+  const dropped = api.tabDrop({ index }).then((res) => {
+    if (!res?.reorder) return res;
+    const from = order.ids().indexOf(res.reorder);
+    if (from >= 0) order.move(res.reorder, from < index ? index - 1 : index);
+    refresh();
+    return null;
+  });
+  return settleMove(dropped);
+}
+
+// A tab that could not move stays, or is back, where it was, and the window
+// that asked says so. moving: main's answer, whether it moved (null: there
+// was nothing to move).
+async function settleMove(moving) {
+  try {
+    if ((await moving) === false) toast('Could not move the tab', 'error');
+  } catch (err) {
+    // Main's error arrives as "Error invoking remote method '…': Error: <reason>".
+    const reason = String(err?.message || err).replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, '');
+    toast(`Could not move the tab: ${reason}`, 'error');
+  }
+}
+
 // Closes several tabs with one question when any of their plots holds data.
 async function closeTabs(ids) {
   const list = ids.map(tabOf).filter(Boolean);
@@ -281,7 +312,7 @@ function tabMenu(id, x, y) {
     { label: 'Close', action: () => closeTab(id) },
     { label: 'Close other tabs', disabled: !others.length, action: () => closeTabs(others) },
     { label: 'Close tabs to the right', disabled: !right.length, action: () => closeTabs(right) },
-    { label: 'Move to new window', disabled: tabs.size < 2, action: () => api.tearOffTab(id) },
+    { label: 'Move to new window', disabled: tabs.size < 2, action: () => settleMove(api.tearOffTab(id)) },
     'separator',
     // A tab that never connected has nothing to disconnect or resume.
     tab.canReconnect
@@ -360,6 +391,7 @@ api.onStatus((event) => tabOf(event.connId)?.onStatus(event.status));
 api.onWarning((event) => tabOf(event.connId)?.onWarning(event.message));
 api.onActivateTab(({ connId }) => activate(connId)); // another window opened a profile this one has
 api.onTabExport((request) => exportTab(request));
+api.onTabDragging((drag) => strip.setDragging(drag));
 api.onTabImport((request) => importTab(request));
 
 // Hidden tabs record but are not drawn; message rates count for every tab.

@@ -9,6 +9,7 @@ const { createJsonStore } = require('./jsonStore');
 const { createLayoutStore } = require('./layoutStore');
 const { WindowState, placeBounds } = require('./windowState');
 const { Requests, TabMover, TIMEOUT_MS } = require('./tabMove');
+const { TabDrag } = require('./tabDrag');
 const { Updater } = require('./updater');
 const { createEngine } = require('./updateEngine');
 const { releaseUrl, createFetchRelease } = require('./fetchRelease');
@@ -32,7 +33,7 @@ const DROP_GRAB = { x: 60, y: 15 };
 // One process owns the data files; launching the app again opens another
 // window in it. Each main window has its own broker connections, which the
 // registry keeps by connection id; every MQTT call and event names one.
-const windows = new Map(); // webContents.id -> { win, init, started, emptied } (see createMainWindow, pageStarted, closeIfEmpty)
+const windows = new Map(); // webContents.id -> { win, init, started, closing, vacated } (see createMainWindow, pageStarted, closeIfEmpty)
 const childWindows = new Map(); // webContents.id -> { win, ownerId, connId, topics: Set, init } (see openChildWindow)
 const registry = new ConnectionRegistry();
 let profiles;
@@ -71,10 +72,12 @@ function ownerOf(sender) {
   return id === null ? null : windows.get(id);
 }
 
-// A connection named in an IPC call, if the sender's window owns it.
+// A connection named in an IPC call, if the sender's window owns it. One
+// between windows belongs to none (see tabMove.js), nor does a pop-out then.
 function connectionOf(e, connId) {
+  const ownerId = ownerIdOf(e.sender);
   const entry = registry.get(connId);
-  if (!entry || entry.ownerId !== ownerIdOf(e.sender)) throw new Error('Unknown connection');
+  if (ownerId === null || !entry || entry.ownerId !== ownerId) throw new Error('Unknown connection');
   return entry;
 }
 
@@ -113,12 +116,17 @@ function closeConnection(connId) {
   closeChildren((child) => child.connId === connId);
 }
 
-// A window closing, crashing or reloading ends all of its connections, and
-// will not answer what main asked of it.
+// A window closing, crashing or reloading ends all of its connections and a
+// drag of its tab, and will not answer what main asked of it. A page that
+// starts over is not left empty by tabs that went out of it before (see
+// closeIfEmpty).
 function closeConnectionsOf(ownerId) {
   registry.closeOwner(ownerId);
   closeChildren((child) => child.ownerId === ownerId);
   requests.windowGone(ownerId);
+  if (tabDrag.active()?.fromWindowId === ownerId) endDrag();
+  const entry = windows.get(ownerId);
+  if (entry) entry.vacated = false;
 }
 
 function bringForward(win) {
@@ -139,14 +147,25 @@ const requests = new Requests((id, channel, message) => {
 const mover = new TabMover({
   registry,
   ask: (id, channel, data) => requests.ask(id, channel, data),
-  isWindow: (id) => windows.has(id),
+  isWindow: (id) => takesTabs(id),
   setOwner: (connId, ownerId) => {
     registry.setOwner(connId, ownerId);
     for (const child of childWindows.values()) if (child.connId === connId) child.ownerId = ownerId;
   },
   closeConnection: (connId) => closeConnection(connId),
-  left: (id) => closeIfEmpty(id),
+  left: (id, out) => {
+    const entry = windows.get(id);
+    if (entry && out) entry.vacated = true;
+    closeIfEmpty(id);
+  },
 });
+
+// A main window that is not closing (or asking whether to): a tab that moved
+// into one that is would end with it.
+function takesTabs(id) {
+  const entry = windows.get(id);
+  return !!entry && !entry.closing && !entry.win.isDestroyed();
+}
 
 // Moves a tab to another main window, at `index` in its strip; that window
 // comes forward. Resolves with whether it moved (one that could not stays,
@@ -169,11 +188,18 @@ async function tearOff(connId, point = null) {
   const at = point ? { x: Math.round(point.x) - DROP_GRAB.x, y: Math.round(point.y) - DROP_GRAB.y } : { x: x + CASCADE, y: y + CASCADE };
   const win = createMainWindow({ bounds: { ...at, width, height }, adopt: true });
   const id = win.webContents.id;
+  let moved = false;
   try {
     await pageStarted(id);
-    return await moveTab(connId, id, 0);
+    moved = await moveTab(connId, id, 0);
+    return moved;
   } finally {
-    closeIfEmpty(id); // it did not get the tab
+    // It did not get the tab: it goes again.
+    const entry = windows.get(id);
+    if (entry && !moved) {
+      entry.vacated = true;
+      closeIfEmpty(id);
+    }
   }
 }
 
@@ -194,14 +220,32 @@ function pageStarted(id) {
   });
 }
 
-// A main window whose tabs all went to other windows closes, once. Its flush
-// runs as for any close; with no connections left, nothing asks first. One
-// that a tab is still on its way from or to waits for that move.
+// A main window whose tabs all went to other windows (vacated) closes, once.
+// Its flush runs as for any close; with no connections left, nothing asks
+// first. One that a tab is still on its way from or to waits for that move.
+// A window whose page crashed or reloaded has no connections either, and
+// stays (see closeConnectionsOf).
 function closeIfEmpty(id) {
   const entry = windows.get(id);
-  if (!entry || entry.emptied || entry.win.isDestroyed() || mover.busy(id) || registry.ofOwner(id).length) return;
-  entry.emptied = true;
+  if (!entry?.vacated || entry.closing || entry.win.isDestroyed() || mover.busy(id)) return;
+  entry.vacated = false;
+  if (registry.ofOwner(id).length) return;
+  entry.closing = true; // a second close() during the flush would skip it
   entry.win.close();
+}
+
+// Dragging a tab (see tabDrag.js). Every main window hears when a drag starts
+// and ends: its strip takes a drop of it meanwhile, also where the drag's own
+// data cannot be read.
+const tabDrag = new TabDrag();
+
+function broadcastDragging(data) {
+  for (const { win } of windows.values()) if (!win.isDestroyed()) win.webContents.send('tabs:dragging', data);
+}
+
+function endDrag() {
+  tabDrag.cancel();
+  broadcastDragging(null);
 }
 
 function focusedMain() {
@@ -254,7 +298,8 @@ function createMainWindow({ bounds = null, restore = null, adopt = false } = {})
   });
   hardenWindow(win);
   const id = win.webContents.id;
-  windows.set(id, { win, init: restore ? { tabs: restore.tabs, active: restore.active } : adopt ? { tabs: [], adopt: true } : null });
+  const entry = { win, init: restore ? { tabs: restore.tabs, active: restore.active } : adopt ? { tabs: [], adopt: true } : null, closing: false, vacated: false };
+  windows.set(id, entry);
   // Until its page reports its tabs, it holds what it reopens.
   if (restore) windowState.report(id, restore);
   // The size and place it has when not maximized or full screen.
@@ -292,6 +337,7 @@ function createMainWindow({ bounds = null, restore = null, adopt = false } = {})
   const flushAndClose = () => {
     if (flushed) return;
     flushed = true;
+    entry.closing = true;
     const done = () => {
       clearTimeout(timer);
       ipcMain.off('app:flushed', onFlushed);
@@ -307,11 +353,13 @@ function createMainWindow({ bounds = null, restore = null, adopt = false } = {})
   let asking = false;
   const confirmClose = async (n) => {
     asking = true;
+    entry.closing = true;
     try {
       const res = await dialog.showMessageBox(win, { type: 'warning', message: `Close ${n} connections?`, buttons: ['Close', 'Cancel'], defaultId: 1, cancelId: 1 });
       return res.response === 0;
     } finally {
       asking = false;
+      entry.closing = flushed;
     }
   };
   win.on('close', (e) => {
@@ -553,11 +601,37 @@ function registerIpc() {
   };
   ipcMain.handle('tabs:move', (e, { connId, toWindowId, index } = {}) => {
     ownTab(e, connId);
-    return moveTab(connId, toWindowId, Number.isInteger(index) ? index : 0);
+    return moveTab(connId, toWindowId, index);
   });
   ipcMain.handle('tabs:tearOff', (e, { connId } = {}) => {
     ownTab(e, connId);
     return tearOff(connId, null);
+  });
+  // A tab dragged from a window's strip (see tabDrag.js): its window reports
+  // the start and the end, the window it is dropped on the drop. A drop on
+  // another window moves it there and answers whether it moved; one on its
+  // own window (which reorders it itself) answers { reorder }. Let go
+  // outside its window with no drop, it gets a window of its own under the
+  // pointer, and the end answers whether it moved; else null.
+  ipcMain.handle('tabs:dragStart', (e, connId) => {
+    ownTab(e, connId);
+    tabDrag.start(connId, e.sender.id);
+    broadcastDragging({ connId });
+  });
+  ipcMain.handle('tabs:drop', (e, { index } = {}) => {
+    if (!windows.has(e.sender.id)) throw new Error('Unknown window');
+    const drop = tabDrag.drop(e.sender.id, index);
+    if (!drop) return null;
+    broadcastDragging(null);
+    if (drop.toWindowId === drop.fromWindowId) return { reorder: drop.connId };
+    return moveTab(drop.connId, drop.toWindowId, drop.index);
+  });
+  ipcMain.handle('tabs:dragEnd', async (e, { overSource } = {}) => {
+    const drag = tabDrag.active();
+    if (drag?.fromWindowId !== e.sender.id) return null;
+    const outcome = await tabDrag.end({ overSource: overSource !== false });
+    if (!tabDrag.active()) broadcastDragging(null); // unless another drag started meanwhile
+    return outcome === 'tearOff' ? tearOff(drag.connId, screen.getCursorScreenPoint()) : null;
   });
   ipcMain.on('tab:reply', (e, reply) => requests.answer(e.sender.id, reply));
   ipcMain.on('menu:shortcuts', (_e, map) => {

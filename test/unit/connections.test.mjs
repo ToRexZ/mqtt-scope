@@ -127,6 +127,36 @@ test('hold queues events in order; release delivers them to the new owner', () =
   assert.equal(seen.length, 4);
 });
 
+test('hold keeps at most holdMax messages; the rest count as dropped, after them', () => {
+  const r = new ConnectionRegistry({ createSession: () => new FakeSession(), holdMax: 5 });
+  const id = r.create(1);
+  const seen = collect(r, 'status', 'batch');
+  const { session } = r.get(id);
+  const msgs = (from, n) => Array.from({ length: n }, (_, i) => ({ n: from + i }));
+  const S = { state: 'connected' };
+  r.hold(id);
+  session.emit('batch', { messages: msgs(1, 3), dropped: 0 });
+  session.emit('status', S);
+  session.emit('batch', { messages: msgs(4, 4), dropped: 1 }); // 2 fit
+  session.emit('batch', { messages: msgs(8, 2), dropped: 0 }); // none fit
+  session.emit('batch', { messages: [], dropped: 3 });
+  assert.deepEqual(seen, []);
+  r.release(id);
+  assert.deepEqual(seen, [
+    ['batch', 'c1', 1, { messages: msgs(1, 3), dropped: 0 }],
+    ['status', 'c1', 1, S],
+    ['batch', 'c1', 1, { messages: msgs(4, 2), dropped: 1 }],
+    ['batch', 'c1', 1, { messages: [], dropped: 7 }],
+  ]);
+
+  // The next hold starts empty.
+  seen.length = 0;
+  r.hold(id);
+  session.emit('batch', { messages: msgs(1, 5), dropped: 0 });
+  r.release(id);
+  assert.deepEqual(seen, [['batch', 'c1', 1, { messages: msgs(1, 5), dropped: 0 }]]);
+});
+
 test('activeCount counts active sessions of every owner', () => {
   const r = reg();
   const a = r.create(1);

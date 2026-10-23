@@ -9,9 +9,10 @@
 //   tab is gone from it) → tab:import to the target (it answers once the tab
 //   is built) → the connection and its pop-outs belong to the target → release
 //
-// A step that fails, or a window that takes longer than timeoutMs, gives the
-// tab back to the window it came from, at its place there. main.js wires this
-// to Electron; no Electron dependency, so it can be tested under plain Node.
+// A step that fails, a window that takes longer than timeoutMs or one that
+// starts closing gives the tab back to the window it came from, at its place
+// there. main.js wires this to Electron; no Electron dependency, so it can be
+// tested under plain Node.
 
 const TIMEOUT_MS = 10000;
 
@@ -57,11 +58,12 @@ class Requests {
 
 class TabMover {
   // registry: the ConnectionRegistry. ask(windowId, channel, data): a
-  // window's answer (Requests.ask). isWindow(id): a main window is open.
-  // setOwner(connId, windowId): the connection and its pop-outs belong to
-  // that window (null: to none, while the tab is between windows).
-  // closeConnection(connId). left(windowId): a tab left the window or did
-  // not come in; main closes a window left without connections.
+  // window's answer (Requests.ask). isWindow(id): a main window is open and
+  // not closing. setOwner(connId, windowId): the connection and its pop-outs
+  // belong to that window (null: to none, while the tab is between windows).
+  // closeConnection(connId). left(windowId, out): a move from or to the
+  // window ended, out: a tab went out of it; main closes a window that tabs
+  // going out left without connections.
   constructor({ registry, ask, isWindow, setOwner, closeConnection, left, timeoutMs = TIMEOUT_MS, setTimer = setTimeout, clearTimer = clearTimeout }) {
     Object.assign(this, { registry, ask, isWindow, setOwner, closeConnection, left, timeoutMs, setTimer, clearTimer });
     this.moves = new Map(); // connId -> { from, to }
@@ -78,7 +80,8 @@ class TabMover {
   }
 
   // Resolves with whether the tab moved to window `to`, at `index` in its
-  // strip; one that did not stays, or is back, where it was.
+  // strip (0 for anything but a whole number from 0); one that did not
+  // stays, or is back, where it was.
   async move(connId, to, index = 0) {
     const entry = this.registry.get(connId);
     if (!entry || this.moving(connId)) throw new Error('Unknown connection');
@@ -86,13 +89,15 @@ class TabMover {
     if (to === from || !this.isWindow(to)) throw new Error('Unknown window');
     this.moves.set(connId, { from, to });
     this.registry.hold(connId);
+    let moved = false;
     try {
-      return await this.run(connId, from, to, index);
+      moved = await this.run(connId, from, to, Number.isInteger(index) && index > 0 ? index : 0);
+      return moved;
     } finally {
       this.moves.delete(connId);
       this.registry.release(connId); // to the window that has it now
-      this.left(from);
-      this.left(to);
+      this.left(from, moved);
+      this.left(to, false);
     }
   }
 
@@ -109,7 +114,7 @@ class TabMover {
     } finally {
       this.clearTimer(timer);
     }
-    if (late) return this.giveBack(connId, from, out);
+    if (late || !this.isWindow(to)) return this.giveBack(connId, from, out);
     this.setOwner(connId, null); // between windows: neither one closing ends it
     const imported = this.ask(to, 'tab:import', { connId, state: out.state, index, activate: true });
     let inTime;
@@ -118,29 +123,39 @@ class TabMover {
     } catch {
       return this.giveBack(connId, from, out);
     }
-    if (!inTime) {
-      // Should the target build it after all, that copy goes again.
-      imported
-        .then(() => this.ask(to, 'tab:export', { connId, drop: true }))
-        .then(() => this.left(to))
-        .catch(() => {});
+    // Built too late, or in a window that started closing meanwhile (the
+    // connection would end with it): the tab goes back, and that copy goes.
+    if (!inTime || !this.isWindow(to)) {
+      this.dropCopy(imported, connId, to);
       return this.giveBack(connId, from, out);
     }
     this.setOwner(connId, to);
     return true;
   }
 
-  // Back to the window it came from, at its place there (shown if it was);
-  // that window answers however long it takes. Gone, it takes the connection
-  // with it.
+  // Back to the window it came from, at its place there (shown if it was).
+  // Gone, or taking longer than timeoutMs, it takes the connection with it
+  // (its events are not held any longer); a copy it builds later goes.
   async giveBack(connId, from, { state, index, active }) {
+    const back = this.ask(from, 'tab:import', { connId, state, index, activate: active });
     try {
-      await this.ask(from, 'tab:import', { connId, state, index, activate: active });
-      this.setOwner(connId, from);
-    } catch {
-      this.closeConnection(connId);
-    }
+      if (await this.within(back)) {
+        this.setOwner(connId, from);
+        return false;
+      }
+      this.dropCopy(back, connId, from);
+    } catch {}
+    this.closeConnection(connId);
     return false;
+  }
+
+  // Once `built` (the window answered its tab:import), the window lets its
+  // copy of the tab go again.
+  dropCopy(built, connId, windowId) {
+    built
+      .then(() => this.ask(windowId, 'tab:export', { connId, drop: true }))
+      .then(() => this.left(windowId, true))
+      .catch(() => {});
   }
 
   // Whether `answer` succeeds within timeoutMs (false: not yet); rejects

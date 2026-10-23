@@ -402,7 +402,7 @@ test('middle-click closes a tab', async ({ env }) => {
 });
 
 test('dragging a tab reorders the strip', async ({ env }) => {
-  const { idA, idB, page, errors } = await twoTabs(env);
+  const { app, idA, idB, page, errors } = await twoTabs(env);
   const idC = await newTab(page);
   await tabEl(page, idC).dragTo(tabEl(page, idA), { targetPosition: { x: 5, y: 10 } });
   await expect.poll(() => tabIds(page)).toEqual([idC, idA, idB]);
@@ -414,6 +414,24 @@ test('dragging a tab reorders the strip', async ({ env }) => {
   const box = await tabEl(page, idB).boundingBox();
   await tabEl(page, idA).dragTo(tabEl(page, idB), { targetPosition: { x: box.width - 5, y: 10 } });
   await expect.poll(() => tabIds(page)).toEqual([idC, idB, idA]);
+
+  // Let go over the window away from the strip: nothing happens, and a text
+  // field it lands on gets nothing (the drag carries no text).
+  await tabEl(page, idB).click();
+  const topic = page.locator('#publisher-host .topic-input');
+  await topic.fill('');
+  await tabEl(page, idA).dragTo(topic);
+  await expect(topic).toHaveValue('');
+  await page.waitForTimeout(600); // longer than main waits for a drop
+  expect(await tabIds(page)).toEqual([idC, idB, idA]);
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
+  // The drag is over: the strip takes no drag whose data it cannot read.
+  const takesDrag = await page.evaluate(() => {
+    const ev = new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer: new DataTransfer() });
+    document.querySelector('.topbar .conn-tab').dispatchEvent(ev);
+    return ev.defaultPrevented;
+  });
+  expect(takesDrag).toBe(false);
   expect(errors).toEqual([]);
 });
 

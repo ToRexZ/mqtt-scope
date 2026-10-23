@@ -9,11 +9,15 @@ const { EventEmitter } = require('node:events');
 const { MqttSession } = require('./mqttSession');
 
 const EVENTS = ['status', 'warning', 'batch'];
+// Messages held for a tab on its way between windows, at most (as many as a
+// session buffers between two batches).
+const HOLD_MAX = 50000;
 
 class ConnectionRegistry extends EventEmitter {
-  constructor({ createSession = () => new MqttSession() } = {}) {
+  constructor({ createSession = () => new MqttSession(), holdMax = HOLD_MAX } = {}) {
     super();
     this._createSession = createSession;
+    this._holdMax = holdMax;
     this._entries = new Map();
     this._counter = 0;
   }
@@ -31,7 +35,7 @@ class ConnectionRegistry extends EventEmitter {
     for (const name of EVENTS) {
       entry.session.on(name, (arg) => {
         if (this._entries.get(connId) !== entry) return;
-        if (entry.held) entry.held.push([name, arg]);
+        if (entry.held) this._hold(entry, name, arg);
         else this.emit(name, connId, entry.ownerId, arg);
       });
     }
@@ -99,10 +103,25 @@ class ConnectionRegistry extends EventEmitter {
   }
 
   // While a tab moves between windows its events are queued, then delivered to
-  // the new owner on release so none are lost or reordered.
+  // the new owner on release so none are lost or reordered. Past holdMax
+  // messages, more are dropped and counted, in a batch after the queued ones.
   hold(connId) {
     const entry = this._entries.get(connId);
-    if (entry && !entry.held) entry.held = [];
+    if (entry && !entry.held) Object.assign(entry, { held: [], heldCount: 0, heldDropped: 0 });
+  }
+
+  _hold(entry, name, arg) {
+    if (name !== 'batch') return entry.held.push([name, arg]);
+    const { messages = [], dropped = 0 } = arg;
+    const room = this._holdMax - entry.heldCount;
+    if (room <= 0) {
+      entry.heldDropped += messages.length + dropped;
+      return;
+    }
+    const kept = Math.min(messages.length, room);
+    entry.heldCount += kept;
+    entry.heldDropped += messages.length - kept;
+    entry.held.push([name, kept < messages.length ? { messages: messages.slice(0, kept), dropped } : arg]);
   }
 
   setOwner(connId, ownerId) {
@@ -114,6 +133,7 @@ class ConnectionRegistry extends EventEmitter {
     const entry = this._entries.get(connId);
     if (!entry || !entry.held) return;
     const queued = entry.held;
+    if (entry.heldDropped) queued.push(['batch', { messages: [], dropped: entry.heldDropped }]);
     entry.held = null;
     for (const [name, arg] of queued) this.emit(name, connId, entry.ownerId, arg);
   }

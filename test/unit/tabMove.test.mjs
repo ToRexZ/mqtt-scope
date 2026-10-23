@@ -26,8 +26,9 @@ class FakeSession extends EventEmitter {
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const TIMEOUT = 1000;
 
-// Windows 1 and 2, each with an inbox of what main asked of it; a connection
-// of window 1 (the tab to move) and the batches each window received.
+// Windows 1 and 2, each with an inbox of what main asked of it (one in
+// `closing` takes no tabs); a connection of window 1 (the tab to move) and
+// the batches each window received.
 function setup() {
   const registry = new ConnectionRegistry({ createSession: () => new FakeSession() });
   const inbox = new Map([
@@ -43,10 +44,11 @@ function setup() {
   let seq = 0;
   const timers = new Map();
   const log = [];
+  const closing = new Set();
   const mover = new TabMover({
     registry,
     ask: (id, channel, data) => requests.ask(id, channel, data),
-    isWindow: (id) => inbox.has(id),
+    isWindow: (id) => inbox.has(id) && !closing.has(id),
     setOwner: (connId, id) => {
       registry.setOwner(connId, id);
       log.push(['owner', id]);
@@ -55,7 +57,7 @@ function setup() {
       registry.close(connId);
       log.push(['close']);
     },
-    left: (id) => log.push(['left', id]),
+    left: (id, out) => log.push(['left', id, out]),
     timeoutMs: TIMEOUT,
     setTimer: (fn, ms) => {
       timers.set(++seq, { at: now + ms, fn });
@@ -87,7 +89,7 @@ function setup() {
     registry.closeOwner(id);
     requests.windowGone(id);
   };
-  return { registry, requests, mover, inbox, log, received, connId, batch, asked, answer, advance, closeWindow };
+  return { registry, requests, mover, inbox, closing, log, received, connId, batch, asked, answer, advance, closeWindow };
 }
 
 const STATE = { tree: 'the tab' };
@@ -117,7 +119,7 @@ describe('a move', () => {
       [2, 4],
     ]);
     assert.equal(t.registry.get(t.connId).ownerId, 2);
-    assert.deepEqual(t.log, [['owner', null], ['owner', 2], ['left', 1], ['left', 2]]);
+    assert.deepEqual(t.log, [['owner', null], ['owner', 2], ['left', 1, true], ['left', 2, false]], 'the tab left window 1');
     assert.equal(t.mover.busy(1), false);
     assert.equal(t.mover.moving(t.connId), false);
   });
@@ -145,7 +147,7 @@ describe('a move', () => {
     assert.deepEqual(t.inbox.get(2), []);
     assert.equal(t.registry.get(t.connId).ownerId, 1);
     assert.deepEqual(t.received, [[1, 1]]);
-    assert.deepEqual(t.log, [['left', 1], ['left', 2]]);
+    assert.deepEqual(t.log, [['left', 1, false], ['left', 2, false]], 'no tab left either window');
   });
 
   test('a failed import gives the tab back to its window, at its place, and its events go there', async () => {
@@ -179,7 +181,7 @@ describe('a move', () => {
     await t.answer(2, 'tab:import', { result: true });
     assert.deepEqual(t.asked(2, 'tab:export').drop, true);
     await t.answer(2, 'tab:export', { result: { state: null, index: 0, active: true } });
-    assert.deepEqual(t.log.at(-1), ['left', 2]);
+    assert.deepEqual(t.log.at(-1), ['left', 2, true]);
     assert.equal(t.registry.get(t.connId).ownerId, 1);
   });
 
@@ -206,7 +208,7 @@ describe('a move', () => {
     await t.answer(2, 'tab:import', { error: 'Cannot build it' });
     assert.equal(await moving, false);
     assert.equal(t.registry.get(t.connId), null);
-    assert.deepEqual(t.log, [['owner', null], ['close'], ['left', 1], ['left', 2]]);
+    assert.deepEqual(t.log, [['owner', null], ['close'], ['left', 1, false], ['left', 2, false]]);
   });
 
   test('the window it goes to closing fails the move', async () => {
@@ -219,6 +221,81 @@ describe('a move', () => {
     await t.answer(1, 'tab:import', { result: true });
     assert.equal(await moving, false);
     assert.equal(t.registry.get(t.connId).ownerId, 1);
+  });
+
+  test('a window that is closing takes no tab: refused before, given back during the move', async () => {
+    const t = setup();
+    t.closing.add(2);
+    await assert.rejects(t.mover.move(t.connId, 2, 0), /Unknown window/);
+    t.closing.delete(2);
+
+    // It starts closing while the tab is on its way: the tab goes back, and
+    // the copy it built goes again.
+    const moving = t.mover.move(t.connId, 2, 0);
+    await tick();
+    await t.answer(1, 'tab:export', { result: EXPORTED });
+    t.closing.add(2);
+    t.batch(1);
+    await t.answer(2, 'tab:import', { result: true });
+    assert.equal(t.asked(2, 'tab:export').drop, true);
+    const { reqId, ...back } = t.asked(1, 'tab:import');
+    assert.deepEqual(back, { channel: 'tab:import', connId: t.connId, state: STATE, index: 1, activate: false });
+    await t.answer(1, 'tab:import', { result: true });
+    assert.equal(await moving, false);
+    assert.equal(t.registry.get(t.connId).ownerId, 1);
+    assert.deepEqual(t.received, [[1, 1]]);
+  });
+
+  test('a window that starts closing while the tab leaves the other one is not offered it', async () => {
+    const t = setup();
+    const moving = t.mover.move(t.connId, 2, 0);
+    await tick();
+    t.closing.add(2);
+    await t.answer(1, 'tab:export', { result: EXPORTED });
+    assert.equal(t.asked(2, 'tab:import'), undefined);
+    await t.answer(1, 'tab:import', { result: true });
+    assert.equal(await moving, false);
+    assert.equal(t.registry.get(t.connId).ownerId, 1);
+  });
+
+  test('a give-back that takes too long ends the connection; a copy built after all goes again', async () => {
+    const t = setup();
+    const moving = t.mover.move(t.connId, 2, 0);
+    await tick();
+    await t.answer(1, 'tab:export', { result: EXPORTED });
+    await t.answer(2, 'tab:import', { error: 'Cannot build it' });
+    assert.notEqual(t.asked(1, 'tab:import'), undefined);
+    t.batch(1);
+    await t.advance(TIMEOUT - 1);
+    assert.equal(t.registry.get(t.connId)?.held?.length, 1, 'still held');
+    await t.advance(1);
+    assert.equal(await moving, false);
+    assert.equal(t.registry.get(t.connId), null, 'not held forever');
+    assert.deepEqual(t.received, []);
+    assert.deepEqual(t.log, [['owner', null], ['close'], ['left', 1, false], ['left', 2, false]]);
+
+    // Window 1 gets there in the end: it is asked to let the tab go.
+    await t.answer(1, 'tab:import', { result: true });
+    assert.equal(t.asked(1, 'tab:export').drop, true);
+    await t.answer(1, 'tab:export', { result: { state: null, index: 1, active: false } });
+    assert.deepEqual(t.log.at(-1), ['left', 1, true]);
+  });
+
+  test('the place in the strip is never negative', async () => {
+    for (const [index, expected] of [
+      [-3, 0],
+      [1.5, 0],
+      ['2', 0],
+      [2, 2],
+    ]) {
+      const t = setup();
+      const moving = t.mover.move(t.connId, 2, index);
+      await tick();
+      await t.answer(1, 'tab:export', { result: EXPORTED });
+      assert.equal(t.asked(2, 'tab:import').index, expected, String(index));
+      await t.answer(2, 'tab:import', { result: true });
+      assert.equal(await moving, true);
+    }
   });
 
   test('one move at a time per tab, to another open window', async () => {
