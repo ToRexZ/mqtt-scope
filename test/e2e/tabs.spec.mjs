@@ -321,7 +321,7 @@ test('no tab overlaps +, whatever the width', async ({ env }) => {
   const { page, errors } = await manyTabs(env, 8);
   for (let w = 1400; w >= 760; w -= 23) {
     await page.setViewportSize({ width: w, height: 700 });
-    await page.waitForTimeout(50);
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))); // the resize observers have run
     const r = await page.evaluate(() => {
       const tabs = document.querySelectorAll('.conn-tab');
       const plus = document.querySelector('.tab-new').getBoundingClientRect();
