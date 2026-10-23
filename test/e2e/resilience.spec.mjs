@@ -1,6 +1,6 @@
 // Resilience: broker connection drops and message floods.
 
-import { test, expect, row, rowByPath, waitForTopic, recordStatus } from './fixtures.mjs';
+import { test, expect, row, rowByPath, waitForTopic, recordStatus, activeTabName } from './fixtures.mjs';
 
 // Publishes live (non-retained) messages until the app has one: right after a
 // reconnect the app's subscription may not be active at the broker yet.
@@ -25,7 +25,8 @@ test('connection drop: reconnects automatically and messages keep flowing', asyn
   broker.dropClients();
   await expect.poll(log, { timeout: 10_000 }).toContainEqual(`Reconnecting… — ${url}`);
   await expect(page.locator('#status-text')).toHaveText(`Connected — ${url}`);
-  await expect(page.locator('#conn-label')).toHaveText(`Test broker ${broker.port}`);
+  await expect(activeTabName(page)).toHaveText(`Test broker ${broker.port}`);
+  await expect(page.locator('.conn-tab.active')).toHaveAttribute('data-state', 'connected');
   const seen = await log();
   expect(seen.indexOf(`Reconnecting… — ${url}`)).toBeLessThan(seen.lastIndexOf(`Connected — ${url}`));
   // While it reconnects on its own the app must not claim to be "Disconnected".

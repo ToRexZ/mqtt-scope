@@ -1,7 +1,7 @@
 // Connecting: refused connections, bad credentials, TLS with a private CA,
 // WebSocket transport and disconnecting.
 
-import { test, expect, makeUserData, profile, closedPort, makeCerts, mockDialogs, waitForTopic, row } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, closedPort, makeCerts, mockDialogs, waitForTopic, row, activeTabName } from './fixtures.mjs';
 
 // Logs every text the dialog's status line shows, including short-lived ones.
 async function recordDialogStatus(page) {
@@ -50,7 +50,7 @@ test('refused connection: the dialog reports the failure and keeps reporting it 
   expect(errors).toEqual([]);
 });
 
-test('wrong credentials show the broker error; fixing the password connects; Disconnect disconnects', async ({ env }) => {
+test('wrong credentials show the broker error; fixing the password connects; Disconnect disconnects and offers Reconnect', async ({ env }) => {
   const broker = await env.broker({ users: { alice: 'correct-horse' } });
   const { page, errors } = await env.launch({
     userData: makeUserData({ profiles: [profile(broker.port, { username: 'alice', password: 'wrong' })] }),
@@ -66,14 +66,16 @@ test('wrong credentials show the broker error; fixing the password connects; Dis
   await dlg.locator('.connect-btn').click();
   await expect(dlg).toHaveCount(0);
   await expect(page.locator('#status-text')).toHaveText(`Connected — mqtt://127.0.0.1:${broker.port}`);
-  await expect(page.locator('#conn-label')).toHaveText(`Test broker ${broker.port}`);
+  await expect(activeTabName(page)).toHaveText(`Test broker ${broker.port}`);
+  await expect(page.locator('.conn-tab.active')).toHaveAttribute('data-state', 'connected');
   await expect(page.locator('.tree-empty')).toHaveText('Connected. Waiting for messages…');
 
   await page.locator('#btn-disconnect').click();
   await expect(page.locator('#status-text')).toHaveText(`Disconnected — mqtt://127.0.0.1:${broker.port}`);
-  await expect(page.locator('#conn-label')).toHaveText(`Test broker ${broker.port} · Disconnected`);
-  await expect(page.locator('#btn-disconnect')).toBeHidden();
-  await expect(page.locator('.tree-empty')).toHaveText('Not connected. Click the connection button above.');
+  await expect(activeTabName(page)).toHaveText(`Test broker ${broker.port}`);
+  await expect(page.locator('.conn-tab.active')).toHaveAttribute('data-state', 'disconnected');
+  await expect(page.locator('#btn-disconnect')).toHaveText('Reconnect');
+  await expect(page.locator('.tree-empty')).toHaveText('Not connected.');
   expect(await page.evaluate(() => window.__mqttscope.status.state)).toBe('disconnected');
   expect(errors).toEqual([]);
 });
@@ -108,8 +110,8 @@ test('TLS: untrusted certificate is rejected, CA chosen with Browse… connects;
   await waitForTopic(page, 'secure/hello');
   await expect(row(page, 'secure')).toBeVisible();
 
-  // Switch to the WebSocket profile.
-  await page.locator('#btn-connections').click();
+  // The WebSocket profile, in a new tab.
+  await page.locator('.tab-new').click();
   await dlg.locator('.conn-item', { hasText: 'WS broker' }).click();
   await expect(dlg.locator('[name="wsPath"]')).toHaveValue('/mqtt');
   await dlg.locator('.connect-btn').click();

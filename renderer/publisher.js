@@ -10,7 +10,9 @@ const newId = () => Math.random().toString(36).slice(2, 10);
 let instances = 0; // each connection tab has a publisher; their topic lists need distinct ids
 
 export class Publisher {
-  // opts: api, getTopics(prefix) -> string[], onToggle(collapsed)
+  // opts: api, getTopics(prefix) -> string[], getSelectedTopic(),
+  //       onToggle(collapsed), onPersist() — the saved or recent messages are
+  //       being written
   constructor(host, opts) {
     this.opts = opts;
     this.api = opts.api;
@@ -143,6 +145,7 @@ export class Publisher {
   }
 
   persist() {
+    this.opts.onPersist?.();
     return this.api
       .storeSet('savedMessages', { saved: this.saved, recent: this.recent })
       .catch((err) => toast(`Could not save messages: ${err.message}`, 'error'));

@@ -10,11 +10,12 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
+    <!-- The tab strip (tabStrip.js): one tab per connection, then + for a new
+         one; the window's own buttons at the far right. -->
     <header class="topbar">
-      <div class="brand">MQTT Scope</div>
-      <button id="btn-connections" class="conn-pill" title="Manage connections">
-        <span class="dot"></span><span id="conn-label">Not connected</span>
-      </button>
+      <div class="brand"><span class="brand-logo" aria-hidden="true"></span><span class="brand-text">MQTT Scope</span></div>
+      <div class="conn-tabs" role="tablist" aria-label="Connections"></div>
+      <button class="tab-new" type="button" title="New connection" aria-label="New connection">+</button>
       <span class="spacer"></span>
       <button id="btn-update" class="btn update" hidden></button>
       <button id="btn-settings" class="btn" title="Settings">Settings</button>

@@ -122,8 +122,7 @@ body.resizing-y {
 /* ------------------------------------------------------------ controls */
 
 .btn,
-.tab,
-.conn-pill {
+.tab {
   font: inherit;
   color: var(--text);
   background: var(--panel-2);
@@ -134,8 +133,7 @@ body.resizing-y {
   white-space: nowrap;
 }
 .btn:hover,
-.tab:hover,
-.conn-pill:hover {
+.tab:hover {
   background: var(--panel-3);
 }
 .btn:focus-visible,
@@ -223,15 +221,21 @@ span.icon {
   border-bottom: 1px solid var(--border);
 }
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-weight: 650;
   letter-spacing: 0.2px;
   margin-right: 6px;
+  white-space: nowrap;
 }
-.conn-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 180px;
+/* A background, not an <img>: the window has no img elements at all (see
+   security.spec.mjs). */
+.brand-logo {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  background: url('logo.svg') center / contain no-repeat;
 }
 .dot {
   width: 9px;
@@ -239,23 +243,100 @@ span.icon {
   border-radius: 50%;
   background: var(--faint);
 }
-.conn-pill[data-state='connected'] .dot {
+
+/* ------------------------------------------------------------ tab strip */
+
+/* One tab per connection (tabStrip.js); data-state is its dot (dotState). */
+.conn-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.conn-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  max-width: 260px;
+  font: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 4px 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.conn-tab:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.conn-tab.active {
+  color: var(--text);
+  background: var(--panel-3);
+  border-color: var(--border);
+}
+.conn-tab:focus-visible,
+.tab-new:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.conn-tab .dot {
+  flex: none;
+}
+.conn-tab[data-state='new'] .dot {
+  display: none;
+}
+.conn-tab[data-state='connected'] .dot {
   background: var(--ok);
 }
-.conn-pill[data-state='connecting'] .dot,
-.conn-pill[data-state='reconnecting'] .dot,
-.conn-pill[data-state='offline'] .dot {
+.conn-tab[data-state='connecting'] .dot {
   background: var(--warn);
 }
-.conn-pill[data-state='error'] .dot {
+.conn-tab[data-state='error'] .dot {
   background: var(--err);
 }
-.stats {
-  display: flex;
-  gap: 14px;
+.conn-tab[data-state='disconnected'] .dot {
+  background: var(--faint);
+}
+.conn-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.conn-tab-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--faint);
+  font-size: 15px;
+  line-height: 1;
+}
+.conn-tab-close:hover {
+  color: var(--text);
+  background: var(--border);
+}
+.tab-new {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
   color: var(--muted);
-  font-variant-numeric: tabular-nums;
-  margin-right: 6px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.tab-new:hover {
+  color: var(--text);
+  background: var(--panel-3);
 }
 
 /* ------------------------------------------------------------ connection tab */
@@ -276,6 +357,13 @@ span.icon {
   padding: 4px 10px;
   background: var(--panel);
   border-bottom: 1px solid var(--border);
+}
+.stats {
+  display: flex;
+  gap: 14px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  margin-right: 6px;
 }
 
 /* ------------------------------------------------------------ update notice */

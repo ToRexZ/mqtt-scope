@@ -1,14 +1,15 @@
 // Main window: the shell around its connection tabs. It holds what the window
-// shares (settings, shortcuts, the connection dialog, the update button),
-// routes each broker event to the tab of its connection and draws the active
-// tab. Each tab (connectionTab.js) is one connection with its own tree,
-// inspector, plots and publisher.
+// shares (settings, shortcuts, the connection dialog, the update button, the
+// tab strip), routes each broker event to the tab of its connection and draws
+// the active tab. Each tab (connectionTab.js) is one connection with its own
+// tree, inspector, plots and publisher.
 
-import { ConnectionTab, STATE_LABELS } from './connectionTab.js';
+import { ConnectionTab } from './connectionTab.js';
 import { ConnectionDialog } from './connectionDialog.js';
 import { closeMenu, toast } from './ui.js';
 import { DEFAULT_SETTINGS, normalizeSettings, openSettings } from './settings.js';
 import { TabSet } from './tabSet.js';
+import { TabStrip, dotState } from './tabStrip.js';
 import { initUpdateButton } from './updateButton.js';
 import { ACTIONS, bindingIndex, comboFromEvent, keyBelongsToTarget, pointerFocus, resolveBindings, toAccelerator } from './keys.js';
 
@@ -24,7 +25,7 @@ let keyIndex = bindingIndex(bindings);
 const tabs = new Map(); // id → ConnectionTab
 const order = new TabSet(); // the ids in strip order, and the active one
 const stripTabs = () => order.ids().map((id) => tabs.get(id));
-let active = null;
+const activeTab = () => tabs.get(order.activeId) || null;
 let dialogStatus = null; // the active tab's status the connection dialog last saw
 
 function applySettings(next) {
@@ -40,7 +41,7 @@ function applySettings(next) {
 const connections = new ConnectionDialog({
   api,
   getBinding: (id) => bindings[id],
-  onConnect: (profile) => active?.connect(profile),
+  onConnect: (profile) => activeTab()?.connect(profile),
 });
 
 // ------------------------------------------------------------------ tabs
@@ -51,37 +52,63 @@ const shell = {
   showConnections: () => connections.open(),
   connectionsOpen: () => connections.isOpen(),
   setSubscriptions: (profileId, subs) => connections.setSubscriptions(profileId, subs),
-  onChange: (tab) => tab === active && showActive(),
+  savedProfile: (profile) => connections.profiles.find((p) => p.id === profile.id) || profile,
+  savedMessagesChanged: (tab) => savedMessagesChanged(tab),
+  onChange: () => refresh(),
 };
 
 const tabOf = (id) => tabs.get(id) || null;
 
-// A tab gets its own connection in main; its id is the tab's id.
+const strip = new TabStrip($('.topbar'), {
+  onActivate: (id) => activate(id),
+  onClose: (id) => closeTab(id),
+  // Until the dialog is drawn inside the tab, it opens over the window and
+  // connects the new tab; cancelling leaves a "New connection" tab.
+  onNew: async () => {
+    await openTab();
+    connections.open();
+  },
+});
+
+// A tab gets its own connection in main; its id is the tab's id. A tab to
+// connect takes its profile when connect() does: one open in another tab
+// leaves it a "New connection".
 async function openTab({ profile = null, connect = false, activate: show = true } = {}) {
   const connId = await api.openConnection();
   const tab = new ConnectionTab({ api, connId, settings, shell });
-  if (profile) tab.profile = { ...profile };
+  if (profile && !connect) tab.profile = { ...profile };
   tabs.set(connId, tab);
+  savedSeen.set(connId, savedGen); // tab.load() reads them
   order.add(connId, { activate: false });
-  if (show || !active) activate(connId);
+  if (show || !activeTab().active) activate(connId);
+  refresh();
   await tab.load();
-  if (profile && connect) await tab.connect(profile);
+  if (profile && connect && tabOf(connId) === tab) await tab.connect(profile);
   return tab;
 }
 
-// Closes the tab and its connection. The window always keeps a tab: closing
-// the last one opens a fresh one.
+// Closes the tab and its connection, after asking when its plots hold
+// recorded data. The window always keeps a tab: closing the last one opens a
+// fresh one.
 async function closeTab(id) {
   const tab = tabOf(id);
   if (!tab) return;
+  if (tab.hasPlotData) {
+    const ok = await api.confirm({
+      message: `Close “${tab.label}”?`,
+      detail: 'Its plots hold recorded data, which is lost when the tab closes. The plots themselves are kept.',
+      okLabel: 'Close',
+    });
+    if (!ok || tabOf(id) !== tab) return;
+  }
   tabs.delete(id);
-  const nextId = order.remove(id); // the right neighbour, else the left
+  savedSeen.delete(id);
+  order.remove(id); // an active tab's right neighbour becomes active, else its left one
   const saved = tab.flush(); // before dispose stops its save timer
   tab.dispose();
-  if (tab === active) {
-    active = null;
-    if (nextId) activate(nextId);
-  }
+  if (tab.profile) order.pushClosed({ profileId: tab.profile.id });
+  if (order.activeId) activate(order.activeId); // draws it, unless it already is
+  refresh();
   await Promise.allSettled([saved, api.closeConnection(id)]);
   if (!tabs.size) {
     await openTab();
@@ -89,30 +116,49 @@ async function closeTab(id) {
   }
 }
 
+// Draws the tab in the window. The tab shown is always the TabSet's active one.
 function activate(id) {
   const tab = tabOf(id);
-  if (!tab || tab === active) return;
+  if (!tab || tab.active) return;
   closeMenu(); // a menu of the tab being left would act on it
-  active?.deactivate();
-  active = tab;
+  const shown = activeTab();
+  if (shown?.active) shown.deactivate();
   order.activate(id);
   tab.activate($('#tab-host'));
-  // Saved and recent messages are shared; another tab may have changed them.
-  tab.publisher.load();
-  showActive();
+  refreshSaved(tab);
+  refresh();
 }
 
-// The connection button and the dialog follow the active tab.
-function showActive() {
-  const s = active.status;
-  const name = active.profile?.name || '';
-  const label = s.state === 'connected' ? name : `${name ? `${name} · ` : ''}${STATE_LABELS[s.state] || s.state}`;
-  $('#conn-label').textContent = label || 'Not connected';
-  $('#btn-connections').dataset.state = s.state;
-  if (s !== dialogStatus) {
-    dialogStatus = s;
-    connections.onStatus(s);
+// The strip shows every tab; the window title and the connection dialog
+// follow the active one.
+function refresh() {
+  const current = activeTab();
+  strip.render(stripTabs().map((t) => ({ id: t.connId, label: t.label, state: dotState(t.status, t.everConnected), active: t === current })));
+  if (!current) return;
+  document.title = `MQTT Scope — ${current.label}`;
+  if (current.status !== dialogStatus) {
+    dialogStatus = current.status;
+    connections.onStatus(current.status);
   }
+}
+
+// Saved and recent messages are shared by all tabs (and windows). Each change
+// bumps a generation; a tab reloads its copy when it is shown with an older
+// one (reloading on every switch would reset its list's scroll).
+let savedGen = 0;
+const savedSeen = new Map(); // tab id → the generation its publisher shows
+
+function savedMessagesChanged(byTab = null) {
+  savedGen++;
+  if (byTab) savedSeen.set(byTab.connId, savedGen); // its copy is what is saved
+  const current = activeTab();
+  if (current) refreshSaved(current);
+}
+
+function refreshSaved(tab) {
+  if (savedSeen.get(tab.connId) === savedGen) return;
+  savedSeen.set(tab.connId, savedGen);
+  return tab.publisher.load();
 }
 
 // ------------------------------------------------------------------ events
@@ -122,7 +168,7 @@ api.onStatus((event) => tabOf(event.connId)?.onStatus(event.status));
 api.onWarning((event) => tabOf(event.connId)?.onWarning(event.message));
 
 // Hidden tabs record but are not drawn; message rates count for every tab.
-setInterval(() => active?.render(), RENDER_INTERVAL_MS);
+setInterval(() => activeTab()?.render(), RENDER_INTERVAL_MS);
 setInterval(() => {
   for (const tab of tabs.values()) tab.tickRate();
 }, RATE_INTERVAL_MS);
@@ -142,7 +188,7 @@ api.onMenu((action) => {
 // Another window saved shared data: pick up its changes.
 api.onStoreChanged(async (name) => {
   if (name === 'profiles') await connections.reload();
-  else if (name === 'savedMessages') await Promise.all(stripTabs().map((t) => t.publisher.load()));
+  else if (name === 'savedMessages') savedMessagesChanged();
   else if (name === 'plotTabs') await Promise.all(stripTabs().map((t) => t.plots.reload()));
   else if (name === 'settings') applySettings(normalizeSettings(await api.storeGet('settings')));
 });
@@ -152,7 +198,6 @@ window.addEventListener('unhandledrejection', (e) => toast(`Unexpected error: ${
 
 // ------------------------------------------------------------------ chrome
 
-$('#btn-connections').addEventListener('click', () => connections.open());
 $('#btn-settings').addEventListener('click', () => showSettings());
 const updates = initUpdateButton(api, $('#btn-update'));
 
@@ -171,12 +216,12 @@ const WINDOW_ACTIONS = {
   settings: () => showSettings(),
   keyboardSettings: () => showSettings('keyboard'),
 };
-const handlerFor = (action) => WINDOW_ACTIONS[action] || active?.handlers[action];
+const handlerFor = (action) => WINDOW_ACTIONS[action] || activeTab()?.handlers[action];
 
 const isPointerFocused = pointerFocus(document);
 document.addEventListener('keydown', (e) => {
   if (document.querySelector('.modal-overlay')) return; // dialogs handle their own keys
-  if (e.key === 'Escape' && active?.handleEscape()) return;
+  if (e.key === 'Escape' && activeTab()?.handleEscape()) return;
   const combo = comboFromEvent(e);
   const action = combo && keyIndex.get(combo);
   const handler = action && handlerFor(action);
@@ -197,22 +242,22 @@ await openTab();
 // the active tab's.
 window.__mqttscope = {
   get tree() {
-    return active?.tree;
+    return activeTab()?.tree;
   },
   get treeView() {
-    return active?.treeView;
+    return activeTab()?.treeView;
   },
   get viewer() {
-    return active?.viewer;
+    return activeTab()?.viewer;
   },
   get plots() {
-    return active?.plots;
+    return activeTab()?.plots;
   },
   get publisher() {
-    return active?.publisher;
+    return activeTab()?.publisher;
   },
   get status() {
-    return active?.status;
+    return activeTab()?.status;
   },
   connections,
   get settings() {
@@ -223,7 +268,7 @@ window.__mqttscope = {
       return stripTabs();
     },
     get active() {
-      return active;
+      return activeTab();
     },
     openTab,
     closeTab,
@@ -231,4 +276,4 @@ window.__mqttscope = {
   },
 };
 
-if (active.status.state === 'disconnected' && !updates.installing()) connections.open();
+if (activeTab().status.state === 'disconnected' && !updates.installing()) connections.open();

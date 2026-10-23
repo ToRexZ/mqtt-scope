@@ -18,7 +18,7 @@ import { bindConnection } from './tabApi.js';
 const PAUSE_QUEUE_LIMIT = 200000;
 const PAUSE_QUEUE_BYTES = 256 * 1024 * 1024;
 const DELETE_ECHO_MS = 5000;
-const NOT_CONNECTED = 'Not connected. Click the connection button above.';
+const NOT_CONNECTED = 'Not connected.';
 // Scrolled elements whose position is kept while the tab is hidden (a
 // detached element forgets it).
 const SCROLLERS = '.tree-scroll, .viewer-body, .history-list, .payload-editor, .lib-list, .plot-settings';
@@ -46,8 +46,9 @@ function stripMessage(m) {
 
 export class ConnectionTab {
   // shell: getBinding(id), showConnections(), connectionsOpen(),
-  //        setSubscriptions(profileId, subs), onChange(tab) — the label, state
-  //        or data changed
+  //        setSubscriptions(profileId, subs), savedProfile(profile) — its
+  //        saved version, savedMessagesChanged(tab) — this tab wrote the saved
+  //        or recent messages, onChange(tab) — the label, state or data changed
   constructor({ api, connId, settings, shell }) {
     this.api = api;
     this.connId = connId; // also the tab's id
@@ -56,6 +57,7 @@ export class ConnectionTab {
     this.profile = null; // snapshot of the profile last connected
     this.status = { state: 'disconnected' };
     this.everConnected = false;
+    this.canReconnect = false; // disconnected by the user after connecting
     this.active = false;
 
     this.tree = new TopicTree();
@@ -183,11 +185,12 @@ export class ConnectionTab {
       getTopics: (prefix) => this.topicSuggestions(prefix),
       getSelectedTopic: () => this.selected?.path ?? null,
       onToggle: (collapsed) => this.els.right.classList.toggle('pub-collapsed', collapsed),
+      onPersist: () => this.shell.savedMessagesChanged(this),
     });
   }
 
   wireChrome() {
-    this.els.disconnect.addEventListener('click', () => this.tabApi.disconnect());
+    this.els.disconnect.addEventListener('click', () => (this.canReconnect ? this.reconnect() : this.tabApi.disconnect()));
     this.els.subscriptions.addEventListener('click', () => this.showSubscriptions());
     this.els.pause.addEventListener('click', () => this.togglePause());
     this.$('#btn-clear').addEventListener('click', () => this.clearTree());
@@ -345,17 +348,34 @@ export class ConnectionTab {
     return res;
   }
 
+  // Connects again to the profile the user disconnected from, as saved now
+  // (edits made since apply).
+  reconnect() {
+    return this.connect(this.shell.savedProfile(this.profile));
+  }
+
   onStatus(s) {
     this.status = s;
     if (s.state === 'connected') this.everConnected = true;
-    this.els.disconnect.hidden = s.state === 'disconnected' && !s.unexpected;
+    // Disconnect while connected or trying to; Reconnect once the user
+    // disconnected a tab that had connected. A tab that never did has nothing
+    // to resume.
+    const byUser = s.state === 'disconnected' && !s.unexpected;
+    this.canReconnect = byUser && this.everConnected && !!this.profile;
+    this.els.disconnect.hidden = byUser && !this.canReconnect;
+    this.els.disconnect.textContent = this.canReconnect ? 'Reconnect' : 'Disconnect';
     this.els.subscriptions.hidden = s.state !== 'connected';
     this.els.statusText.textContent = s.state === 'error' ? `Error: ${s.error}` : `${STATE_LABELS[s.state] || s.state}${s.url ? ` — ${s.url}` : ''}`;
     if (s.state === 'connected') this.treeView.setEmptyText('Connected. Waiting for messages…');
     else if (s.state === 'disconnected') this.treeView.setEmptyText(NOT_CONNECTED);
-    // Retries repeat the same error every few seconds; show each distinct one once.
-    if (s.state === 'error' && this.active && !this.shell.connectionsOpen() && s.error !== this.lastErrorToast) toast(s.error, 'error');
-    this.lastErrorToast = s.state === 'error' ? s.error : s.state === 'connected' ? null : this.lastErrorToast;
+    // Retries repeat the same error every few seconds; show each distinct one
+    // once. A hidden tab shows none (its dot turns red), so a retry toasts it
+    // once the tab is shown.
+    if (s.state === 'error' && this.active && !this.shell.connectionsOpen() && s.error !== this.lastErrorToast) {
+      toast(s.error, 'error');
+      this.lastErrorToast = s.error;
+    }
+    if (s.state === 'connected') this.lastErrorToast = null;
     if (this.active) this.treeView.refresh();
     else this.treeDirty = true;
     this.shell.onChange(this);

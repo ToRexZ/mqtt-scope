@@ -1,7 +1,7 @@
 // Markup in topic names, payloads, saved-message names, plot labels and
 // connection names must be shown as text and never executed or injected.
 
-import { test, expect, makeUserData, profile, connect, row, rowByPath, waitForTopic, viewerBody, viewerTab, historyItems, menu, answerPrompt, popupFrom } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, row, rowByPath, waitForTopic, viewerBody, viewerTab, historyItems, menu, answerPrompt, popupFrom, activeTabName } from './fixtures.mjs';
 
 const IMG = '<img src=x onerror="window.__pwned=1">';
 const SCRIPT = '<script>window.__pwned=1</script>';
@@ -39,7 +39,8 @@ test('markup in topics and payloads is never executed (tree, inspector modes, hi
   // Connection dialog with a hostile profile name.
   await expect(page.locator('.conn-dialog .conn-name')).toHaveText([IMG]);
   await connect(page);
-  await expect(page.locator('#conn-label')).toHaveText(IMG);
+  await expect(activeTabName(page)).toHaveText(IMG);
+  await expect(page).toHaveTitle(`MQTT Scope — ${IMG}`);
   await waitForTopic(page, `xss/${SCRIPT}`);
 
   // Tree: names and values are text.

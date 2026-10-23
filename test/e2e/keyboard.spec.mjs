@@ -2,7 +2,7 @@
 // and the "expand a topic when clicked" setting.
 
 import path from 'node:path';
-import { test, expect, makeUserData, profile, connect, rowByPath, waitForTopic, waitForFile, readJson } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, rowByPath, waitForTopic, waitForFile, readJson, activeTabName } from './fixtures.mjs';
 
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -17,7 +17,7 @@ test('connection list: Enter connects to the selected connection, arrows move th
   await expect(page.locator('.conn-item.active')).toHaveText(/Broker B/);
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => window.__mqttscope.status.state === 'connected');
-  await expect(page.locator('#conn-label')).toHaveText('Broker B');
+  await expect(activeTabName(page)).toHaveText('Broker B');
   await expect(page.locator('.conn-dialog')).toHaveCount(0);
   // Enter in a text field connects too; in the subscription list it adds a line.
   await page.keyboard.press(`${MOD}+K`);

@@ -3,7 +3,7 @@
 
 import path from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
-import { test, expect, makeUserData, mockDialogs, dialogCalls, waitForFile } from './fixtures.mjs';
+import { test, expect, makeUserData, mockDialogs, dialogCalls, waitForFile, activeTabName } from './fixtures.mjs';
 
 const PASSWORD = 's3cret-Pa55word';
 
@@ -175,7 +175,7 @@ test('connection manager: create, protocol defaults, duplicate, delete and persi
   expect(second.errors).toEqual([]);
 });
 
-test('connection dialog: Escape closes it, the connection pill reopens it, profiles persist via Connect', async ({ env }) => {
+test('connection dialog: Escape closes it, + opens it for a new tab, profiles persist via Connect', async ({ env }) => {
   const broker = await env.broker();
   const userData = makeUserData();
   const { page, errors } = await env.launch({ userData });
@@ -189,14 +189,15 @@ test('connection dialog: Escape closes it, the connection pill reopens it, profi
   await dlg.locator('.connect-btn').click();
   await expect(dlg).toHaveCount(0); // closes once connected
   await expect(page.locator('#status-text')).toHaveText(`Connected — mqtt://127.0.0.1:${broker.port}`);
-  await expect(page.locator('#conn-label')).toHaveText('Local broker');
+  await expect(activeTabName(page)).toHaveText('Local broker');
   await expect(page.locator('#btn-disconnect')).toBeVisible();
 
-  // Reopen from the pill, close with Escape.
-  await page.locator('#btn-connections').click();
+  // Open again with + (in a new tab), close with Escape.
+  await page.locator('.tab-new').click();
   await expect(dlg).toBeVisible();
   await dlg.locator('[name="name"]').press('Escape');
   await expect(dlg).toHaveCount(0);
+  await expect(page.locator('.conn-tab .conn-tab-name')).toHaveText(['Local broker', 'New connection']);
 
   // Connect flushed the edits to disk.
   const saved = JSON.parse(await waitForFile(path.join(userData, 'profiles.json'), (b) => JSON.parse(b)[0].port === broker.port));
@@ -212,7 +213,7 @@ test('edits made right before the window is closed are not lost (connections, pl
   await page.locator('.conn-dialog .modal-close').click();
   await page.locator('.right-tabs .tab[data-tab="plots"]').click();
   await page.locator('.plot-card select').selectOption('60');
-  await page.locator('#btn-connections').click();
+  await page.locator('.tab-new').click();
   await page.locator('.conn-dialog [name="name"]').fill('Renamed just before closing');
   expect(errors).toEqual([]);
 

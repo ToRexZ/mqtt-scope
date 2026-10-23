@@ -1,6 +1,6 @@
-// Several connections per window, each in its own tab (ConnectionTab). There
-// is no tab strip yet, so tabs are opened, switched and closed through the
-// test hook's shell.
+// Several connections per window, each in its own tab (ConnectionTab). Tabs
+// are opened, switched and closed through the test hook's shell here; the
+// tab strip itself is tested in tabs.spec.mjs.
 
 import { test, expect, profile, waitForTopic, selectTopic } from './fixtures.mjs';
 

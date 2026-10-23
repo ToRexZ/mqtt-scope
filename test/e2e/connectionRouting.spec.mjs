@@ -3,7 +3,7 @@
 // or reloading its window, ends it. The UI still shows one connection per
 // window, so the second one is driven through window.api.
 
-import { test, expect, profile, connect, selectTopic, waitForTopic, popupFrom, closedPort } from './fixtures.mjs';
+import { test, expect, profile, connect, selectTopic, waitForTopic, popupFrom, closedPort, activeTabName } from './fixtures.mjs';
 
 const registry = (app, method, ...args) => app.evaluate((_electron, [m, a]) => globalThis.__mqttscopeConnections[m](...a), [method, args]);
 const registrySize = (app) => app.evaluate(() => globalThis.__mqttscopeConnections.size);
@@ -49,7 +49,7 @@ test('one window, two connections: each gets only its own broker', async ({ env 
   const history = () => page.evaluate(() => window.__mqttscope.tree.find('same/topic').history.map((m) => new TextDecoder().decode(m.payload)));
   await expect.poll(history).toEqual(['a', 'a2']);
   expect(await page.evaluate(() => new TextDecoder().decode(window.__mqttscope.tree.find('same/topic').message.payload))).toBe('a2');
-  expect(await page.locator('#conn-label').textContent()).toBe(`Test broker ${a.port}`);
+  await expect(activeTabName(page)).toHaveText(`Test broker ${a.port}`);
   expect(errors).toEqual([]);
 });
 
