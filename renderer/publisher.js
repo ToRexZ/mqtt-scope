@@ -90,7 +90,7 @@ export class Publisher {
       this.validateTimer = setTimeout(() => this.validate(), 200);
     });
     this.payload.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab' && !e.shiftKey) {
+      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         document.execCommand('insertText', false, '  ');
       }

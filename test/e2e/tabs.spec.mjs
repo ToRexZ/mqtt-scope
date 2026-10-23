@@ -467,3 +467,32 @@ test('the strip is a tablist with roving tabindex and arrow keys', async ({ env 
   expect(await tabIds(page)).toEqual([idB]);
   expect(errors).toEqual([]);
 });
+
+test('keyboard focus stays in the strip: after a click, and after Delete closes a tab', async ({ env }) => {
+  const { idA, idB, page, errors } = await twoTabs(env);
+  await tabEl(page, idB).focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(tabEl(page, idA)).toBeFocused();
+  await tabEl(page, idB).click(); // the focus was on a tab: it stays on the clicked one
+  await expect(tabEl(page, idB)).toBeFocused();
+  await page.keyboard.press('ArrowLeft');
+  await expect(tabEl(page, idA)).toBeFocused();
+  await page.keyboard.press('Delete');
+  await expect(tabEl(page, idA)).toHaveCount(0);
+  await expect(tabEl(page, idB)).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
+test('the File menu has New Tab, Close Tab and Reopen Closed Tab with their shortcuts', async ({ env }) => {
+  const { app, errors } = await twoTabs(env);
+  const items = await app.evaluate(({ Menu }) => {
+    const file = Menu.getApplicationMenu().items.find((i) => i.label === 'File');
+    return file.submenu.items.filter((i) => /Tab$/.test(i.label)).map((i) => [i.label, i.accelerator]);
+  });
+  expect(items).toEqual([
+    ['New Tab', 'CmdOrCtrl+T'],
+    ['Close Tab', 'CmdOrCtrl+W'],
+    ['Reopen Closed Tab', 'CmdOrCtrl+Shift+T'],
+  ]);
+  expect(errors).toEqual([]);
+});

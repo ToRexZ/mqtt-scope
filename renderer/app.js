@@ -62,18 +62,7 @@ const tabOf = (id) => tabs.get(id) || null;
 const strip = new TabStrip($('.topbar'), {
   onActivate: (id) => activate(id),
   onClose: (id) => closeTab(id),
-  // Until the dialog is drawn inside the tab, it opens over the window and
-  // connects the new tab; cancelling leaves a "New connection" tab.
-  onNew: async () => {
-    if (opening) return; // a double-click would make two tabs
-    opening = true;
-    try {
-      await openTab();
-    } finally {
-      opening = false;
-    }
-    connections.open();
-  },
+  onNew: () => newTab(),
   onContextMenu: (id, x, y) => tabMenu(id, x, y),
   onMove: (id, to) => {
     order.move(id, to);
@@ -81,6 +70,19 @@ const strip = new TabStrip($('.topbar'), {
   },
 });
 let opening = false;
+
+// Until the dialog is drawn inside the tab, it opens over the window and
+// connects the new tab; cancelling leaves a "New connection" tab.
+async function newTab() {
+  if (opening) return; // a double-click would make two tabs
+  opening = true;
+  try {
+    await openTab();
+  } finally {
+    opening = false;
+  }
+  connections.open();
+}
 
 // A tab gets its own connection in main; its id is the tab's id. A tab to
 // connect takes its profile when connect() does: one open in another tab
@@ -235,7 +237,7 @@ api.onFlush(async () => {
 
 api.onMenu((action) => {
   if (updates.installing()) return; // nothing opens over the Installing dialog
-  if (document.querySelector('.modal-overlay') && action !== 'connections') return;
+  if (document.querySelector('.modal-overlay')) return;
   handlerFor(action)?.();
 });
 
@@ -264,8 +266,19 @@ async function showSettings(page) {
 
 // Shortcuts of the window (see keys.js; rebindable in Settings → Keyboard).
 // The others act on the active tab (ConnectionTab.handlers).
+const goTo = (id) => id && activate(id);
 const WINDOW_ACTIONS = {
-  connections: () => connections.open(),
+  // A connected tab must not be repointed at another broker.
+  connections: () => newTab(),
+  newTab: () => newTab(),
+  closeTab: () => closeTab(order.activeId),
+  reopenTab: () => reopenClosed(),
+  nextTab: () => goTo(order.next(1)),
+  prevTab: () => goTo(order.next(-1)),
+  nextTabAlt: () => goTo(order.next(1)),
+  prevTabAlt: () => goTo(order.next(-1)),
+  goToLastTab: () => goTo(order.last()),
+  ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((n) => [`goToTab${n}`, () => goTo(order.nth(n))])),
   newWindow: () => api.newWindow(),
   settings: () => showSettings(),
   keyboardSettings: () => showSettings('keyboard'),

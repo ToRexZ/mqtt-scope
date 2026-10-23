@@ -2,7 +2,7 @@
 // and the "expand a topic when clicked" setting.
 
 import path from 'node:path';
-import { test, expect, makeUserData, profile, connect, rowByPath, waitForTopic, waitForFile, readJson, activeTabName } from './fixtures.mjs';
+import { test, expect, openTabTo, makeUserData, profile, connect, rowByPath, waitForTopic, waitForFile, readJson, activeTabName } from './fixtures.mjs';
 
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
 
@@ -20,7 +20,11 @@ test('connection list: Enter connects to the selected connection, arrows move th
   await expect(activeTabName(page)).toHaveText('Broker B');
   await expect(page.locator('.conn-dialog')).toHaveCount(0);
   // Enter in a text field connects too; in the subscription list it adds a line.
+  // Ctrl+K opens a new tab, and Broker B is already open in this one.
   await page.keyboard.press(`${MOD}+K`);
+  await expect(page.locator('.conn-item.active')).toHaveText(/Broker B/);
+  await page.keyboard.press('ArrowUp');
+  await expect(page.locator('.conn-item.active')).toHaveText(/Broker A/);
   await page.locator('.conn-form textarea[name="subscriptions"]').focus();
   await page.keyboard.press('Enter');
   await expect(page.locator('.conn-dialog')).toHaveCount(1);
@@ -38,9 +42,9 @@ test('shortcuts can be rebound in Settings → Keyboard; conflicts block saving;
   await connect(page);
 
   // Defaults work.
-  await page.keyboard.press(`${MOD}+2`);
+  await page.keyboard.press('Alt+2');
   await expect(page.locator('.right-tabs .tab[data-tab="plots"]')).toHaveClass(/active/);
-  await page.keyboard.press(`${MOD}+1`);
+  await page.keyboard.press('Alt+1');
   await expect(page.locator('.right-tabs .tab[data-tab="inspector"]')).toHaveClass(/active/);
   await page.keyboard.press(`${MOD}+K`);
   await expect(page.locator('.conn-dialog')).toHaveCount(1);
@@ -147,5 +151,93 @@ test('clicking a topic expands it one level; keyboard navigation does not; the s
   await (await rowByPath(page, 'robot/b')).click();
   expect(await expanded('robot/b')).toBe(false);
   await waitForFile(path.join(userData, 'settings.json'), (b) => JSON.parse(b).autoExpand === false);
+  expect(errors).toEqual([]);
+});
+
+const tabNames = (page) => page.locator('.conn-tab .conn-tab-name');
+
+test('tab shortcuts: new, next, previous, go to, last, close, reopen', async ({ env }) => {
+  const a = await env.broker();
+  const b = await env.broker();
+  const userData = makeUserData({ profiles: [profile(a.port, { id: 'a', name: 'Broker A' }), profile(b.port, { id: 'b', name: 'Broker B' })] });
+  const { page, errors } = await env.launch({ userData });
+  await connect(page);
+  await openTabTo(page, 'Broker B');
+  await expect(tabNames(page)).toHaveText(['Broker A', 'Broker B']);
+
+  await page.keyboard.press(`${MOD}+T`); // a new tab and its dialog
+  await expect(tabNames(page)).toHaveCount(3);
+  await expect(page.locator('.conn-dialog')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(activeTabName(page)).toHaveText('New connection');
+
+  await page.keyboard.press('Control+Tab');
+  await expect(activeTabName(page)).toHaveText('Broker A'); // wraps around
+  await page.keyboard.press('Control+Shift+Tab');
+  await expect(activeTabName(page)).toHaveText('New connection');
+  await page.keyboard.press(`${MOD}+PageUp`);
+  await expect(activeTabName(page)).toHaveText('Broker B');
+  await page.keyboard.press(`${MOD}+PageDown`);
+  await expect(activeTabName(page)).toHaveText('New connection');
+  await page.keyboard.press(`${MOD}+1`);
+  await expect(activeTabName(page)).toHaveText('Broker A');
+  await page.keyboard.press(`${MOD}+2`);
+  await expect(activeTabName(page)).toHaveText('Broker B');
+  await page.keyboard.press(`${MOD}+7`); // past the end: nothing
+  await expect(activeTabName(page)).toHaveText('Broker B');
+  await page.keyboard.press(`${MOD}+9`);
+  await expect(activeTabName(page)).toHaveText('New connection');
+
+  await page.keyboard.press(`${MOD}+1`);
+  await page.keyboard.press(`${MOD}+W`);
+  await expect(tabNames(page)).toHaveText(['Broker B', 'New connection']);
+  await page.keyboard.press(`${MOD}+Shift+T`);
+  await expect(tabNames(page)).toHaveText(['Broker B', 'New connection', 'Broker A']);
+  await expect(activeTabName(page)).toHaveText('Broker A');
+
+  await page.keyboard.press(`${MOD}+K`); // opens a new tab too
+  await expect(tabNames(page)).toHaveCount(4);
+  await expect(page.locator('.conn-dialog')).toHaveCount(1);
+  expect(errors).toEqual([]);
+});
+
+test('tab shortcuts work while typing', async ({ env }) => {
+  const broker = await env.broker();
+  const userData = makeUserData({ profiles: [profile(broker.port, { id: 'a', name: 'Broker A' })] });
+  const { page, errors } = await env.launch({ userData });
+  await connect(page);
+  await page.keyboard.press(`${MOD}+T`);
+  await page.keyboard.press('Escape');
+  await expect(activeTabName(page)).toHaveText('New connection');
+
+  const payload = page.locator('.publisher .payload-editor');
+  await payload.fill('abc');
+  await payload.press('Control+Tab');
+  await expect(activeTabName(page)).toHaveText('Broker A');
+  await tabNames(page).nth(1).click();
+  await expect(payload).toHaveValue('abc');
+  await payload.focus();
+  await payload.press('Tab'); // a plain Tab still indents
+  expect(await payload.inputValue()).toContain('  ');
+
+  const filter = page.locator('#tree-filter');
+  await filter.fill('xyz');
+  await filter.press(`${MOD}+1`);
+  await expect(activeTabName(page)).toHaveText('Broker A');
+  await page.keyboard.press(`${MOD}+2`);
+  await expect(activeTabName(page)).toHaveText('New connection');
+  await expect(filter).toHaveValue('xyz'); // typed text untouched
+  expect(errors).toEqual([]);
+});
+
+test('Alt+1 and Alt+2 switch Inspector and Plots', async ({ env }) => {
+  const broker = await env.broker();
+  const userData = makeUserData({ profiles: [profile(broker.port)] });
+  const { page, errors } = await env.launch({ userData });
+  await connect(page);
+  await page.keyboard.press('Alt+2');
+  await expect(page.locator('.right-tabs .tab[data-tab="plots"]')).toHaveClass(/active/);
+  await page.keyboard.press('Alt+1');
+  await expect(page.locator('.right-tabs .tab[data-tab="inspector"]')).toHaveClass(/active/);
   expect(errors).toEqual([]);
 });

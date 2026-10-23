@@ -131,7 +131,8 @@ export class TabStrip {
     const before = this.focusBefore;
     this.focusBefore = null;
     if (!before || !this.list.contains(document.activeElement)) return;
-    if (before.isConnected && !this.list.contains(before)) before.focus({ preventScroll: true });
+    if (this.list.contains(before)) return; // keyboard navigation continues from the clicked tab
+    if (before.isConnected) before.focus({ preventScroll: true });
     else document.activeElement.blur();
   }
 
@@ -147,8 +148,12 @@ export class TabStrip {
     const all = [...this.list.children];
     const i = all.indexOf(item);
     const to = { ArrowLeft: (i + all.length - 1) % all.length, ArrowRight: (i + 1) % all.length, Home: 0, End: all.length - 1 }[e.key];
-    if (e.key === 'Delete') this.handlers.onClose(item.dataset.id);
-    else if (to !== undefined) {
+    if (e.key === 'Delete') {
+      // The closed tab's button is gone: focus goes to the tab shown next.
+      Promise.resolve(this.handlers.onClose(item.dataset.id)).then(() => {
+        if (!item.isConnected && !document.querySelector('.modal-overlay')) this.items.get(this.activeId)?.focus();
+      });
+    } else if (to !== undefined) {
       this.handlers.onActivate(all[to].dataset.id);
       all[to].focus();
     } else return;

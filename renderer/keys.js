@@ -2,8 +2,28 @@
 // matching key events. Combos are strings like "Mod+Shift+K", where Mod is
 // Ctrl (Cmd on macOS). An empty string means the action has no shortcut.
 
+// Defaults that differ on macOS are chosen once, when ACTIONS is built.
+export const isMacPlatform = () => typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '');
+const onMac = isMacPlatform();
+
 export const ACTIONS = [
-  { id: 'connections', label: 'Open connections', default: 'Mod+K' },
+  { id: 'connections', label: 'Open a new connection tab', default: 'Mod+K' },
+  { id: 'newTab', label: 'New connection tab', default: 'Mod+T' },
+  { id: 'closeTab', label: 'Close the tab', default: 'Mod+W' },
+  { id: 'reopenTab', label: 'Reopen the last closed tab', default: 'Mod+Shift+T' },
+  { id: 'nextTab', label: 'Next tab', default: onMac ? 'Ctrl+Tab' : 'Mod+Tab' },
+  { id: 'prevTab', label: 'Previous tab', default: onMac ? 'Ctrl+Shift+Tab' : 'Mod+Shift+Tab' },
+  { id: 'nextTabAlt', label: 'Next tab (alternative)', default: 'Mod+PageDown' },
+  { id: 'prevTabAlt', label: 'Previous tab (alternative)', default: 'Mod+PageUp' },
+  { id: 'goToTab1', label: 'Go to tab 1', default: 'Mod+1' },
+  { id: 'goToTab2', label: 'Go to tab 2', default: 'Mod+2' },
+  { id: 'goToTab3', label: 'Go to tab 3', default: 'Mod+3' },
+  { id: 'goToTab4', label: 'Go to tab 4', default: 'Mod+4' },
+  { id: 'goToTab5', label: 'Go to tab 5', default: 'Mod+5' },
+  { id: 'goToTab6', label: 'Go to tab 6', default: 'Mod+6' },
+  { id: 'goToTab7', label: 'Go to tab 7', default: 'Mod+7' },
+  { id: 'goToTab8', label: 'Go to tab 8', default: 'Mod+8' },
+  { id: 'goToLastTab', label: 'Go to the last tab', default: 'Mod+9' },
   { id: 'connectSelected', label: 'Connect to the selected connection (in the connection list)', default: 'Enter' },
   { id: 'subscriptions', label: 'Subscriptions', default: 'Mod+Shift+S' },
   { id: 'newWindow', label: 'New window (another broker)', default: 'Mod+Shift+N' },
@@ -11,8 +31,8 @@ export const ACTIONS = [
   { id: 'find', label: 'Filter topics, or search the message when the inspector has focus', default: 'Mod+F' },
   { id: 'publish', label: 'Publish (in the publisher)', default: 'Mod+Enter' },
   { id: 'maximize', label: 'Maximize the inspector', default: 'F11' },
-  { id: 'tabInspector', label: 'Show the Inspector', default: 'Mod+1' },
-  { id: 'tabPlots', label: 'Show the Plots', default: 'Mod+2' },
+  { id: 'tabInspector', label: 'Show the Inspector', default: 'Alt+1' },
+  { id: 'tabPlots', label: 'Show the Plots', default: 'Alt+2' },
   { id: 'newPlot', label: 'Add data to a new plot', default: 'Mod+Shift+A' },
   { id: 'pause', label: 'Pause or resume updates', default: 'Mod+Shift+P' },
   { id: 'hold', label: 'Hold or follow the message in the inspector (on the Plots tab: freeze or resume)', default: 'Space' },
@@ -21,8 +41,6 @@ export const ACTIONS = [
 ];
 
 const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'OS']);
-
-export const isMacPlatform = () => typeof navigator !== 'undefined' && /Mac/i.test(navigator.platform || navigator.userAgent || '');
 
 // The combo for a keydown event, or '' for a lone modifier key.
 export function comboFromEvent(e, mac = isMacPlatform()) {

@@ -135,3 +135,33 @@ describe('keys the focused element uses itself', () => {
     assert.equal(keyBelongsToTarget('Space', null), false);
   });
 });
+
+describe('tab shortcuts', () => {
+  test('default shortcuts do not clash', () => {
+    assert.equal(conflicts(resolveBindings({})).size, 0);
+  });
+  test('Ctrl+Tab is Mod+Tab off macOS and Ctrl+Tab on macOS', () => {
+    assert.equal(comboFromEvent({ key: 'Tab', ctrlKey: true }, false), 'Mod+Tab');
+    assert.equal(comboFromEvent({ key: 'Tab', ctrlKey: true }, true), 'Ctrl+Tab');
+  });
+  test('tab shortcuts have menu accelerators', () => {
+    assert.equal(toAccelerator('Mod+Shift+T'), 'CmdOrCtrl+Shift+T');
+    assert.equal(toAccelerator('Mod+PageDown'), 'CmdOrCtrl+PageDown');
+  });
+  test('a saved custom binding for the Plots tab is kept', () => {
+    assert.equal(resolveBindings(normalizeOverrides({ tabPlots: 'Mod+3' })).tabPlots, 'Mod+3');
+  });
+  test('the defaults', () => {
+    const b = resolveBindings({});
+    assert.equal(b.newTab, 'Mod+T');
+    assert.equal(b.closeTab, 'Mod+W');
+    assert.equal(b.reopenTab, 'Mod+Shift+T');
+    assert.equal(b.nextTabAlt, 'Mod+PageDown');
+    assert.equal(b.goToTab1, 'Mod+1');
+    assert.equal(b.goToTab8, 'Mod+8');
+    assert.equal(b.goToLastTab, 'Mod+9');
+    assert.equal(b.tabInspector, 'Alt+1');
+    assert.equal(b.tabPlots, 'Alt+2');
+    assert.equal(ACTIONS.find((a) => a.id === 'connections').label, 'Open a new connection tab');
+  });
+});
