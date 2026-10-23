@@ -228,3 +228,75 @@ test('saved messages: a save in one tab shows in the others; switching back keep
   expect(await list.evaluate((l) => l.scrollTop)).toBe(300);
   expect(errors).toEqual([]);
 });
+
+// Twelve tabs with long names, each opened for its own profile (no connection
+// needed: a tab with a profile shows its name).
+async function manyTabs(env, count = 12) {
+  const profiles = Array.from({ length: count }, (_, i) => profile(1883, { id: `long${i}`, name: `Production cluster number ${i + 1} east` }));
+  const ctx = await env.launch({ userData: makeUserData({ profiles }) });
+  await ctx.page.locator('.conn-dialog .modal-close').click();
+  await ctx.page.evaluate(async (ps) => {
+    for (const p of ps) await window.__mqttscope.shell.openTab({ profile: p });
+  }, profiles);
+  await expect(ctx.page.locator('.conn-tab')).toHaveCount(count + 1);
+  return { profiles, ...ctx };
+}
+
+test('twelve tabs: icon-only brand, the strip scrolls, + stays in view', async ({ env }) => {
+  const { page, errors } = await manyTabs(env);
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await expect(page.locator('.brand')).toHaveClass(/icon-only/);
+  await expect(page.locator('.brand-text')).toBeHidden();
+  await expect(page.locator('.conn-tabs')).toHaveClass(/scrolling/);
+  const widths = await page.locator('.conn-tab').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().width));
+  for (const w of widths) expect(Math.round(w)).toBeGreaterThanOrEqual(100);
+  // The strip stays on one row and + is inside the window, right after the strip.
+  const box = await page.locator('.tab-new').boundingBox();
+  const strip = await page.locator('.conn-tabs').boundingBox();
+  expect(box.x + box.width).toBeLessThanOrEqual(1000);
+  expect(box.x).toBeGreaterThanOrEqual(strip.x + strip.width - 1);
+  expect(box.y).toBeLessThan(60);
+  expect(await page.locator('.conn-tab').last().evaluate((e) => e.getBoundingClientRect().top)).toBeLessThan(60);
+  await page.locator('.tab-new').click();
+  await expect(page.locator('.conn-tab')).toHaveCount(14);
+  expect(errors).toEqual([]);
+});
+
+test('the strip never wraps in the narrow stacked layout', async ({ env }) => {
+  const { page, errors } = await manyTabs(env, 6);
+  await page.setViewportSize({ width: 700, height: 600 });
+  await expect(page.locator('.conn-tabs')).toHaveClass(/scrolling/);
+  const tops = await page.locator('.brand, .conn-tab, .tab-new, #btn-settings').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+  expect(Math.max(...tops) - Math.min(...tops)).toBeLessThan(12);
+  expect(errors).toEqual([]);
+});
+
+test('a cut-off name scrolls, and only ellipsizes with reduced motion', async ({ env }) => {
+  const { page, errors } = await manyTabs(env);
+  await page.setViewportSize({ width: 1000, height: 700 });
+  const name = page.locator('.conn-tab').nth(1).locator('.conn-tab-name');
+  const label = name.locator('.conn-tab-label');
+  await expect(name).toHaveClass(/scrolling/);
+  expect(await label.evaluate((e) => getComputedStyle(e).animationName)).not.toBe('none');
+  const vars = await name.evaluate((e) => ({ shift: parseFloat(e.style.getPropertyValue('--shift')), dur: parseFloat(e.style.getPropertyValue('--dur')) }));
+  expect(vars.shift).toBeGreaterThan(0);
+  expect(vars.dur).toBeCloseTo(3 + (2 * vars.shift) / 30, 1); // 30 px/s, 1.5 s at each end
+
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect(await label.evaluate((e) => getComputedStyle(e).animationName)).toBe('none');
+  expect(await name.evaluate((e) => getComputedStyle(e).textOverflow)).toBe('ellipsis');
+  expect(errors).toEqual([]);
+});
+
+test('a name that fits does not scroll; the tooltip is the full name', async ({ env }) => {
+  const { page, errors } = await manyTabs(env);
+  await page.setViewportSize({ width: 1000, height: 700 });
+  await expect(page.locator('.conn-tab').nth(1)).toHaveAttribute('title', 'Production cluster number 1 east');
+  await expect(page.locator('.conn-tab').last()).toHaveAttribute('title', 'Production cluster number 12 east');
+  // Widening the window until everything fits stops the scrolling.
+  await page.setViewportSize({ width: 5000, height: 700 });
+  await expect(page.locator('.conn-tab .conn-tab-name.scrolling')).toHaveCount(0);
+  await expect(page.locator('.conn-tabs')).not.toHaveClass(/scrolling/);
+  await expect(page.locator('.brand')).not.toHaveClass(/icon-only/);
+  expect(errors).toEqual([]);
+});

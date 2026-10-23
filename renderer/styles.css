@@ -227,7 +227,12 @@ span.icon {
   font-weight: 650;
   letter-spacing: 0.2px;
   margin-right: 6px;
+  flex: none;
   white-space: nowrap;
+}
+/* Narrow strip: the logo alone (tabStrip.js, tabLayout.js). */
+.brand.icon-only .brand-text {
+  display: none;
 }
 /* A background, not an <img>: the window has no img elements at all (see
    security.spec.mjs). */
@@ -253,12 +258,17 @@ span.icon {
   gap: 4px;
   min-width: 0;
 }
+/* Out of room: the strip scrolls sideways; + is outside it, so it stays at
+   the strip's right edge. */
+.conn-tabs.scrolling {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
 .conn-tab {
   display: inline-flex;
   align-items: center;
   gap: 7px;
-  min-width: 0;
-  max-width: 260px;
+  flex: none; /* tabStrip.js sets max-width */
   font: inherit;
   color: var(--muted);
   background: transparent;
@@ -303,7 +313,22 @@ span.icon {
 .conn-tab-name {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+}
+/* A cut-off name slides back and forth (tabStrip.js sets --shift, --dur and
+   the keyframes in --anim); with reduced motion it stays put and ends in an
+   ellipsis. */
+.conn-tab-name.scrolling .conn-tab-label {
+  display: inline-block;
+  animation: var(--anim) var(--dur) linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .conn-tab-name.scrolling {
+    text-overflow: ellipsis;
+  }
+  .conn-tab-name.scrolling .conn-tab-label {
+    display: inline;
+    animation: none;
+  }
 }
 .conn-tab-close {
   flex: none;
@@ -364,6 +389,7 @@ span.icon {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   margin-right: 6px;
+  flex: none;
 }
 
 /* ------------------------------------------------------------ update notice */
@@ -555,7 +581,6 @@ span.icon {
 /* Narrower than the window's minimum width, which tiling window managers
    ignore: the tree goes above the inspector instead of beside it. */
 @media (max-width: 899px) {
-  .topbar,
   .tab-toolbar {
     flex-wrap: wrap;
   }
