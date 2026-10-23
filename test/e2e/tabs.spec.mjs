@@ -307,15 +307,19 @@ test('re-measuring a running name animation keeps --shift and the scrolling clas
   const name = page.locator('.conn-tab').nth(1).locator('.conn-tab-name');
   await expect(name).toHaveClass(/scrolling/);
   const read = () => name.evaluate((e) => ({ shift: e.style.getPropertyValue('--shift'), dur: e.style.getPropertyValue('--dur'), scrolling: e.classList.contains('scrolling') }));
+  // Resize observers have run once a frame has been painted after the resize.
+  const settled = () => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+  await settled();
   const before = await read();
-  // Park the animation at the far end, where the label's transform is largest, then re-render.
+  // Move the label by a transform that widens the scrollable overflow (the
+  // animation only moves it left, which scrollWidth ignores), then re-measure.
   await name.locator('.conn-tab-label').evaluate((e) => {
-    const a = e.getAnimations()[0];
-    a.pause();
-    a.currentTime = parseFloat(getComputedStyle(e.parentElement).getPropertyValue('--dur')) * 500;
+    e.getAnimations().forEach((a) => a.cancel());
+    e.style.transform = 'translateX(40px)';
   });
   await page.setViewportSize({ width: 1001, height: 700 });
   await page.setViewportSize({ width: 1000, height: 700 });
+  await settled();
   expect(await read()).toEqual(before);
   expect(errors).toEqual([]);
 });
