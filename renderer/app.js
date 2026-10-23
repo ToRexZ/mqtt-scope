@@ -379,7 +379,7 @@ $('#btn-settings').addEventListener('click', () => showSettings());
 const updates = initUpdateButton(api, $('#btn-update'));
 
 async function showSettings(tab) {
-  const next = await openSettings(api, settings, { tab });
+  const next = await openSettings(api, settings, { tab, openUpdatePanel: (state) => updates.openPanel(state) });
   if (next) applySettings(next);
 }
 $('#btn-collapse-all').addEventListener('click', () => {

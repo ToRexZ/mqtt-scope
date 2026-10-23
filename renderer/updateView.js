@@ -95,7 +95,7 @@ export function installingView(state) {
   };
 }
 
-// What a window does with the answer to Help → Check for Updates…:
+// What a window does with the answer to Settings → Check for updates:
 // { toast, kind } to show, { open: true } for the panel, or null. Nothing
 // while an update installs, so nothing takes focus from the Installing dialog.
 export function checkedView(checked, state) {

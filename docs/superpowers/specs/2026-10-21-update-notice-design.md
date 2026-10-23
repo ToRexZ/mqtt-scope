@@ -38,8 +38,8 @@ the app or grabs focus unprompted drops a session someone is watching.
 ## Behaviour (decided by the maintainer)
 
 **Checking.** At startup and every 6 hours while running, on by default. A
-Settings → General switch, "Check for updates", turns it off. Help → **Check
-for Updates…** always works, also when the switch is off, and is the only
+Settings → General switch, "Check for updates", turns it off. The Settings button **Check for updates** (bottom of the dialog; macOS also
+keeps Help → Check for Updates…) always works, also when the switch is off, and is the only
 path that reports "You're on the latest version" (as a toast) or a failure.
 Only GitHub's latest-release endpoint for `ToRexZ/mqtt-scope` is contacted;
 drafts and pre-releases are therefore never offered.
@@ -49,8 +49,8 @@ appears in the top bar beside Settings, in every main window. It stays until
 handled. Clicking it opens a small panel (not a modal) showing the running and
 new versions, that release's notes from GitHub, and actions. **Later** closes
 the panel; the button stays. **Skip this version** hides the button until a
-release newer than the skipped one appears. *(Builder-check call:)* Help →
-Check for Updates… ignores a skip: if the skipped version is still the
+release newer than the skipped one appears. *(Builder-check call:)* Check for
+updates ignores a skip: if the skipped version is still the
 latest, the manual check shows the button again and clears the skip. That is
 the way to undo a skip. Every panel also has a small **Open release page**
 link, so a self-update that fails still leaves a manual way out.
@@ -173,7 +173,7 @@ dry run; its fallback is the release-page link. The first real update
 - Exact panel layout and styling, following existing top-bar and menu styles.
 - Test design: unit tests for version comparison and install detection; an
   e2e test against a local fake release endpoint for the notice, Later, Skip,
-  the menu check and the offline case. The electron-updater download/install
+  the Settings check button and the offline case. The electron-updater download/install
   itself can be faked behind the module boundary.
 - README "Updates" section (including the AppImage rename tip and the
   release-attached PKGBUILD), CHANGELOG entry, version bump to 0.3.0 (new
