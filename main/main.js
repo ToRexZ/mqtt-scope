@@ -77,6 +77,9 @@ function forwardConnectionEvents() {
     if (status.state === 'error') log.warn('mqtt', status.url || '', status.error);
     send(ownerId, 'mqtt:status', { connId, status });
   });
+  registry.on('openProfiles', (ids) => {
+    for (const { win } of windows.values()) if (!win.isDestroyed()) win.webContents.send('conn:openProfilesChanged', ids);
+  });
   registry.on('warning', (connId, ownerId, message) => send(ownerId, 'mqtt:warning', { connId, message }));
   registry.on('batch', (connId, ownerId, batch) => {
     send(ownerId, 'mqtt:messages', { connId, messages: batch.messages, dropped: batch.dropped });
@@ -283,8 +286,22 @@ function registerIpc() {
   const sessionOf = (e, connId) => connectionOf(e, connId).session;
   ipcMain.handle('mqtt:connect', (e, connId, profile) => {
     connectionOf(e, connId);
-    return registry.connect(connId, profile || {});
+    const res = registry.connect(connId, profile || {});
+    // The other tab may be in this very window, which then shows it itself.
+    if (res.duplicate) res.duplicate = { ...res.duplicate, sameWindow: res.duplicate.ownerId === ownerIdOf(e.sender) };
+    return res;
   });
+  // Brings the window that owns a connection forward and has it show that tab.
+  ipcMain.handle('conn:focus', (e, connId) => {
+    if (!windows.has(e.sender.id)) return;
+    const win = windows.get(registry.get(connId)?.ownerId)?.win;
+    if (!win || win.isDestroyed()) return;
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    win.webContents.send('tabs:activate', { connId });
+  });
+  ipcMain.handle('conn:openProfiles', () => registry.openProfileIds());
   ipcMain.handle('mqtt:disconnect', (e, connId) => sessionOf(e, connId).disconnect());
   ipcMain.handle('mqtt:status', (e, connId) => sessionOf(e, connId).status);
   ipcMain.handle('mqtt:publish', (e, connId, msg) => sessionOf(e, connId).publish(msg));

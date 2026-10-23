@@ -193,19 +193,17 @@ test('closing the last tab leaves a fresh one', async ({ env }) => {
   expect(errors).toEqual([]);
 });
 
-test('connecting a tab to a profile open in another tab leaves the tab as it was', async ({ env }) => {
+test('connecting a tab to a profile open in another tab shows that tab and closes the picker', async ({ env }) => {
   const a = await env.broker();
   await a.publish('a/topic', '1', { retain: true });
   const { page, errors } = await env.connected(a);
   await waitForTopic(page, 'a/topic');
+  const first = await page.evaluate(() => window.__mqttscope.shell.active.connId);
   await openTab(page);
   const res = await page.evaluate((p) => window.__mqttscope.shell.active.connect(p), profile(a.port));
   expect(res.duplicate).toBeTruthy();
-  await expect(page.locator('.toast.error')).toHaveText(`“Test broker ${a.port}” is already open`);
-  const tab = await page.evaluate(() => ({ profile: window.__mqttscope.shell.active.profile, state: window.__mqttscope.status.state }));
-  expect(tab).toEqual({ profile: null, state: 'disconnected' });
-  // The first tab keeps its tree.
-  await activate(page, 0);
+  expect(await page.evaluate(() => window.__mqttscope.shell.tabs.length)).toBe(1);
+  expect(await page.evaluate(() => window.__mqttscope.shell.active.connId)).toBe(first);
   expect(await page.evaluate(() => window.__mqttscope.tree.find('a/topic')?.messageCount)).toBe(1);
   expect(errors).toEqual([]);
 });

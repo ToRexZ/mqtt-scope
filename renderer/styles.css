@@ -2413,3 +2413,17 @@ body.plot-window {
 .plot-window .plot-head {
   cursor: default;
 }
+
+/* The tab was connected with settings that have since been edited. */
+.reconnect-hint {
+  border: 0;
+  background: none;
+  padding: 2px 4px;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.reconnect-hint[hidden] {
+  display: none;
+}

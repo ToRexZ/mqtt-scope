@@ -4,7 +4,7 @@
 
 import path from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
-import { test, expect, makeUserData, profile, connect, closedPort, mockDialogs, dialogCalls, waitForFile, waitForTopic, selectTopic, row, toast, activeTabName, recordDialogStatus } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, closedPort, mockDialogs, dialogCalls, waitForFile, waitForTopic, selectTopic, row, toast, activeTabName, openTabTo, recordDialogStatus } from './fixtures.mjs';
 
 const PASSWORD = 's3cret-Pa55word';
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -512,5 +512,185 @@ test('the tab becomes a session on the first connect', async ({ env }) => {
   await broker.start();
   await page.locator('#btn-disconnect').click();
   await expect(page.locator('#status-text')).toHaveText(`Connected — ${url}`);
+  expect(errors).toEqual([]);
+});
+
+// ---------------------------------------------------------------- one tab per profile
+
+const twoProfiles = async (env) => {
+  const a = await env.broker();
+  const b = await env.broker();
+  const userData = makeUserData({ profiles: [profile(a.port, { id: 'a', name: 'Broker A' }), profile(b.port, { id: 'b', name: 'Broker B' })] });
+  return { a, b, userData };
+};
+const tabCount = (page) => page.evaluate(() => window.__mqttscope.shell.tabs.length);
+const pickProfile = (page, name) => page.locator('.conn-dialog .conn-item').filter({ has: page.locator('.conn-name').getByText(name, { exact: true }) }).click();
+const openWindow = async (app) => {
+  const next = app.waitForEvent('window');
+  await app.evaluate(({ Menu }) => {
+    const file = Menu.getApplicationMenu().items.find((i) => i.label === 'File');
+    file.submenu.items.find((i) => i.label === 'New Window').click();
+  });
+  const page = await next;
+  await page.waitForFunction(() => !!window.__mqttscope);
+  await page.waitForSelector('.conn-dialog');
+  return page;
+};
+
+test('opening an open profile switches to its tab', async ({ env }) => {
+  const { userData } = await twoProfiles(env);
+  const { page, errors } = await env.launch({ userData });
+  await connect(page);
+  const idA = await activeId(page);
+  const idB = await openTabTo(page, 'Broker B');
+  expect(await activeId(page)).toBe(idB);
+
+  // A picker for the open Broker A is closed; Broker A's tab is shown.
+  await page.click('.tab-new');
+  await expect.poll(() => tabCount(page)).toBe(3);
+  await pickProfile(page, 'Broker A');
+  await page.locator('.conn-dialog .connect-btn').click();
+  await expect.poll(() => tabCount(page)).toBe(2);
+  expect(await activeId(page)).toBe(idA);
+  await expect(page.locator('.conn-tab .conn-tab-name')).toHaveText(['Broker A', 'Broker B']);
+  await expect(toast(page, 'error')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('reopening a closed profile that is open again activates its tab', async ({ env }) => {
+  const { userData } = await twoProfiles(env);
+  const { page, errors } = await env.launch({ userData });
+  await connect(page);
+  const idA = await activeId(page);
+  const idB = await openTabTo(page, 'Broker B');
+  await page.evaluate((id) => window.__mqttscope.shell.closeTab(id), idB);
+  const idB2 = await openTabTo(page, 'Broker B');
+  await page.evaluate(() => window.__mqttscope.shell.activate(window.__mqttscope.shell.tabs[0].connId));
+  expect(await activeId(page)).toBe(idA);
+  await page.evaluate(() => window.__mqttscope.shell.reopenClosed());
+  expect(await tabCount(page)).toBe(2);
+  expect(await activeId(page)).toBe(idB2);
+  await expect(toast(page, 'error')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('a fresh picker preselects a profile that is not open', async ({ env }) => {
+  const { userData } = await twoProfiles(env);
+  const { page, errors } = await env.launch({ userData });
+  await connect(page);
+  await page.click('.tab-new');
+  await expect(page.locator('.conn-dialog .conn-item.active .conn-name')).toHaveText('Broker B');
+  expect(errors).toEqual([]);
+});
+
+test('a window\'s only tab, a picker, stays when its profile is open elsewhere', async ({ env }) => {
+  const { userData } = await twoProfiles(env);
+  const { app, page, errors } = await env.launch({ userData });
+  await connect(page);
+  const page2 = await openWindow(app);
+  await pickProfile(page2, 'Broker A');
+  await page2.locator('.conn-dialog .connect-btn').click();
+  await expect.poll(() => page2.evaluate(() => window.__mqttscope.shell.tabs.length)).toBe(1);
+  expect(await mode(page2)).toBe('picker');
+  await expect(page2.locator('.conn-dialog')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('opening an open profile in another window brings that window forward', async ({ env }) => {
+  const { userData } = await twoProfiles(env);
+  const { app, page, errors } = await env.launch({ userData });
+  await connect(page);
+  const idA = await activeId(page);
+  await openTabTo(page, 'Broker B'); // window 1 shows Broker B; Broker A is behind it
+  const id1 = await (await app.browserWindow(page)).evaluate((win) => win.webContents.id);
+  await app.evaluate(({ BrowserWindow }) => {
+    globalThis.__focused = [];
+    const focus = BrowserWindow.prototype.focus;
+    BrowserWindow.prototype.focus = function (...args) {
+      globalThis.__focused.push(this.webContents.id);
+      return focus.apply(this, args);
+    };
+  });
+
+  const page2 = await openWindow(app);
+  await pickProfile(page2, 'Broker A');
+  await page2.locator('.conn-dialog .connect-btn').click();
+  await expect.poll(() => activeId(page)).toBe(idA);
+  expect(await app.evaluate(() => globalThis.__focused)).toContain(id1);
+  expect(errors).toEqual([]);
+});
+
+test('an open profile cannot be deleted', async ({ env }) => {
+  const { userData } = await twoProfiles(env);
+  const { app, page, errors } = await env.launch({ userData });
+  await mockDialogs(app, { confirm: true });
+  await connect(page);
+  const idA = await activeId(page);
+  await page.click('.tab-new');
+  await expect.poll(() => tabCount(page)).toBe(2);
+  const del = page.locator('.conn-dialog').getByRole('button', { name: 'Delete', exact: true });
+  await pickProfile(page, 'Broker B');
+  await expect(del).toBeEnabled();
+  await pickProfile(page, 'Broker A');
+  await expect(del).toBeDisabled();
+  await expect(del).toHaveAttribute('title', 'Close its tab first');
+
+  // Closing its tab frees it, without redrawing the dialog.
+  await page.evaluate((id) => window.__mqttscope.shell.closeTab(id), idA);
+  await expect(del).toBeEnabled();
+  await expect(del).toHaveAttribute('title', 'Delete this connection');
+  expect(errors).toEqual([]);
+});
+
+test('editing an open profile asks for a reconnect; renaming renames the tab', async ({ env }) => {
+  const { userData } = await twoProfiles(env);
+  const { page, errors } = await env.launch({ userData });
+  await connect(page);
+  const idA = await activeId(page);
+  await page.click('.tab-new');
+  await expect.poll(() => tabCount(page)).toBe(2);
+  const idPicker = await activeId(page);
+  await pickProfile(page, 'Broker A');
+  const field = (name) => page.locator(`.conn-dialog .conn-form [name="${name}"]`);
+  const hint = page.locator('#tab-host .reconnect-hint');
+
+  // A rename needs no reconnect.
+  await field('name').fill('Renamed A');
+  await tabEl(page, idA).click();
+  await expect(activeTabName(page)).toHaveText('Renamed A');
+  await expect(page).toHaveTitle('MQTT Scope — Renamed A');
+  await expect(hint).toBeHidden();
+
+  // A change to how it connects does.
+  await tabEl(page, idPicker).click();
+  await field('host').fill('localhost');
+  await tabEl(page, idA).click();
+  await expect(hint).toBeVisible();
+  await expect(hint).toHaveText('reconnect to apply');
+  // Changing it back takes the hint away again.
+  await tabEl(page, idPicker).click();
+  await field('host').fill('127.0.0.1');
+  await tabEl(page, idA).click();
+  await expect(hint).toBeHidden();
+
+  await tabEl(page, idPicker).click();
+  await field('host').fill('localhost');
+  await tabEl(page, idA).click();
+  await expect(hint).toBeVisible();
+  await hint.click();
+  await expect(page.locator('#status-text')).toContainText('mqtt://localhost:');
+  await expect(page.locator('#status-text')).toContainText('Connected');
+  await expect(hint).toBeHidden();
+  expect(errors).toEqual([]);
+});
+
+test('an edit in another window shows the hint', async ({ env }) => {
+  const { userData } = await twoProfiles(env);
+  const { app, page, errors } = await env.launch({ userData });
+  await connect(page);
+  const page2 = await openWindow(app);
+  await pickProfile(page2, 'Broker A');
+  await page2.locator('.conn-dialog [name="username"]').fill('someone');
+  await expect(page.locator('#tab-host .reconnect-hint')).toBeVisible();
   expect(errors).toEqual([]);
 });

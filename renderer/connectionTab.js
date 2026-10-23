@@ -16,6 +16,7 @@ import { decode, extractNumber, hexDump } from './payload.js';
 import { hasNumbers } from './fields.js';
 import { openSubscriptions } from './subscriptionsDialog.js';
 import { bindConnection } from './tabApi.js';
+import { connectSignature } from './profiles.js';
 
 const PAUSE_QUEUE_LIMIT = 200000;
 const PAUSE_QUEUE_BYTES = 256 * 1024 * 1024;
@@ -49,6 +50,7 @@ function stripMessage(m) {
 export class ConnectionTab {
   // shell: getBinding(id), setSubscriptions(profileId, subs),
   //        savedProfile(profile) — its saved version,
+  //        showDuplicate(tab, duplicate) — the profile is open in another tab,
   //        savedMessagesChanged(tab) — this tab wrote the saved or recent
   //        messages, onChange(tab) — the label, state, mode or data changed
   constructor({ api, connId, settings, shell }) {
@@ -89,6 +91,7 @@ export class ConnectionTab {
       pause: this.$('#btn-pause'),
       disconnect: this.$('#btn-disconnect'),
       subscriptions: this.$('#btn-subscriptions'),
+      hint: this.$('.reconnect-hint'),
       topics: this.$('#stat-topics'),
       msgs: this.$('#stat-msgs'),
       rate: this.$('#stat-rate'),
@@ -203,6 +206,7 @@ export class ConnectionTab {
   wireChrome() {
     this.els.disconnect.addEventListener('click', () => this.toggleConnection());
     this.els.subscriptions.addEventListener('click', () => this.showSubscriptions());
+    this.els.hint.addEventListener('click', () => this.reconnect());
     this.els.pause.addEventListener('click', () => this.togglePause());
     this.$('#btn-clear').addEventListener('click', () => this.clearTree());
     this.$('#btn-collapse-all').addEventListener('click', () => {
@@ -366,17 +370,31 @@ export class ConnectionTab {
   async connect(profile) {
     const res = await this.tabApi.connect(profile);
     // Open in another tab: two clients with one client ID would throw each
-    // other off the broker. This tab stays as it was.
+    // other off the broker. The shell shows that tab; this one stays as it was.
     if (res.duplicate) {
-      toast(`“${profile.name}” is already open`, 'error');
+      await this.shell.showDuplicate(this, res.duplicate);
       return res;
     }
     if (brokerKey(this.profile) !== brokerKey(profile)) this.clearTree();
     this.profile = { ...profile };
+    this.checkSaved();
     this.shell.onChange(this);
     // A picker's dialog already shows it on its status line.
     if (!res.ok && !(this.mode === 'picker' && this.status.error === res.error)) toast(res.error, 'error');
     return res;
+  }
+
+  // The profile was edited (here or in another window) or loaded: a rename
+  // renames the tab; a change to how it connects shows the hint until the
+  // tab reconnects with the saved profile.
+  checkSaved() {
+    if (!this.profile) return;
+    const saved = this.shell.savedProfile(this.profile);
+    this.els.hint.hidden = connectSignature(saved) === connectSignature(this.profile);
+    if (saved.name !== this.profile.name) {
+      this.profile = { ...this.profile, name: saved.name };
+      this.shell.onChange(this);
+    }
   }
 
   // The toolbar button and the tab menu: Reconnect once the user

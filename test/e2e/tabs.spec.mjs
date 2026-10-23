@@ -184,16 +184,15 @@ test('Disconnect keeps the tab and its data; Reconnect resumes', async ({ env })
   expect(errors).toEqual([]);
 });
 
-test('a tab opened for a profile open in another tab stays a New connection', async ({ env }) => {
+test('a tab opened for a profile open in another tab is not left behind', async ({ env }) => {
   const a = await env.broker();
   const { page, errors } = await env.connected(a);
+  const idA = await page.evaluate(() => window.__mqttscope.shell.active.connId);
   await page.evaluate(async (p) => {
     await window.__mqttscope.shell.openTab({ profile: p, connect: true });
   }, profile(a.port));
-  await expect(toast(page, 'error')).toHaveText(`“Test broker ${a.port}” is already open`);
-  await expect(page.locator('.conn-tab .conn-tab-name')).toHaveText([`Test broker ${a.port}`, 'New connection']);
-  await expect(page).toHaveTitle('MQTT Scope — New connection');
-  expect(await page.evaluate(() => window.__mqttscope.shell.active.profile)).toBeNull();
+  await expect(page.locator('.conn-tab .conn-tab-name')).toHaveText([`Test broker ${a.port}`]);
+  expect(await page.evaluate(() => window.__mqttscope.shell.active.connId)).toBe(idA);
   expect(errors).toEqual([]);
 });
 

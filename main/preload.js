@@ -7,6 +7,13 @@ contextBridge.exposeInMainWorld('api', {
   // (see renderer/tabApi.js), and every MQTT call and event names one.
   openConnection: () => ipcRenderer.invoke('conn:open'),
   closeConnection: (connId) => ipcRenderer.invoke('conn:close', connId),
+  // A profile is open in at most one tab app-wide: openProfiles() are the ids
+  // of those. focusConnection shows a tab of any window; its window answers
+  // with onActivateTab.
+  focusConnection: (connId) => ipcRenderer.invoke('conn:focus', connId),
+  openProfiles: () => ipcRenderer.invoke('conn:openProfiles'),
+  onOpenProfilesChanged: (cb) => ipcRenderer.on('conn:openProfilesChanged', (_e, ids) => cb(ids)),
+  onActivateTab: (cb) => ipcRenderer.on('tabs:activate', (_e, data) => cb(data)),
   connect: (connId, profile) => ipcRenderer.invoke('mqtt:connect', connId, profile),
   disconnect: (connId) => ipcRenderer.invoke('mqtt:disconnect', connId),
   status: (connId) => ipcRenderer.invoke('mqtt:status', connId),

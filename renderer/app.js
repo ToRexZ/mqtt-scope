@@ -40,7 +40,11 @@ function applySettings(next) {
 
 // The connection dialog, drawn in the active tab while that tab is a picker
 // (see placeDialog).
-const connections = new ConnectionDialog({ api, getBinding: (id) => bindings[id] });
+const connections = new ConnectionDialog({
+  api,
+  getBinding: (id) => bindings[id],
+  onProfilesChanged: () => checkTabs(),
+});
 
 // ------------------------------------------------------------------ tabs
 
@@ -49,6 +53,7 @@ const shell = {
   getBinding: (id) => bindings[id],
   setSubscriptions: (profileId, subs) => connections.setSubscriptions(profileId, subs),
   savedProfile: (profile) => connections.profiles.find((p) => p.id === profile.id) || profile,
+  showDuplicate: (tab, duplicate) => showDuplicate(tab, duplicate),
   savedMessagesChanged: (tab) => savedMessagesChanged(tab),
   onChange: () => refresh(),
 };
@@ -79,8 +84,8 @@ async function newTab() {
 }
 
 // A tab gets its own connection in main; its id is the tab's id. A tab to
-// connect takes its profile when connect() does: one open in another tab
-// leaves it a "New connection".
+// connect takes its profile when connect() does; one open in another tab
+// closes it again (see showDuplicate).
 async function openTab({ profile = null, connect = false, activate: show = true } = {}) {
   const connId = await api.openConnection();
   const tab = new ConnectionTab({ api, connId, settings, shell });
@@ -93,6 +98,20 @@ async function openTab({ profile = null, connect = false, activate: show = true 
   await tab.load();
   if (profile && connect && tabOf(connId) === tab) await tab.connect(profile);
   return tab;
+}
+
+// A profile is open in one tab app-wide: connecting to it shows the tab that
+// has it (in another window, that window comes forward). The tab that tried
+// goes, unless it is its window's only one.
+async function showDuplicate(tab, duplicate) {
+  if (duplicate.sameWindow) activate(duplicate.connId);
+  else api.focusConnection(duplicate.connId);
+  if (tab.mode === 'picker' && tabs.size > 1) await closeTab(tab.connId);
+}
+
+// Each session tab compares its profile with the saved one (see checkSaved).
+function checkTabs() {
+  for (const tab of tabs.values()) tab.checkSaved();
 }
 
 // Closes the tab and its connection, after asking when its plots hold
@@ -141,7 +160,13 @@ async function closeTabs(ids) {
 async function reopenClosed() {
   for (let entry = order.popClosed(); entry; entry = order.popClosed()) {
     const profile = connections.profiles.find((p) => p.id === entry.profileId);
-    if (profile) return openTab({ profile, connect: true });
+    if (!profile) continue;
+    const open = stripTabs().find((t) => t.mode === 'session' && t.profile?.id === profile.id);
+    if (open) {
+      activate(open.connId);
+      return open;
+    }
+    return openTab({ profile, connect: true });
   }
   return null;
 }
@@ -231,6 +256,7 @@ function refreshSaved(tab) {
 api.onMessages((batch) => tabOf(batch.connId)?.ingestBatch(batch));
 api.onStatus((event) => tabOf(event.connId)?.onStatus(event.status));
 api.onWarning((event) => tabOf(event.connId)?.onWarning(event.message));
+api.onActivateTab(({ connId }) => activate(connId)); // another window opened a profile this one has
 
 // Hidden tabs record but are not drawn; message rates count for every tab.
 setInterval(() => activeTab()?.render(), RENDER_INTERVAL_MS);
@@ -252,7 +278,10 @@ api.onMenu((action) => {
 
 // Another window saved shared data: pick up its changes.
 api.onStoreChanged(async (name) => {
-  if (name === 'profiles') await connections.reload();
+  if (name === 'profiles') {
+    await connections.reload();
+    checkTabs();
+  }
   else if (name === 'savedMessages') savedMessagesChanged();
   else if (name === 'plotTabs') await Promise.all(stripTabs().map((t) => t.plots.reload()));
   else if (name === 'settings') applySettings(normalizeSettings(await api.storeGet('settings')));

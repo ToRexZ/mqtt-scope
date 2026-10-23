@@ -29,6 +29,15 @@ export function blankProfile(name = 'New connection') {
   };
 }
 
+// What a connection is made with: a tab whose snapshot differs from the saved
+// profile in this needs a reconnect to apply it. Not the name or subscriptions.
+const SIGNATURE_FIELDS = ['protocol', 'host', 'port', 'wsPath', 'mqttVersion', 'username', 'password', 'clientId', 'keepalive', 'clean', 'rejectUnauthorized', 'caFile', 'certFile', 'keyFile'];
+export function connectSignature(profile) {
+  // Missing and empty count the same; the two flags are on unless false.
+  const value = (k) => (k === 'clean' || k === 'rejectUnauthorized' ? profile[k] !== false : (profile[k] ?? ''));
+  return JSON.stringify(SIGNATURE_FIELDS.map(value));
+}
+
 export function parseSubscriptions(text) {
   return text
     .split('\n')

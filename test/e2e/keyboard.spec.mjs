@@ -20,10 +20,8 @@ test('connection list: Enter connects to the selected connection, arrows move th
   await expect(activeTabName(page)).toHaveText('Broker B');
   await expect(page.locator('.conn-dialog')).toHaveCount(0);
   // Enter in a text field connects too; in the subscription list it adds a line.
-  // Ctrl+K opens a new tab, and Broker B is already open in this one.
+  // Ctrl+K opens a new tab, which starts on Broker A: Broker B is open in this one.
   await page.keyboard.press(`${MOD}+K`);
-  await expect(page.locator('.conn-item.active')).toHaveText(/Broker B/);
-  await page.keyboard.press('ArrowUp');
   await expect(page.locator('.conn-item.active')).toHaveText(/Broker A/);
   await page.locator('.conn-form textarea[name="subscriptions"]').focus();
   await page.keyboard.press('Enter');
@@ -203,7 +201,8 @@ test('tab shortcuts: new, next, previous, go to, last, close, reopen', async ({ 
 test('tab shortcuts work while typing', async ({ env }) => {
   const a = await env.broker();
   const b = await env.broker();
-  const userData = makeUserData({ profiles: [profile(a.port, { id: 'a', name: 'Broker A' }), profile(b.port, { id: 'b', name: 'Broker B' })] });
+  // Broker C stays closed, so the New connection tab below starts on it.
+  const userData = makeUserData({ profiles: [profile(a.port, { id: 'a', name: 'Broker A' }), profile(b.port, { id: 'b', name: 'Broker B' }), profile(a.port, { id: 'c', name: 'Broker C' })] });
   const { page, errors } = await env.launch({ userData });
   await connect(page);
   await openTabTo(page, 'Broker B');
