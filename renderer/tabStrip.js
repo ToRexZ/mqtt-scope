@@ -121,9 +121,12 @@ export class TabStrip {
   // SCROLL_SPEED, resting SCROLL_PAUSE at each end (styles.css reads --shift,
   // --dur and --anim; with reduced motion it ends in "…" instead).
   scrollName(name) {
-    const shift = Math.ceil(name.scrollWidth - name.clientWidth);
+    // offsetWidth ignores the animation's transform, scrollWidth would not.
+    const shift = Math.ceil(name.firstChild.offsetWidth - name.clientWidth);
     name.classList.toggle('scrolling', shift > 0);
     if (shift <= 0) return;
+    // Untouched while nothing changed, so a running animation does not jump.
+    if (name.style.getPropertyValue('--shift') === `${shift}px`) return;
     const cycle = 2 * (SCROLL_PAUSE + shift / SCROLL_SPEED);
     name.style.setProperty('--shift', `${shift}px`);
     name.style.setProperty('--dur', `${cycle.toFixed(2)}s`);

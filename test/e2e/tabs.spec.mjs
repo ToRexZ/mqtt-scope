@@ -300,3 +300,41 @@ test('a name that fits does not scroll; the tooltip is the full name', async ({ 
   await expect(page.locator('.brand')).not.toHaveClass(/icon-only/);
   expect(errors).toEqual([]);
 });
+
+test('re-measuring a running name animation keeps --shift and the scrolling class', async ({ env }) => {
+  const { page, errors } = await manyTabs(env);
+  await page.setViewportSize({ width: 1000, height: 700 });
+  const name = page.locator('.conn-tab').nth(1).locator('.conn-tab-name');
+  await expect(name).toHaveClass(/scrolling/);
+  const read = () => name.evaluate((e) => ({ shift: e.style.getPropertyValue('--shift'), dur: e.style.getPropertyValue('--dur'), scrolling: e.classList.contains('scrolling') }));
+  const before = await read();
+  // Park the animation at the far end, where the label's transform is largest, then re-render.
+  await name.locator('.conn-tab-label').evaluate((e) => {
+    const a = e.getAnimations()[0];
+    a.pause();
+    a.currentTime = parseFloat(getComputedStyle(e.parentElement).getPropertyValue('--dur')) * 500;
+  });
+  await page.setViewportSize({ width: 1001, height: 700 });
+  await page.setViewportSize({ width: 1000, height: 700 });
+  expect(await read()).toEqual(before);
+  expect(errors).toEqual([]);
+});
+
+test('no tab overlaps +, whatever the width', async ({ env }) => {
+  const { page, errors } = await manyTabs(env, 8);
+  for (let w = 1400; w >= 760; w -= 23) {
+    await page.setViewportSize({ width: w, height: 700 });
+    await page.waitForTimeout(50);
+    const r = await page.evaluate(() => {
+      const tabs = document.querySelectorAll('.conn-tab');
+      const plus = document.querySelector('.tab-new').getBoundingClientRect();
+      const strip = document.querySelector('.conn-tabs');
+      const head = document.querySelector('.topbar').getBoundingClientRect();
+      return { last: tabs[tabs.length - 1].getBoundingClientRect().right, stripRight: strip.getBoundingClientRect().right, plusLeft: plus.left, plusRight: plus.right, headRight: head.right, scrolled: strip.classList.contains('scrolling') };
+    });
+    expect(r.plusRight, `width ${w}`).toBeLessThanOrEqual(r.headRight);
+    expect(r.stripRight, `width ${w}`).toBeLessThanOrEqual(r.plusLeft + 0.5);
+    if (!r.scrolled) expect(r.last, `width ${w}`).toBeLessThanOrEqual(r.plusLeft + 0.5);
+  }
+  expect(errors).toEqual([]);
+});

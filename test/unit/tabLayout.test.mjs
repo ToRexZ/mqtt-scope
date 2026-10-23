@@ -26,3 +26,12 @@ test('below the minimum the strip scrolls', () => {
 test('no tabs: nothing to shrink', () => {
   assert.deepEqual(stripLayout({ ...base, available: 100, tabs: [] }), { brand: 'icon', maxTab: null, scroll: false });
 });
+
+test('no tabs: the brand still gives way, never a division by zero', () => {
+  assert.deepEqual(stripLayout({ ...base, available: 10, tabs: [] }), { brand: 'icon', maxTab: null, scroll: false });
+});
+
+test('tabs exactly at the share keep their width', () => {
+  // room 600: the two 200s are the share itself, the 500 gets the same 200.
+  assert.deepEqual(stripLayout({ ...base, available: 660, tabs: [200, 200, 500] }), { brand: 'icon', maxTab: 200, scroll: false });
+});
