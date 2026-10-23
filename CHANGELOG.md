@@ -6,6 +6,10 @@ All notable changes to MQTT Scope. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Settings shows the MQTT Scope version at the bottom.
+
 ## [0.3.0] - 2026-10-23
 
 ### Added

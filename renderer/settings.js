@@ -139,7 +139,10 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
     }
     const saveBtn = Object.assign(el('button', 'btn primary', 'Save'), { type: 'submit' });
     const actions = el('div', 'modal-actions');
-    actions.append(button('Cancel', '', () => done(null)), saveBtn);
+    // The running version comes with the update state main already keeps.
+    const version = el('span', 'settings-version');
+    api.updateState().then((u) => u?.current && (version.textContent = `MQTT Scope ${u.current}`), () => {});
+    actions.append(version, button('Cancel', '', () => done(null)), saveBtn);
     form.append(el('h3', '', 'Settings'), tabs, general, keyboard, actions);
 
     const done = (v) => {
