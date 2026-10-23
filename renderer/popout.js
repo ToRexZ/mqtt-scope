@@ -1,5 +1,5 @@
 // Pop-out inspector window for one topic. Receives that topic's messages
-// from the main process and keeps its own (longer) history.
+// of its connection from the main process and keeps its own (longer) history.
 
 import { MessageViewer } from './viewer.js';
 import { normalizeSettings } from './settings.js';
@@ -11,7 +11,7 @@ const api = window.api;
 
 const init = await api.popoutInit();
 if (init) {
-  document.title = `${init.topic} — MQTT Scope`;
+  document.title = init.title; // "<profile name> — <topic>"
   const source = { path: init.topic, history: init.history || [], messageCount: (init.history || []).length };
   const viewer = new MessageViewer(document.querySelector('#viewer-host'), { api, standalone: true });
   viewer.show(source);

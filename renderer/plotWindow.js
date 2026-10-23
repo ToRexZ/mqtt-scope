@@ -22,7 +22,7 @@ if (opened?.plot) start(opened, resolveBindings(normalizeSettings(await api.stor
 
 function start(init, keys) {
   const plot = sanitizePlot(init.plot);
-  document.title = `${plot.title} — MQTT Scope`;
+  document.title = init.title; // "<profile name> — <plot title>"
   const data = new PlotData();
   data.track(plot.series, (s) => {
     const pts = init.data?.[seriesKey(s.topic, s.segs)];

@@ -21,9 +21,12 @@ class FakeSession extends EventEmitter {
     this.active = true;
     return { ok: true, url: 'mqtt://x' };
   }
+  // Like MqttSession, reports the change synchronously.
   disconnect() {
     this.disconnects++;
     this.active = false;
+    this.status = { state: 'disconnected' };
+    this.emit('status', this.status);
   }
 }
 

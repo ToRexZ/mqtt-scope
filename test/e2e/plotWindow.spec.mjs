@@ -30,12 +30,12 @@ async function openPlotWindow(env) {
 }
 
 test('it starts with the points collected so far and shows the latest value', async ({ env }) => {
-  const { win, page, errors } = await openPlotWindow(env);
+  const { broker, win, page, errors } = await openPlotWindow(env);
   const inMain = await page.evaluate(() => window.__mqttscope.plots.points('hall/temp', null).length);
   expect(await win.evaluate(() => window.__plotWindow.data.points('hall/temp', null).length)).toBe(inMain);
   await expect(win.locator('.legend-label')).toHaveText('Temperature');
   await expect(win.locator('.legend-value')).toHaveText('23');
-  await expect(win).toHaveTitle('Temperature — MQTT Scope');
+  await expect(win).toHaveTitle(`Test broker ${broker.port} — Temperature`);
   expect(errors).toEqual([]);
 });
 

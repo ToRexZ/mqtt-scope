@@ -1,5 +1,5 @@
 // Main window: wires the topic tree, inspector, plots, publisher and the
-// connection manager to the MQTT session in the main process.
+// connection manager to a broker connection in the main process.
 
 import { TopicTree } from './topicTree.js';
 import { TreeView } from './treeView.js';
@@ -14,9 +14,15 @@ import { hasNumbers } from './fields.js';
 import { openSubscriptions } from './subscriptionsDialog.js';
 import { initUpdateButton } from './updateButton.js';
 import { ACTIONS, bindingIndex, comboFromEvent, keyBelongsToTarget, pointerFocus, resolveBindings, toAccelerator } from './keys.js';
+import { bindConnection } from './tabApi.js';
 
 const api = window.api;
 const $ = (sel) => document.querySelector(sel);
+
+// The window's connection. The views use tabApi, which names it in every MQTT
+// call; events of other connections are ignored.
+const connId = await api.openConnection();
+const tabApi = bindConnection(api, connId, { name: () => activeProfile?.name || '' });
 
 const PAUSE_QUEUE_LIMIT = 200000;
 const PAUSE_QUEUE_BYTES = 256 * 1024 * 1024;
@@ -62,9 +68,9 @@ const treeView = new TreeView($('#tree-scroll'), tree, {
 treeView.setEmptyText('Not connected. Click the connection button above.');
 
 const viewer = new MessageViewer($('#viewer-host'), {
-  api,
+  api: tabApi,
   onMaximize: toggleMaximize,
-  onPopout: (node) => api.openPopout(node.path, node.history.map(stripMessage)),
+  onPopout: (node) => tabApi.openPopout(node.path, node.history.map(stripMessage)),
   onUseInPublisher: (topic, msg) => publisher.loadMessage(topic, msg),
   onSelectTopic: (node) => {
     treeView.reveal(node);
@@ -74,7 +80,7 @@ const viewer = new MessageViewer($('#viewer-host'), {
 });
 
 const plots = new PlotsPanel($('#plots-host'), {
-  api,
+  api: tabApi,
   getHistory: (topic) => tree.find(topic)?.history || [],
   getTopicNodes: () => tree.root.topics(),
   onCountChange: (n) => ($('#plot-count').textContent = n ? String(n) : ''),
@@ -82,7 +88,7 @@ const plots = new PlotsPanel($('#plots-host'), {
 });
 
 const publisher = new Publisher($('#publisher-host'), {
-  api,
+  api: tabApi,
   getTopics: topicSuggestions,
   getSelectedTopic: () => selected?.path ?? null,
   onToggle: (collapsed) => $('#right').classList.toggle('pub-collapsed', collapsed),
@@ -96,7 +102,7 @@ const connections = new ConnectionDialog({
     const brokerKey = (p) => p && `${p.id}|${p.protocol}|${p.host}|${p.port}|${p.wsPath || ''}`;
     if (brokerKey(activeProfile) !== brokerKey(profile)) clearTree();
     activeProfile = { ...profile };
-    const res = await api.connect(profile);
+    const res = await tabApi.connect(profile);
     if (!res.ok) toast(res.error, 'error');
   },
 });
@@ -117,7 +123,9 @@ function topicSuggestions(prefix) {
 
 // ------------------------------------------------------------------ messages
 
-api.onMessages(({ messages, dropped }) => {
+api.onMessages((batch) => {
+  if (batch.connId !== connId) return;
+  const { messages, dropped } = batch;
   if (dropped) droppedTotal += dropped;
   if (paused) {
     for (const m of messages) {
@@ -190,7 +198,7 @@ function updateStats() {
 function reloadSession() {
   clearTree();
   plots.reset();
-  api.resetChildWindows?.(); // pop-out windows start over too
+  tabApi.resetChildWindows(); // pop-out windows start over too
   droppedTotal = 0;
   rateCount = 0;
   rate = 0;
@@ -239,7 +247,7 @@ async function deleteRetained(nodes, what) {
   let failed = 0;
   for (const n of nodes) {
     pendingDeletes.set(n.path, Date.now() + DELETE_ECHO_MS);
-    const res = await api.publish({ topic: n.path, payload: '', qos: 1, retain: true });
+    const res = await tabApi.publish({ topic: n.path, payload: '', qos: 1, retain: true });
     if (res.ok) {
       tree.removeTopic(n);
     } else {
@@ -268,7 +276,7 @@ function treeMenu(node, x, y) {
       },
     },
     { label: 'Publish to this topic…', action: () => (msg ? publisher.loadMessage(node.path, msg) : publisher.useTopic(node.path)) },
-    { label: 'Open in new window', disabled: !msg, action: () => api.openPopout(node.path, node.history.map(stripMessage)) },
+    { label: 'Open in new window', disabled: !msg, action: () => tabApi.openPopout(node.path, node.history.map(stripMessage)) },
     'separator',
     ...(numeric
       ? plots.menuItems(node.path, null)
@@ -305,7 +313,9 @@ const STATE_LABELS = {
   error: 'Error',
 };
 
-api.onStatus((s) => {
+api.onStatus((event) => {
+  if (event.connId !== connId) return;
+  const s = event.status;
   status = s;
   connections.onStatus(s);
   const name = activeProfile?.name || '';
@@ -324,7 +334,7 @@ api.onStatus((s) => {
   treeView.refresh();
 });
 
-api.onWarning((message) => toast(message, 'error'));
+api.onWarning((event) => event.connId === connId && toast(event.message, 'error'));
 
 // The main process asks for this before closing the window.
 api.onFlush(async () => {
@@ -352,13 +362,13 @@ window.addEventListener('unhandledrejection', (e) => toast(`Unexpected error: ${
 // ------------------------------------------------------------------ chrome
 
 $('#btn-connections').addEventListener('click', () => connections.open());
-$('#btn-disconnect').addEventListener('click', () => api.disconnect());
+$('#btn-disconnect').addEventListener('click', () => tabApi.disconnect());
 $('#btn-subscriptions').addEventListener('click', showSubscriptions);
 
 function showSubscriptions() {
   if (status.state !== 'connected') return toast('Connect first to change subscriptions', 'error');
   openSubscriptions({
-    api,
+    api: tabApi,
     profileName: activeProfile?.name,
     onSaved: (subs) => activeProfile && connections.setSubscriptions(activeProfile.id, subs),
   });
@@ -503,7 +513,7 @@ splitter($('#split-right'), {
 (async () => {
   const [saved] = await Promise.all([api.storeGet('settings').catch(() => null), connections.load(), publisher.load(), plots.load()]);
   applySettings(normalizeSettings(saved));
-  const s = await api.status();
+  const s = await tabApi.status();
   if (s.state === 'disconnected' && !updates.installing()) connections.open();
 })();
 

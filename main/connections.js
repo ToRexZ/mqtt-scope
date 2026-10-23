@@ -59,11 +59,13 @@ class ConnectionRegistry extends EventEmitter {
     this._entries.get(connId)?.session.disconnect();
   }
 
+  // Forgotten first: the session reports 'disconnected' while it tears down,
+  // and that must not reach the window either.
   close(connId) {
     const entry = this._entries.get(connId);
     if (!entry) return;
-    entry.session.disconnect();
     this._entries.delete(connId);
+    entry.session.disconnect();
     if (entry.profileId != null) this._emitOpenProfiles();
   }
 

@@ -3,7 +3,7 @@
 const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, safeStorage, session: electronSession, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
-const { MqttSession } = require('./mqttSession');
+const { ConnectionRegistry } = require('./connections');
 const { createProfileStore } = require('./profileStore');
 const { createJsonStore } = require('./jsonStore');
 const { Updater } = require('./updater');
@@ -21,9 +21,11 @@ const ICON = path.join(__dirname, 'icon.png');
 const MAX_FILE_BYTES = 256 * 1024 * 1024; // the MQTT payload limit
 
 // One process owns the data files; launching the app again opens another
-// window in it. Each main window has its own broker connection.
-const windows = new Map(); // webContents.id -> { win, session }
-const childWindows = new Map(); // webContents.id -> { win, ownerId, topics: Set, init } (see openChildWindow)
+// window in it. Each main window has its own broker connections, which the
+// registry keeps by connection id; every MQTT call and event names one.
+const windows = new Map(); // webContents.id -> { win }
+const childWindows = new Map(); // webContents.id -> { win, ownerId, connId, topics: Set, init } (see openChildWindow)
+const registry = new ConnectionRegistry();
 let profiles;
 let stores;
 let updater;
@@ -45,18 +47,61 @@ function hardenWindow(win) {
   win.webContents.on('will-navigate', (e) => e.preventDefault());
 }
 
-// The main window an IPC sender belongs to (a pop-out belongs to its opener).
-function ownerOf(sender) {
-  const own = windows.get(sender.id);
-  if (own) return own;
+// The id of the main window an IPC sender belongs to (a pop-out belongs to its opener).
+function ownerIdOf(sender) {
+  if (windows.has(sender.id)) return sender.id;
   const child = childWindows.get(sender.id);
-  return child ? windows.get(child.ownerId) || null : null;
+  return child && windows.has(child.ownerId) ? child.ownerId : null;
 }
 
-function sessionOf(e) {
-  const owner = ownerOf(e.sender);
-  if (!owner) throw new Error('Unknown window');
-  return owner.session;
+function ownerOf(sender) {
+  const id = ownerIdOf(sender);
+  return id === null ? null : windows.get(id);
+}
+
+// A connection named in an IPC call, if the sender's window owns it.
+function connectionOf(e, connId) {
+  const entry = registry.get(connId);
+  if (!entry || entry.ownerId !== ownerIdOf(e.sender)) throw new Error('Unknown connection');
+  return entry;
+}
+
+// Status, warnings and messages go to the window that owns the connection;
+// messages also to that connection's pop-outs, for their topics.
+function forwardConnectionEvents() {
+  const send = (ownerId, channel, data) => {
+    const win = windows.get(ownerId)?.win;
+    if (win && !win.isDestroyed()) win.webContents.send(channel, data);
+  };
+  registry.on('status', (connId, ownerId, status) => {
+    if (status.state === 'error') log.warn('mqtt', status.url || '', status.error);
+    send(ownerId, 'mqtt:status', { connId, status });
+  });
+  registry.on('warning', (connId, ownerId, message) => send(ownerId, 'mqtt:warning', { connId, message }));
+  registry.on('batch', (connId, ownerId, batch) => {
+    send(ownerId, 'mqtt:messages', { connId, messages: batch.messages, dropped: batch.dropped });
+    for (const child of childWindows.values()) {
+      if (child.connId !== connId || child.win.isDestroyed()) continue;
+      const mine = batch.messages.filter((m) => child.topics.has(m.topic));
+      if (mine.length) child.win.webContents.send('mqtt:messages', { connId, messages: mine, dropped: 0 });
+    }
+  });
+}
+
+function closeChildren(pred) {
+  for (const child of childWindows.values()) if (pred(child) && !child.win.isDestroyed()) child.win.close();
+}
+
+// Ends a connection; its pop-outs close with it.
+function closeConnection(connId) {
+  registry.close(connId);
+  closeChildren((child) => child.connId === connId);
+}
+
+// A window closing, crashing or reloading ends all of its connections.
+function closeConnectionsOf(ownerId) {
+  registry.closeOwner(ownerId);
+  closeChildren((child) => child.ownerId === ownerId);
 }
 
 function focusedMain() {
@@ -79,29 +124,17 @@ function createMainWindow() {
   });
   hardenWindow(win);
   const id = win.webContents.id;
-  const session = new MqttSession();
-  windows.set(id, { win, session });
-  const send = (channel, data) => !win.isDestroyed() && win.webContents.send(channel, data);
+  windows.set(id, { win });
 
-  session.on('status', (status) => {
-    if (status.state === 'error') log.warn('mqtt', status.url || '', status.error);
-    send('mqtt:status', status);
-  });
-  session.on('warning', (message) => send('mqtt:warning', message));
-  session.on('batch', (batch) => {
-    send('mqtt:messages', batch);
-    for (const child of childWindows.values()) {
-      if (child.ownerId !== id || child.win.isDestroyed()) continue;
-      const mine = batch.messages.filter((m) => child.topics.has(m.topic));
-      if (mine.length) child.win.webContents.send('mqtt:messages', { messages: mine, dropped: 0 });
-    }
-  });
-
+  // A reloaded page starts with no connections; the first load has none yet.
+  // Not 'did-start-loading': a navigation blocked below fires that too, and
+  // the page stays.
+  win.webContents.on('did-navigate', () => closeConnectionsOf(id));
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   win.webContents.on('render-process-gone', async (_e, details) => {
     log.error('renderer gone', details);
     if (details.reason === 'clean-exit' || win.isDestroyed()) return;
-    session.disconnect();
+    closeConnectionsOf(id);
     const res = await dialog.showMessageBox(win, {
       type: 'error',
       message: 'The window crashed',
@@ -131,8 +164,7 @@ function createMainWindow() {
   });
   win.on('closed', () => {
     windows.delete(id);
-    session.disconnect();
-    for (const child of childWindows.values()) if (child.ownerId === id && !child.win.isDestroyed()) child.win.close();
+    closeConnectionsOf(id);
     // A quit (e.g. Cmd+Q) was paused by the flush above; resume it.
     if (quitting) app.quit();
   });
@@ -190,7 +222,7 @@ function createUpdater(kind) {
     store: { get: () => stores.get('updates'), set: (value) => stores.set('updates', value) },
     isEnabled: updateChecksOn,
     // A restart drops brokers still connecting or reconnecting too.
-    connectedCount: () => [...windows.values()].filter(({ session }) => session.active).length,
+    connectedCount: () => registry.activeCount(),
     log,
   });
   // Every main window shows the same state. A window closing mid-broadcast
@@ -239,13 +271,26 @@ function storageSecurity() {
 function registerIpc() {
   const parent = (e) => BrowserWindow.fromWebContents(e.sender);
 
-  ipcMain.handle('mqtt:connect', (e, profile) => sessionOf(e).connect(profile || {}));
-  ipcMain.handle('mqtt:disconnect', (e) => sessionOf(e).disconnect());
-  ipcMain.handle('mqtt:status', (e) => sessionOf(e).status);
-  ipcMain.handle('mqtt:publish', (e, msg) => sessionOf(e).publish(msg));
-  ipcMain.handle('mqtt:subscribe', (e, { topic, qos } = {}) => sessionOf(e).subscribe(topic, qos));
-  ipcMain.handle('mqtt:unsubscribe', (e, topic) => sessionOf(e).unsubscribe(topic));
-  ipcMain.handle('mqtt:subscriptions', (e) => sessionOf(e).subscriptions.map((s) => ({ ...s })));
+  // A main window opens its connections; the id names one in every call after.
+  ipcMain.handle('conn:open', (e) => {
+    if (!windows.has(e.sender.id)) throw new Error('Unknown window');
+    return registry.create(e.sender.id);
+  });
+  ipcMain.handle('conn:close', (e, connId) => {
+    connectionOf(e, connId);
+    closeConnection(connId);
+  });
+  const sessionOf = (e, connId) => connectionOf(e, connId).session;
+  ipcMain.handle('mqtt:connect', (e, connId, profile) => {
+    connectionOf(e, connId);
+    return registry.connect(connId, profile || {});
+  });
+  ipcMain.handle('mqtt:disconnect', (e, connId) => sessionOf(e, connId).disconnect());
+  ipcMain.handle('mqtt:status', (e, connId) => sessionOf(e, connId).status);
+  ipcMain.handle('mqtt:publish', (e, connId, msg) => sessionOf(e, connId).publish(msg));
+  ipcMain.handle('mqtt:subscribe', (e, connId, { topic, qos } = {}) => sessionOf(e, connId).subscribe(topic, qos));
+  ipcMain.handle('mqtt:unsubscribe', (e, connId, topic) => sessionOf(e, connId).unsubscribe(topic));
+  ipcMain.handle('mqtt:subscriptions', (e, connId) => sessionOf(e, connId).subscriptions.map((s) => ({ ...s })));
 
   ipcMain.handle('profiles:list', () => profiles.load());
   ipcMain.handle('profiles:save', (e, list) => {
@@ -322,38 +367,39 @@ function registerIpc() {
     return { name: path.basename(file), bytes: new Uint8Array(fs.readFileSync(file)) };
   });
 
-  // An inspector pop-out: one topic, with the history the main window kept.
-  ipcMain.handle('popout:open', (e, { topic, history } = {}) => {
-    const owner = ownerOf(e.sender);
-    if (!owner || typeof topic !== 'string') return;
-    openChildWindow(owner, {
+  // An inspector pop-out: one topic of one connection, with the history the
+  // main window kept.
+  ipcMain.handle('popout:open', (e, { connId, topic, title, history } = {}) => {
+    if (typeof topic !== 'string') return;
+    const { ownerId } = connectionOf(e, connId);
+    const name = String(title || topic);
+    openChildWindow(ownerId, connId, {
       page: 'popout.html',
-      title: topic,
+      title: name,
       size: { width: 1200, height: 900 },
       topics: [topic],
-      init: { topic, history: Array.isArray(history) ? history : [] },
+      init: { topic, title: name, history: Array.isArray(history) ? history : [] },
     });
   });
 
   // A plot in its own window: the plot and the points collected so far.
-  ipcMain.handle('plotwin:open', (e, init = {}) => {
-    const owner = ownerOf(e.sender);
-    const plot = init?.plot;
-    if (!owner || !plot || !Array.isArray(plot.series)) return;
-    openChildWindow(owner, {
+  ipcMain.handle('plotwin:open', (e, { connId, title, plot, data, tabName } = {}) => {
+    if (!plot || !Array.isArray(plot.series)) return;
+    const { ownerId } = connectionOf(e, connId);
+    const name = String(title || plot.title || 'Plot');
+    openChildWindow(ownerId, connId, {
       page: 'plotWindow.html',
-      title: String(plot.title || 'Plot'),
+      title: name,
       size: { width: 1100, height: 650, minWidth: 360, minHeight: 240 },
       topics: plot.series.map((s) => s && s.topic),
-      init,
+      init: { title: name, plot, data, tabName },
     });
   });
 
-  // Reload (Ctrl+R) in a main window: its child windows start over too.
-  ipcMain.on('children:reset', (e) => {
-    const owner = windows.get(e.sender.id);
-    if (!owner) return;
-    for (const child of childWindows.values()) if (child.ownerId === e.sender.id && !child.win.isDestroyed()) child.win.webContents.send('app:reset');
+  // Reload (Ctrl+R) of a connection in a main window: its child windows start over too.
+  ipcMain.on('children:reset', (e, connId) => {
+    if (!windows.has(e.sender.id) || registry.get(connId)?.ownerId !== e.sender.id) return;
+    for (const child of childWindows.values()) if (child.connId === connId && !child.win.isDestroyed()) child.win.webContents.send('app:reset');
   });
 
   // A child window asks once for what it was opened with.
@@ -367,9 +413,9 @@ function registerIpc() {
 }
 
 // Windows opened from a main window (inspector pop-outs, pop-out plots). Each
-// gets its init data once, then the messages of its topics; it closes with
-// its main window.
-function openChildWindow(owner, { page, title, size, topics, init }) {
+// gets its init data once, then its connection's messages of its topics; it
+// closes with its connection.
+function openChildWindow(ownerId, connId, { page, title, size, topics, init }) {
   const win = new BrowserWindow({
     ...size,
     title,
@@ -381,7 +427,7 @@ function openChildWindow(owner, { page, title, size, topics, init }) {
   });
   hardenWindow(win);
   const id = win.webContents.id;
-  childWindows.set(id, { win, ownerId: owner.win.webContents.id, topics: new Set(topics.filter((t) => typeof t === 'string')), init });
+  childWindows.set(id, { win, ownerId, connId, topics: new Set(topics.filter((t) => typeof t === 'string')), init });
   win.on('closed', () => childWindows.delete(id));
   win.loadFile(path.join(__dirname, '..', 'renderer', page));
 }
@@ -485,6 +531,8 @@ function start() {
   // Before the first window, so the desktop finds the entry for it.
   integrateDesktop({ kind, isPackaged: app.isPackaged, log });
   updater = createUpdater(kind);
+  forwardConnectionEvents();
+  if (!app.isPackaged) globalThis.__mqttscopeConnections = registry; // for tests, like __mqttscopeUpdater
   registerIpc();
   // Started by the Windows installer after Restart to update: that window comes to the front.
   frontAfterUpdate({ argv: process.argv, win: createMainWindow(), log });

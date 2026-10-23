@@ -15,7 +15,7 @@ test('pop-out window shows one topic, follows it live and closes with the main w
 
   const { popup, errors: popupErrors } = await popupFrom(app, () => page.locator('#viewer-host').getByRole('button', { name: '⤢ Pop out' }).click());
   await expect(popup.locator('.viewer-topic')).toHaveText('po/a');
-  await expect(popup).toHaveTitle(/^po\/a\b/); // product name deliberately not asserted
+  await expect(popup).toHaveTitle(`Test broker ${broker.port} — po/a`);
   // It starts with the history collected so far.
   await expect(popup.locator('.history-item .history-preview')).toHaveText(['second', 'first']);
   // A standalone viewer: no pop-out / maximize of its own.

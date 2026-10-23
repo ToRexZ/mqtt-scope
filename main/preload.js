@@ -3,16 +3,21 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('api', {
-  connect: (profile) => ipcRenderer.invoke('mqtt:connect', profile),
-  disconnect: () => ipcRenderer.invoke('mqtt:disconnect'),
-  status: () => ipcRenderer.invoke('mqtt:status'),
-  publish: (msg) => ipcRenderer.invoke('mqtt:publish', msg),
-  subscribe: (topic, qos) => ipcRenderer.invoke('mqtt:subscribe', { topic, qos }),
-  unsubscribe: (topic) => ipcRenderer.invoke('mqtt:unsubscribe', topic),
-  subscriptions: () => ipcRenderer.invoke('mqtt:subscriptions'),
+  // A window can hold several broker connections; main gives each an id
+  // (see renderer/tabApi.js), and every MQTT call and event names one.
+  openConnection: () => ipcRenderer.invoke('conn:open'),
+  closeConnection: (connId) => ipcRenderer.invoke('conn:close', connId),
+  connect: (connId, profile) => ipcRenderer.invoke('mqtt:connect', connId, profile),
+  disconnect: (connId) => ipcRenderer.invoke('mqtt:disconnect', connId),
+  status: (connId) => ipcRenderer.invoke('mqtt:status', connId),
+  publish: (connId, msg) => ipcRenderer.invoke('mqtt:publish', connId, msg),
+  subscribe: (connId, topic, qos) => ipcRenderer.invoke('mqtt:subscribe', connId, { topic, qos }),
+  unsubscribe: (connId, topic) => ipcRenderer.invoke('mqtt:unsubscribe', connId, topic),
+  subscriptions: (connId) => ipcRenderer.invoke('mqtt:subscriptions', connId),
+  // { connId, messages, dropped }, { connId, status }, { connId, message }
   onMessages: (cb) => ipcRenderer.on('mqtt:messages', (_e, data) => cb(data)),
-  onStatus: (cb) => ipcRenderer.on('mqtt:status', (_e, status) => cb(status)),
-  onWarning: (cb) => ipcRenderer.on('mqtt:warning', (_e, message) => cb(message)),
+  onStatus: (cb) => ipcRenderer.on('mqtt:status', (_e, data) => cb(data)),
+  onWarning: (cb) => ipcRenderer.on('mqtt:warning', (_e, data) => cb(data)),
   onMenu: (cb) => ipcRenderer.on('menu', (_e, action) => cb(action)),
   onFlush: (cb) => ipcRenderer.on('app:flush', () => cb()),
   newWindow: () => ipcRenderer.invoke('app:newWindow'),
@@ -42,10 +47,10 @@ contextBridge.exposeInMainWorld('api', {
   saveFile: (defaultName, data) => ipcRenderer.invoke('file:save', { defaultName, data }),
   readFileBytes: () => ipcRenderer.invoke('file:readBytes'),
 
-  openPopout: (topic, history) => ipcRenderer.invoke('popout:open', { topic, history }),
+  openPopout: ({ connId, topic, title, history }) => ipcRenderer.invoke('popout:open', { connId, topic, title, history }),
   popoutInit: () => ipcRenderer.invoke('child:init'),
-  openPlotWindow: (init) => ipcRenderer.invoke('plotwin:open', init),
+  openPlotWindow: (init) => ipcRenderer.invoke('plotwin:open', init), // { connId, title, plot, data, tabName }
   plotWindowInit: () => ipcRenderer.invoke('child:init'),
-  resetChildWindows: () => ipcRenderer.send('children:reset'),
+  resetChildWindows: (connId) => ipcRenderer.send('children:reset', connId),
   onReset: (cb) => ipcRenderer.on('app:reset', () => cb()),
 });
