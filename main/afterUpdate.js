@@ -8,12 +8,15 @@
 
 // Topmost for a moment puts it above the other windows (changing the z-order
 // is not subject to the foreground lock, unlike activating); show() and
-// focus() then activate it where Windows allows.
+// focus() then activate it where Windows allows. It never stays topmost.
 function bringToFront(win) {
   win.setAlwaysOnTop(true);
-  win.show();
-  win.focus();
-  win.setAlwaysOnTop(false);
+  try {
+    win.show();
+    win.focus();
+  } finally {
+    win.setAlwaysOnTop(false);
+  }
 }
 
 // win: the first main window. Returns whether this start came from an update.
@@ -25,7 +28,11 @@ function frontAfterUpdate({ argv, win, log }) {
   win.webContents.once('did-finish-load', () => {
     if (win.isDestroyed()) return;
     log.info('update', 'started after an update: bringing the window to the front');
-    bringToFront(win);
+    try {
+      bringToFront(win);
+    } catch (err) {
+      log.warn('update', `could not bring the window to the front: ${err.message}`);
+    }
   });
   return true;
 }

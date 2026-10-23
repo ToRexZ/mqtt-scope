@@ -25,9 +25,11 @@ class FakeWindow extends EventEmitter {
   }
   show() {
     this.calls.push(['show']);
+    if (this.failOn === 'show') throw new Error('show failed');
   }
   focus() {
     this.calls.push(['focus']);
+    if (this.failOn === 'focus') throw new Error('Object has been destroyed');
   }
   isDestroyed() {
     return this.destroyed;
@@ -72,4 +74,19 @@ test('a window closed before its page loaded is left alone', () => {
   win.webContents.emit('did-finish-load');
   assert.deepEqual(win.calls, []);
   assert.deepEqual(log.lines, []);
+});
+
+test('if showing or focusing it fails, the window still stops being always on top; the error is logged, not thrown', () => {
+  for (const [failOn, message, calls] of [
+    ['focus', 'Object has been destroyed', [['setAlwaysOnTop', true], ['show'], ['focus'], ['setAlwaysOnTop', false]]],
+    ['show', 'show failed', [['setAlwaysOnTop', true], ['show'], ['setAlwaysOnTop', false]]],
+  ]) {
+    const win = new FakeWindow();
+    win.failOn = failOn;
+    const log = fakeLog();
+    frontAfterUpdate({ argv: ['x', '--updated'], win, log });
+    assert.doesNotThrow(() => win.webContents.emit('did-finish-load'), failOn);
+    assert.deepEqual(win.calls, calls, failOn);
+    assert.deepEqual(log.lines.at(-1), ['warn', 'update', `could not bring the window to the front: ${message}`], failOn);
+  }
 });
