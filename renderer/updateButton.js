@@ -229,7 +229,14 @@ export function initUpdateButton(api, buttonEl) {
   // Listen first, then read, so no change falls in between (see preload.js).
   api.onUpdateState(apply);
   api.updateState().then(apply, () => {});
-  return { installing: installing.isOpen };
+  return {
+    installing: installing.isOpen,
+    // The state is the answer to a check that may be ahead of the broadcast.
+    openPanel: (fresh) => {
+      if (fresh) apply(fresh);
+      open('panel');
+    },
+  };
 }
 
 // The Installing dialog: modal, above everything including the panel, with an

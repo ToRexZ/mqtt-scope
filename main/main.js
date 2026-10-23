@@ -230,11 +230,14 @@ function quitForUpdate() {
 }
 
 // Settings → Check for updates (and macOS Help → Check for Updates…): always asks, and tells the window it came from.
-async function checkForUpdatesNow() {
+// announce: tell the window (the macOS menu). The Settings button passes false
+// and shows the answer itself from the returned result.
+async function checkForUpdatesNow({ announce = true } = {}) {
   const asked = focusedMain();
   const result = await updater.check({ manual: true });
   const w = asked && !asked.win.isDestroyed() ? asked : focusedMain();
-  if (w && !w.win.isDestroyed()) w.win.webContents.send('update:checked', result);
+  if (announce && w && !w.win.isDestroyed()) w.win.webContents.send('update:checked', result);
+  return result;
 }
 
 function storageSecurity() {
@@ -295,7 +298,7 @@ function registerIpc() {
     createMainWindow();
   });
   // The old Help menu's items, from the Settings footer. Main builds every path.
-  ipcMain.handle('app:checkForUpdates', () => checkForUpdatesNow());
+  ipcMain.handle('app:checkForUpdates', () => checkForUpdatesNow({ announce: false }));
   ipcMain.handle('app:showLogFile', () => log.file && shell.showItemInFolder(log.file));
   ipcMain.handle('app:openDataFolder', () => shell.openPath(app.getPath('userData')));
   ipcMain.on('menu:shortcuts', (_e, map) => {

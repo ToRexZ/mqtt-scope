@@ -3,6 +3,7 @@
 
 import { el, button, toast, overlayHost } from './ui.js';
 import { iconButton } from './icons.js';
+import { checkedView } from './updateView.js';
 import { ACTIONS, comboFromEvent, conflicts, displayCombo, normalizeOverrides, resolveBindings } from './keys.js';
 
 export const DEFAULT_SETTINGS = {
@@ -33,7 +34,7 @@ export function normalizeSettings(raw) {
 }
 
 // Resolves to the saved settings, or null when cancelled.
-export function openSettings(api, current, { tab = 'general' } = {}) {
+export function openSettings(api, current, { tab = 'general', openUpdatePanel = () => {} } = {}) {
   return new Promise((resolve) => {
     const overlay = el('div', 'modal-overlay');
     const form = el('form', 'modal prompt settings');
@@ -145,14 +146,30 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
     // no menu bar on Linux and Windows). Main knows every path and URL.
     const version = el('span', 'settings-version');
     api.updateState().then((u) => u?.current && (version.textContent = `MQTT Scope ${u.current}`), () => {});
-    const link = (label, title, run) => button(label, title, run, 'btn link');
+    const link = (label, title, run) => button(label, title, run, 'btn small');
+    // Toasts show above this dialog, so it stays open with its edits. A newer
+    // version opens the update panel, which this modal would cover: only when
+    // nothing here is unsaved (then the dialog closes first).
+    const checkNow = async () => {
+      let result;
+      try {
+        result = await api.checkForUpdates();
+      } catch (err) {
+        return toast(`Couldn't check for updates: ${err.message}`, 'error');
+      }
+      const state = await api.updateState().catch(() => null);
+      const reaction = checkedView(result, state);
+      if (reaction?.toast) toast(reaction.toast, reaction.kind);
+      else if (reaction?.open) {
+        if (!overlay.isConnected || !unsaved()) {
+          done(null);
+          openUpdatePanel(state);
+        } else toast(`${state?.latest ? `MQTT Scope ${state.latest.version}` : 'A newer MQTT Scope'} is available — the Update button is in the top bar`);
+      }
+    };
     const footerLinks = el('div', 'settings-links');
     footerLinks.append(
-      // The answer is a toast or the update panel, both hidden behind this dialog.
-      link('Check for updates', 'Ask GitHub for the latest version now', () => {
-        done(null);
-        api.checkForUpdates();
-      }),
+      link('Check for updates', 'Ask GitHub for the latest version now', checkNow),
       link('Show log file', 'Show main.log in the file manager', () => api.showLogFile()),
       link('Open data folder', 'Open the folder with profiles, settings and logs', () => api.openDataFolder()),
     );
@@ -165,11 +182,15 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
       overlay.remove();
       resolve(v);
     };
+    const formValues = () => {
+      const raw = Object.fromEntries(Object.entries(fields).map(([k, i]) => [k, i.value]));
+      return normalizeSettings({ ...raw, autoExpand: autoExpand.input.checked, checkForUpdates: checkUpdates.input.checked, keys: bindings });
+    };
+    const unsaved = () => JSON.stringify(formValues()) !== JSON.stringify(normalizeSettings(current));
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
       if (conflicts(bindings).size) return showTab('keyboard');
-      const raw = Object.fromEntries(Object.entries(fields).map(([k, i]) => [k, i.value]));
-      const next = normalizeSettings({ ...raw, autoExpand: autoExpand.input.checked, checkForUpdates: checkUpdates.input.checked, keys: bindings });
+      const next = formValues();
       try {
         await api.storeSet('settings', next);
       } catch (err) {

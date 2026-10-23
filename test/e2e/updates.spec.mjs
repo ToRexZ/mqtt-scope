@@ -26,13 +26,10 @@ const tick = (app) => app.evaluate(() => globalThis.__mqttscopeUpdater.tick());
 async function recordUpdates(page) {
   await page.evaluate(() => {
     window.__updateStates = [];
-    window.__updateChecks = [];
     window.api.onUpdateState((s) => window.__updateStates.push(s));
-    window.api.onUpdateChecked((r) => window.__updateChecks.push(r));
   });
 }
 const broadcasts = (page) => page.evaluate(() => window.__updateStates);
-const checkResults = (page) => page.evaluate(() => window.__updateChecks);
 
 // Records every net.fetch call main makes from now on. `block` fails them
 // instead, so a test that expects none cannot reach the internet if it is wrong.
@@ -62,9 +59,13 @@ async function clickMenu(app, menuLabel, itemLabel) {
 // modal and starts open in a window without a connection.)
 async function checkForUpdates(page) {
   if (await page.locator('.conn-dialog .modal-close').count()) await closeConnectionDialog(page);
-  await page.locator('#btn-settings').click();
+  if (!(await page.locator('.modal.settings').count())) await page.locator('#btn-settings').click();
   await page.locator('.modal.settings .settings-footer').getByRole('button', { name: 'Check for updates' }).click();
 }
+const cancelSettings = async (page) => {
+  await page.locator('.modal.settings').getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.locator('.modal.settings')).toHaveCount(0);
+};
 
 async function newWindow(app) {
   const opened = app.waitForEvent('window');
@@ -84,7 +85,7 @@ async function expectNoContact(env, extraEnv) {
 
   // The check from Settings says so instead of asking; re-enabling the setting asks nothing.
   await checkForUpdates(page);
-  await expect.poll(() => checkResults(page)).toEqual([{ result: 'disabled' }]);
+  await expect(toast(page, 'info').filter({ hasText: 'Update checks are off in development builds' })).toBeVisible();
   await page.evaluate(() => window.api.storeSet('settings', { checkForUpdates: false }));
   await page.evaluate(() => window.api.storeSet('settings', { checkForUpdates: true }));
   expect(await fetches()).toEqual([]);
@@ -160,16 +161,16 @@ test('Check for updates reports latest and offline', async ({ env }) => {
   await recordUpdates(page);
 
   await checkForUpdates(page);
-  await expect.poll(() => checkResults(page)).toEqual([{ result: 'latest' }]);
+  await expect(toast(page, 'info').filter({ hasText: `You're on the latest version (${VERSION})` })).toBeVisible();
 
   server.setRelease(null); // the server answers 503
   await checkForUpdates(page);
-  await expect.poll(async () => (await checkResults(page)).at(-1)).toEqual({ result: 'error', error: 'HTTP 503' });
+  await expect(toast(page, 'error').filter({ hasText: "Couldn't check for updates: HTTP 503" })).toBeVisible();
+  await expect(toast(page, 'error')).toHaveCount(0); // faded away
 
   await server.close(); // nothing listens any more
   await checkForUpdates(page);
-  await expect.poll(async () => (await checkResults(page)).length).toBe(3);
-  expect((await checkResults(page)).at(-1)).toEqual({ result: 'error', error: expect.stringMatching(/\S/) });
+  await expect(toast(page, 'error').filter({ hasText: /Couldn't check for updates: \S/ })).toBeVisible();
 
   // Failed checks change nothing.
   expect(await broadcasts(page)).toEqual([]);
@@ -924,6 +925,7 @@ test('turning the setting off stops automatic checks; the Settings button still 
   expect(server.requests()).toBe(2);
 
   // The dialog shows the saved choice; saving other settings keeps it.
+  await cancelSettings(page);
   await page.locator('#btn-settings').click();
   await expect(box).not.toBeChecked();
   await dialog.locator('[name="historyLimit"]').fill('50');
@@ -1037,5 +1039,82 @@ test('in a narrow window the button and panel stay inside the window', async ({ 
   await page.setViewportSize({ width: 420, height: 400 });
   await expect.poll(() => inside(panel(page), 420, 400)).toBe(true);
   for (const b of await panelButtons(page).all()) expect(await inside(b, 420, 400)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+// ---- Settings → Check for updates keeps the dialog (and its edits) open
+
+const settingsDialog = (page) => page.locator('.modal.settings');
+const checkButton = (page) => settingsDialog(page).getByRole('button', { name: 'Check for updates' });
+// The toast is on top of the modal, not hidden behind it.
+const onTop = (locator) =>
+  locator.evaluate((t) => {
+    const r = t.getBoundingClientRect();
+    return t.contains(document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2));
+  });
+
+test('Settings → Check for updates: latest and errors are toasts above the open dialog, edits kept', async ({ env }) => {
+  const server = await env.releaseServer(release(VERSION));
+  const { page, errors } = await env.launch({ env: overrides(server) });
+  await expect.poll(() => server.requests()).toBe(1);
+  await closeConnectionDialog(page);
+  await page.locator('#btn-settings').click();
+  await settingsDialog(page).locator('[name="historyLimit"]').fill('7');
+
+  await checkButton(page).click();
+  const latest = toast(page, 'info').filter({ hasText: `You're on the latest version (${VERSION})` });
+  await expect(latest).toBeVisible();
+  expect(await onTop(latest)).toBe(true);
+  await expect(settingsDialog(page)).toBeVisible();
+  await expect(settingsDialog(page).locator('[name="historyLimit"]')).toHaveValue('7');
+
+  server.setRelease(null); // 503
+  await checkButton(page).click();
+  const failed = toast(page, 'error').filter({ hasText: "Couldn't check for updates: HTTP 503" });
+  await expect(failed).toBeVisible();
+  expect(await onTop(failed)).toBe(true);
+  await expect(settingsDialog(page).locator('[name="historyLimit"]')).toHaveValue('7');
+  expect(errors).toEqual([]);
+});
+
+test('Settings → Check for updates: a newer version closes an unchanged dialog and opens the panel', async ({ env }) => {
+  const server = await env.releaseServer(release(VERSION));
+  const { page, errors } = await env.launch({ env: overrides(server) });
+  await expect.poll(() => server.requests()).toBe(1);
+  await closeConnectionDialog(page);
+  await expect(updateButton(page)).toBeHidden();
+  server.setRelease(release('9.9.9', 'Fresh notes'));
+
+  await page.locator('#btn-settings').click();
+  await checkButton(page).click();
+  await expect(settingsDialog(page)).toHaveCount(0);
+  await expect(page.getByRole('dialog', { name: 'MQTT Scope 9.9.9' })).toBeVisible();
+  await expect(notes(page)).toHaveText('Fresh notes');
+  expect(errors).toEqual([]);
+});
+
+test('Settings → Check for updates: with unsaved edits a newer version is a toast and the dialog stays', async ({ env }) => {
+  const server = await env.releaseServer(release(VERSION));
+  const { page, errors } = await env.launch({ env: overrides(server) });
+  await expect.poll(() => server.requests()).toBe(1);
+  await closeConnectionDialog(page);
+  server.setRelease(release('9.9.9'));
+
+  await page.locator('#btn-settings').click();
+  await settingsDialog(page).locator('[name="historyLimit"]').fill('7');
+  await checkButton(page).click();
+  const found = toast(page, 'info').filter({ hasText: 'MQTT Scope 9.9.9 is available — the Update button is in the top bar' });
+  await expect(found).toBeVisible();
+  expect(await onTop(found)).toBe(true);
+  await expect(settingsDialog(page)).toBeVisible();
+  await expect(settingsDialog(page).locator('[name="historyLimit"]')).toHaveValue('7');
+  await expect(panel(page)).toBeHidden();
+  await expect(updateButton(page)).toHaveText('↑ Update 9.9.9');
+
+  // Back to the saved value: no unsaved edit, so the panel opens.
+  await settingsDialog(page).locator('[name="historyLimit"]').fill('100');
+  await checkButton(page).click();
+  await expect(settingsDialog(page)).toHaveCount(0);
+  await expect(panel(page)).toBeVisible();
   expect(errors).toEqual([]);
 });

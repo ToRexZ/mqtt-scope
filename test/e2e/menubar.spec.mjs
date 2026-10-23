@@ -113,8 +113,8 @@ test('Settings footer: Check for updates, Show log file and Open data folder', a
   await footer.getByRole('button', { name: 'Show log file' }).click();
   await expect.poll(async () => (await calls()).at(-1)).toEqual(['showItemInFolder', path.join(userData, 'logs', 'main.log')]);
 
-  // Check for updates answers with a toast; this development build does not check.
+  // Check for updates answers with a toast above the dialog; this development build does not check.
   await footer.getByRole('button', { name: 'Check for updates' }).click();
   await expect(toast(page, 'info').filter({ hasText: 'Update checks are off in development builds' })).toBeVisible();
-  await expect(dlg).toHaveCount(0); // the dialog closes so the answer is not hidden behind it
+  await expect(dlg).toBeVisible(); // stays open, with its edits
 });
