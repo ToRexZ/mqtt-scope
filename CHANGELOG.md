@@ -6,12 +6,17 @@ All notable changes to MQTT Scope. The format follows
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-23
+
 ### Changed
 
 - Settings shows the MQTT Scope version at the bottom.
 - No menu bar on Linux and Windows: Check for updates, Show log file and Open
   data folder are at the bottom of Settings, next to the version. Keyboard
   shortcuts work as before.
+- Settings → Keyboard also lists the shortcuts that can't be changed (zoom, full
+  screen, developer tools, quit).
+- Settings fits small windows: the middle scrolls, and Save stays in view.
 
 ### Removed
 
@@ -150,7 +155,8 @@ First release.
 - Several brokers at once (one window each); installers for Linux, Windows and
   macOS.
 
-[Unreleased]: https://github.com/ToRexZ/mqtt-scope/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/ToRexZ/mqtt-scope/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/ToRexZ/mqtt-scope/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/ToRexZ/mqtt-scope/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/ToRexZ/mqtt-scope/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/ToRexZ/mqtt-scope/compare/v0.1.0...v0.2.0
