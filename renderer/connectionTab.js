@@ -2,14 +2,16 @@
 // publisher, toolbar and status bar. The window shell (app.js) makes one per
 // tab. Only the active tab's DOM is in the document, so the element ids of
 // the tab template stay unique. A hidden tab keeps its connection and keeps
-// recording (tree, history, plot data) but draws nothing.
+// recording (tree, history, plot data) but draws nothing. Until it first
+// connects, a tab is a "picker": it shows the window's connection dialog
+// (mounted by the shell) instead of all that.
 
 import { TopicTree } from './topicTree.js';
 import { TreeView } from './treeView.js';
 import { MessageViewer } from './viewer.js';
 import { PlotsPanel } from './plots.js';
 import { Publisher } from './publisher.js';
-import { showMenu, splitter, toast } from './ui.js';
+import { el, showMenu, splitter, toast } from './ui.js';
 import { decode, extractNumber, hexDump } from './payload.js';
 import { hasNumbers } from './fields.js';
 import { openSubscriptions } from './subscriptionsDialog.js';
@@ -45,10 +47,10 @@ function stripMessage(m) {
 }
 
 export class ConnectionTab {
-  // shell: getBinding(id), showConnections(), connectionsOpen(),
-  //        setSubscriptions(profileId, subs), savedProfile(profile) — its
-  //        saved version, savedMessagesChanged(tab) — this tab wrote the saved
-  //        or recent messages, onChange(tab) — the label, state or data changed
+  // shell: getBinding(id), setSubscriptions(profileId, subs),
+  //        savedProfile(profile) — its saved version,
+  //        savedMessagesChanged(tab) — this tab wrote the saved or recent
+  //        messages, onChange(tab) — the label, state, mode or data changed
   constructor({ api, connId, settings, shell }) {
     this.api = api;
     this.connId = connId; // also the tab's id
@@ -56,6 +58,7 @@ export class ConnectionTab {
     this.tabApi = bindConnection(api, connId, { name: () => this.profile?.name || '' });
     this.profile = null; // snapshot of the profile last connected
     this.status = { state: 'disconnected' };
+    this.mode = 'picker'; // 'session' from the first 'connected' on, for good
     this.everConnected = false;
     this.canReconnect = false; // disconnected by the user after connecting
     this.active = false;
@@ -77,6 +80,7 @@ export class ConnectionTab {
     this.savedScroll = [];
     this.applySettings(settings);
 
+    this.pickerRoot = el('div', 'tab-root tab-picker'); // the shell mounts the dialog here
     this.root = document.importNode(document.querySelector('#tab-template').content, true).firstElementChild;
     this.els = {
       layout: this.$('#layout'),
@@ -277,17 +281,27 @@ export class ConnectionTab {
 
   // ---------------------------------------------------------------- showing
 
+  // What the tab shows: the place of the connection dialog, or the session.
+  get content() {
+    return this.mode === 'session' ? this.root : this.pickerRoot;
+  }
+
   activate(host) {
-    host.append(this.root);
+    host.append(this.content);
     this.active = true;
-    for (const [el, top, left] of this.savedScroll) {
-      el.scrollTop = top;
-      el.scrollLeft = left;
+    if (this.mode === 'session') this.drawSession();
+  }
+
+  // The session as the tab left it (scroll positions, focus), with everything
+  // that arrived while it was hidden.
+  drawSession() {
+    for (const [scroller, top, left] of this.savedScroll) {
+      scroller.scrollTop = top;
+      scroller.scrollLeft = left;
     }
     this.savedScroll = [];
     this.viewer.reloadPrefs();
     this.plots.setVisible(this.rightPanel === 'plots');
-    // The first frame shows everything that arrived while hidden.
     this.treeDirty = true;
     this.render();
     if (this.focused?.isConnected) this.focused.focus({ preventScroll: true });
@@ -295,15 +309,24 @@ export class ConnectionTab {
   }
 
   deactivate() {
-    this.savedScroll = [...this.root.querySelectorAll(SCROLLERS)].filter((el) => el.scrollTop || el.scrollLeft).map((el) => [el, el.scrollTop, el.scrollLeft]);
+    this.savedScroll = [...this.root.querySelectorAll(SCROLLERS)].filter((s) => s.scrollTop || s.scrollLeft).map((s) => [s, s.scrollTop, s.scrollLeft]);
     this.focused = this.root.contains(document.activeElement) ? document.activeElement : null;
     this.active = false;
     this.plots.setVisible(false);
-    this.root.remove();
+    this.content.remove();
+  }
+
+  // The first connect: the session replaces the dialog, for good.
+  becomeSession() {
+    this.mode = 'session';
+    if (!this.active) return;
+    this.pickerRoot.replaceWith(this.root);
+    this.drawSession();
   }
 
   // One frame of the active tab: the tree, the inspector and the stats.
   render() {
+    if (this.mode !== 'session') return;
     if (this.treeDirty) {
       this.treeDirty = false;
       this.treeView.refresh();
@@ -344,7 +367,8 @@ export class ConnectionTab {
     if (brokerKey(this.profile) !== brokerKey(profile)) this.clearTree();
     this.profile = { ...profile };
     this.shell.onChange(this);
-    if (!res.ok) toast(res.error, 'error');
+    // A picker's dialog already shows it on its status line.
+    if (!res.ok && !(this.mode === 'picker' && this.status.error === res.error)) toast(res.error, 'error');
     return res;
   }
 
@@ -376,13 +400,14 @@ export class ConnectionTab {
     else if (s.state === 'disconnected') this.treeView.setEmptyText(NOT_CONNECTED);
     // Retries repeat the same error every few seconds; show each distinct one
     // once. A hidden tab shows none (its dot turns red), so a retry toasts it
-    // once the tab is shown.
-    if (s.state === 'error' && this.active && !this.shell.connectionsOpen() && s.error !== this.lastErrorToast) {
-      toast(s.error, 'error');
+    // once the tab is shown. A picker shows it in its dialog instead.
+    if (s.state === 'error' && this.active && s.error !== this.lastErrorToast) {
+      if (this.mode === 'session') toast(s.error, 'error');
       this.lastErrorToast = s.error;
     }
     if (s.state === 'connected') this.lastErrorToast = null;
-    if (this.active) this.treeView.refresh();
+    if (s.state === 'connected' && this.mode === 'picker') this.becomeSession();
+    else if (this.active && this.mode === 'session') this.treeView.refresh();
     else this.treeDirty = true;
     this.shell.onChange(this);
   }
@@ -591,6 +616,7 @@ export class ConnectionTab {
     this.plots.dispose();
     this.publisher.dispose();
     this.root.remove();
+    this.pickerRoot.remove();
     this.active = false;
   }
 }

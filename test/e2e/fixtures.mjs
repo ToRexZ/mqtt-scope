@@ -270,3 +270,19 @@ export async function recordStatus(page) {
   });
   return () => page.evaluate(() => window.__statusLog.slice());
 }
+
+// Records every text the connection dialog's status line shows (null while no
+// dialog shows), including short-lived ones.
+export async function recordDialogStatus(page) {
+  await page.evaluate(() => {
+    window.__dialogStatus = [];
+    let last;
+    const read = () => {
+      const t = document.querySelector('.conn-dialog .conn-status-line')?.textContent ?? null;
+      if (t !== last) window.__dialogStatus.push((last = t));
+    };
+    read();
+    new MutationObserver(read).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  return () => page.evaluate(() => window.__dialogStatus.slice());
+}

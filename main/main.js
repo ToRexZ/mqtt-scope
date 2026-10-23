@@ -452,7 +452,7 @@ function buildMenu() {
         { label: 'Reopen Closed Tab', click: toRenderer('reopenTab'), ...keys('reopenTab') },
         ...(isMac ? [{ label: 'Close Window', accelerator: 'Cmd+Shift+W', registerAccelerator: false, click: () => BrowserWindow.getFocusedWindow()?.close() }] : []),
         { type: 'separator' },
-        { label: 'Connections…', click: toRenderer('connections'), ...keys('connections') },
+        { label: 'New Connection Tab…', click: toRenderer('connections'), ...keys('connections') },
         { label: 'Subscriptions…', click: toRenderer('subscriptions'), ...keys('subscriptions') },
         { label: 'Settings…', click: toRenderer('settings'), ...keys('settings') },
         { type: 'separator' },

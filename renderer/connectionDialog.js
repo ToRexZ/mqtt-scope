@@ -1,19 +1,26 @@
 // Connection manager: a list of saved broker profiles and an editor for the
-// selected one. Edits are saved automatically.
+// selected one. Edits are saved automatically. One per window: the shell
+// draws it in the active New connection tab (mount), and it shows that tab's
+// connection status.
 
-import { el, button, toast, overlayHost } from './ui.js';
+import { el, button, toast, menuOpen } from './ui.js';
 import { comboFromEvent, isTypingTarget } from './keys.js';
 import { DEFAULT_PORTS, blankProfile, parseSubscriptions, formatSubscriptions, newId } from './profiles.js';
 
 
 export class ConnectionDialog {
-  // opts: api, onConnect(profile)
+  // opts: api, getBinding(id)
   constructor(opts) {
     this.opts = opts;
     this.api = opts.api;
     this.profiles = [];
     this.selectedId = null;
     this.status = null;
+    this.host = null; // the tab element it is drawn in
+    this.mounted = null; // mount()'s options: closable, onConnect(profile), onCancel()
+    this.tabProfileId = undefined; // that tab's profile when last mounted
+    this.box = el('div', 'conn-dialog');
+    this.box.addEventListener('keydown', (e) => this.handleKey(e));
   }
 
   async load() {
@@ -28,7 +35,7 @@ export class ConnectionDialog {
     if (this.dirty) return;
     this.profiles = await this.api.listProfiles();
     if (!this.profiles.some((p) => p.id === this.selectedId)) this.selectedId = this.profiles[0]?.id ?? null;
-    if (this.overlay) this.render();
+    if (this.host) this.render(this.box.contains(document.activeElement) ? 'list' : null);
   }
 
   setSubscriptions(id, subs) {
@@ -61,23 +68,56 @@ export class ConnectionDialog {
     }
   }
 
-  isOpen() {
-    return !!this.overlay;
+  isMounted() {
+    return !!this.host;
   }
 
-  open() {
-    if (this.overlay) return;
-    this.overlay = el('div', 'modal-overlay');
-    this.box = el('div', 'modal conn-dialog');
-    this.overlay.append(this.box);
-    overlayHost().append(this.overlay);
-    this.overlay.addEventListener('keydown', (e) => this.handleKey(e));
-    this.render();
+  // Draws the dialog in `host`, the content of a New connection tab; mounting
+  // in the same tab again takes the new options. The tab's profile is
+  // selected when the dialog is drawn in it and when the tab gets another one
+  // (Connect, or a tab reopened for its profile), not while the user browses
+  // the list. opts: closable (× and Esc call onCancel), onConnect(profile),
+  // onCancel(), profileId, focus (false leaves the focus where it is, e.g.
+  // in a dialog over the window).
+  mount(host, { profileId = null, focus = true, ...opts }) {
+    const moved = this.host !== host;
+    if (moved) {
+      this.unmount();
+      this.host = host;
+      host.append(this.box);
+    }
+    this.mounted = opts;
+    const select = profileId !== this.tabProfileId && profileId !== this.selectedId && this.profiles.some((p) => p.id === profileId);
+    this.tabProfileId = profileId;
+    if (select) this.selectedId = profileId;
+    if (moved) this.render(focus ? 'list' : null);
+    else if (select) this.render(this.box.contains(document.activeElement) ? 'list' : null);
+    else this.renderClose();
   }
 
-  // Enter (rebindable) connects; arrow keys move through the list.
+  // Its tab was hidden, closed or connected.
+  unmount() {
+    if (!this.host) return;
+    this.flush();
+    this.box.remove();
+    this.host = null;
+    this.mounted = null;
+    this.tabProfileId = undefined;
+  }
+
+  // Mod+K in a New connection tab.
+  focus() {
+    this.box.querySelector('.conn-item.active')?.focus();
+  }
+
+  // Enter (rebindable) connects; arrow keys move through the list; Esc
+  // cancels, unless the tab is the window's only one.
   handleKey(e) {
-    if (e.key === 'Escape') return this.close();
+    if (e.key === 'Escape') {
+      if (!this.mounted?.closable || menuOpen()) return; // an open menu takes Esc first
+      e.stopPropagation(); // the dialog's Escape, not the window's
+      return this.mounted.onCancel();
+    }
     const t = e.target;
     const connectKey = this.opts.getBinding?.('connectSelected') ?? 'Enter';
     if (connectKey && comboFromEvent(e) === connectKey) {
@@ -98,16 +138,9 @@ export class ConnectionDialog {
     }
   }
 
-  close() {
-    this.flush();
-    this.overlay?.remove();
-    this.overlay = null;
-  }
-
+  // The connection status of the tab it is drawn in.
   onStatus(status) {
     this.status = status;
-    if (!this.overlay) return;
-    if (status.state === 'connected') return this.close();
     this.renderStatus();
   }
 
@@ -121,7 +154,7 @@ export class ConnectionDialog {
   }
 
   // focus: 'list' puts focus on the selected connection (so Enter connects),
-  // 'name' on the name field (for a new connection).
+  // 'name' on the name field (for a new connection), null leaves it.
   render(focus = 'list') {
     this.box.textContent = '';
     const side = el('div', 'conn-list');
@@ -154,10 +187,17 @@ export class ConnectionDialog {
     const p = this.selected;
     if (p) this.renderForm(form, p);
 
-    const close = button('×', 'Close (Esc)', () => this.close(), 'btn icon modal-close');
-    this.box.append(side, form, close);
+    this.box.append(side, form);
+    this.renderClose();
     if (focus === 'name') form.querySelector('input[name="name"]')?.select();
-    else side.querySelector('.conn-item.active')?.focus();
+    else if (focus === 'list') side.querySelector('.conn-item.active')?.focus();
+  }
+
+  // × only where the tab may be cancelled.
+  renderClose() {
+    const shown = this.box.querySelector(':scope > .modal-close');
+    if (!this.mounted?.closable) return shown?.remove();
+    if (!shown) this.box.append(button('×', 'Close this tab (Esc)', () => this.mounted?.onCancel(), 'btn icon modal-close'));
   }
 
   renderForm(form, p) {
@@ -332,11 +372,14 @@ export class ConnectionDialog {
     this.render();
   }
 
+  // Connects the tab it is drawn in (taken now: the tab may change while the
+  // edits are saved).
   async connect() {
     const p = this.selected;
-    if (!p) return;
+    const target = this.mounted?.onConnect;
+    if (!p || !target) return;
     if (!String(p.host || '').trim()) return toast('Host is required', 'error');
     await this.flush();
-    this.opts.onConnect(p);
+    target(p);
   }
 }

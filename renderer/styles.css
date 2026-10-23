@@ -1995,13 +1995,27 @@ body.moving-plot * {
   font-size: 11.5px;
 }
 
-/* connection dialog */
+/* connection dialog: the content of a New connection tab, centred in it */
+.tab-picker {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
 .conn-dialog {
-  width: min(980px, 94vw);
-  height: min(680px, 90vh);
+  position: relative;
+  width: min(980px, 100%);
+  height: 680px;
+  max-height: 100%;
   display: grid;
   grid-template-columns: 250px 1fr;
   overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.conn-dialog h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
 }
 .conn-list {
   border-right: 1px solid var(--border);

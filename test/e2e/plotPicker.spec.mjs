@@ -154,7 +154,7 @@ test('picker: scrollable topic list, message structure, multi-select with aliase
   // Aliases persist across restarts.
   await env.closeApp({ app });
   const again = await env.launch({ userData });
-  await again.page.locator('.conn-dialog .modal-close').click(); // opens on start
+  await connect(again.page); // the plots show in a connected tab
   await again.page.locator('.right-tabs .tab[data-tab="plots"]').click();
   await expect(legendLabels(again.page)).toHaveText(['Battery %', 'Voltage', 'fleet/robot-007/temp']);
   expect(errors).toEqual([]);

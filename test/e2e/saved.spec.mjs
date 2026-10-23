@@ -142,7 +142,7 @@ test('saved messages: save, send, order, filter, rename, delete, recent, persist
   await env.closeApp(first);
 
   const second = await env.launch({ userData });
-  await second.page.locator('.conn-dialog .modal-close').click();
+  await connect(second.page); // the publisher shows in a connected tab
   const pub2 = publisher(second.page);
   await expect(pub2.names).toHaveText(['Alpha msg', 'From recent', 'Beta msg']);
   await expect(pub2.item('Beta msg').locator('.lib-preview')).toHaveText('{"b": 2}');

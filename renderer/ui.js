@@ -28,6 +28,8 @@ export function closeMenu() {
   openMenu = null;
 }
 
+export const menuOpen = () => !!openMenu;
+
 // items: [{ label, action, disabled }] or 'separator'
 export function showMenu(x, y, items) {
   closeMenu();

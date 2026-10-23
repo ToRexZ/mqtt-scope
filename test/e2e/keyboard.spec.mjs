@@ -84,7 +84,7 @@ test('shortcuts can be rebound in Settings → Keyboard; conflicts block saving;
     .poll(() =>
       app.evaluate(({ Menu }) => {
         const file = Menu.getApplicationMenu().items.find((i) => i.label === 'File');
-        return file.submenu.items.find((i) => i.label === 'Connections…').accelerator;
+        return file.submenu.items.find((i) => i.label === 'New Connection Tab…').accelerator;
       }),
     )
     .toBe('CmdOrCtrl+J');
@@ -168,7 +168,6 @@ test('tab shortcuts: new, next, previous, go to, last, close, reopen', async ({ 
   await page.keyboard.press(`${MOD}+T`); // a new tab and its dialog
   await expect(tabNames(page)).toHaveCount(3);
   await expect(page.locator('.conn-dialog')).toHaveCount(1);
-  await page.keyboard.press('Escape');
   await expect(activeTabName(page)).toHaveText('New connection');
 
   await page.keyboard.press('Control+Tab');
@@ -202,13 +201,12 @@ test('tab shortcuts: new, next, previous, go to, last, close, reopen', async ({ 
 });
 
 test('tab shortcuts work while typing', async ({ env }) => {
-  const broker = await env.broker();
-  const userData = makeUserData({ profiles: [profile(broker.port, { id: 'a', name: 'Broker A' })] });
+  const a = await env.broker();
+  const b = await env.broker();
+  const userData = makeUserData({ profiles: [profile(a.port, { id: 'a', name: 'Broker A' }), profile(b.port, { id: 'b', name: 'Broker B' })] });
   const { page, errors } = await env.launch({ userData });
   await connect(page);
-  await page.keyboard.press(`${MOD}+T`);
-  await page.keyboard.press('Escape');
-  await expect(activeTabName(page)).toHaveText('New connection');
+  await openTabTo(page, 'Broker B');
 
   const payload = page.locator('.publisher .payload-editor');
   await payload.fill('abc');
@@ -225,8 +223,22 @@ test('tab shortcuts work while typing', async ({ env }) => {
   await filter.press(`${MOD}+1`);
   await expect(activeTabName(page)).toHaveText('Broker A');
   await page.keyboard.press(`${MOD}+2`);
-  await expect(activeTabName(page)).toHaveText('New connection');
+  await expect(activeTabName(page)).toHaveText('Broker B');
   await expect(filter).toHaveValue('xyz'); // typed text untouched
+
+  // In a New connection tab's dialog too; its fields keep their plain keys.
+  await page.keyboard.press(`${MOD}+T`);
+  const name = page.locator('.conn-dialog [name="name"]');
+  await name.fill('');
+  await name.pressSequentially('Typed');
+  await name.press('Control+Tab');
+  await expect(activeTabName(page)).toHaveText('Broker A');
+  await page.keyboard.press('Control+Shift+Tab');
+  await expect(activeTabName(page)).toHaveText('New connection');
+  await expect(name).toHaveValue('Typed');
+  await name.focus();
+  await name.press('Space'); // a shortcut elsewhere (hold)
+  await expect(name).toHaveValue('Typed ');
   expect(errors).toEqual([]);
 });
 

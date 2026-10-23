@@ -2,7 +2,8 @@
 // shares (settings, shortcuts, the connection dialog, the update button, the
 // tab strip), routes each broker event to the tab of its connection and draws
 // the active tab. Each tab (connectionTab.js) is one connection with its own
-// tree, inspector, plots and publisher.
+// tree, inspector, plots and publisher; until it connects, the connection
+// dialog is drawn in it.
 
 import { ConnectionTab } from './connectionTab.js';
 import { ConnectionDialog } from './connectionDialog.js';
@@ -37,20 +38,15 @@ function applySettings(next) {
   api.setMenuShortcuts?.(Object.fromEntries(ACTIONS.map((a) => [a.id, toAccelerator(bindings[a.id])])));
 }
 
-// The connection dialog connects the active tab.
-const connections = new ConnectionDialog({
-  api,
-  getBinding: (id) => bindings[id],
-  onConnect: (profile) => activeTab()?.connect(profile),
-});
+// The connection dialog, drawn in the active tab while that tab is a picker
+// (see placeDialog).
+const connections = new ConnectionDialog({ api, getBinding: (id) => bindings[id] });
 
 // ------------------------------------------------------------------ tabs
 
 // What a tab may ask of the window.
 const shell = {
   getBinding: (id) => bindings[id],
-  showConnections: () => connections.open(),
-  connectionsOpen: () => connections.isOpen(),
   setSubscriptions: (profileId, subs) => connections.setSubscriptions(profileId, subs),
   savedProfile: (profile) => connections.profiles.find((p) => p.id === profile.id) || profile,
   savedMessagesChanged: (tab) => savedMessagesChanged(tab),
@@ -71,8 +67,7 @@ const strip = new TabStrip($('.topbar'), {
 });
 let opening = false;
 
-// Until the dialog is drawn inside the tab, it opens over the window and
-// connects the new tab; cancelling leaves a "New connection" tab.
+// +, Mod+T and Mod+K: a New connection tab, whose content is the dialog.
 async function newTab() {
   if (opening) return; // a double-click would make two tabs
   opening = true;
@@ -81,7 +76,6 @@ async function newTab() {
   } finally {
     opening = false;
   }
-  connections.open();
 }
 
 // A tab gets its own connection in main; its id is the tab's id. A tab to
@@ -102,8 +96,8 @@ async function openTab({ profile = null, connect = false, activate: show = true 
 }
 
 // Closes the tab and its connection, after asking when its plots hold
-// recorded data. The window always keeps a tab: closing the last one opens a
-// fresh one.
+// recorded data (a picker never has any). The window always keeps a tab:
+// closing the last one opens a fresh one.
 async function closeTab(id, { confirmed = false } = {}) {
   const tab = tabOf(id);
   if (!tab) return;
@@ -124,10 +118,7 @@ async function closeTab(id, { confirmed = false } = {}) {
   if (order.activeId) activate(order.activeId); // draws it, unless it already is
   refresh();
   await Promise.allSettled([saved, api.closeConnection(id)]);
-  if (!tabs.size) {
-    await openTab();
-    if (!updates.installing()) connections.open();
-  }
+  if (!tabs.size) await openTab();
 }
 
 // Closes several tabs with one question when any of their plots holds data.
@@ -190,12 +181,28 @@ function activate(id) {
 function refresh() {
   const current = activeTab();
   strip.render(stripTabs().map((t) => ({ id: t.connId, label: t.label, state: dotState(t.status, t.everConnected), active: t === current })));
-  if (!current) return;
-  document.title = `MQTT Scope — ${current.label}`;
-  if (current.status !== dialogStatus) {
-    dialogStatus = current.status;
-    connections.onStatus(current.status);
+  if (current) {
+    document.title = `MQTT Scope — ${current.label}`;
+    if (current.status !== dialogStatus) {
+      dialogStatus = current.status;
+      connections.onStatus(current.status);
+    }
   }
+  placeDialog(current);
+}
+
+// The dialog is drawn in the active tab while it is a picker; Connect
+// connects that tab, Cancel closes it, except the window's only tab. It takes
+// the focus unless a dialog shows over the window (the Installing dialog).
+function placeDialog(tab) {
+  if (tab?.mode !== 'picker' || !tab.active) return connections.unmount();
+  connections.mount(tab.pickerRoot, {
+    closable: tabs.size > 1,
+    profileId: tab.profile?.id,
+    focus: !document.querySelector('.modal-overlay'),
+    onConnect: (profile) => tab.connect(profile),
+    onCancel: () => closeTab(tab.connId),
+  });
 }
 
 // Saved and recent messages are shared by all tabs (and windows). Each change
@@ -268,8 +275,9 @@ async function showSettings(page) {
 // The others act on the active tab (ConnectionTab.handlers).
 const goTo = (id) => id && activate(id);
 const WINDOW_ACTIONS = {
-  // A connected tab must not be repointed at another broker.
-  connections: () => newTab(),
+  // A tab that connected belongs to its profile: another broker gets a new
+  // tab. A picker already shows the dialog.
+  connections: () => (activeTab()?.mode === 'picker' ? connections.focus() : newTab()),
   newTab: () => newTab(),
   closeTab: () => closeTab(order.activeId),
   reopenTab: () => reopenClosed(),
@@ -283,8 +291,11 @@ const WINDOW_ACTIONS = {
   settings: () => showSettings(),
   keyboardSettings: () => showSettings('keyboard'),
 };
-const handlerFor = (action) => WINDOW_ACTIONS[action] || activeTab()?.handlers[action];
+// A picker shows none of what the tab's own actions act on.
+const handlerFor = (action) => WINDOW_ACTIONS[action] || (activeTab()?.mode === 'session' ? activeTab().handlers[action] : null);
 
+// The connection dialog is part of its tab, not a dialog over the window, so
+// shortcuts work in it (its fields keep their plain keys).
 const isPointerFocused = pointerFocus(document);
 document.addEventListener('keydown', (e) => {
   if (document.querySelector('.modal-overlay')) return; // dialogs handle their own keys
@@ -344,5 +355,3 @@ window.__mqttscope = {
     activate,
   },
 };
-
-if (activeTab().status.state === 'disconnected' && !updates.installing()) connections.open();

@@ -2,7 +2,7 @@
 // are opened, switched and closed through the test hook's shell here; the
 // tab strip itself is tested in tabs.spec.mjs.
 
-import { test, expect, profile, waitForTopic, selectTopic } from './fixtures.mjs';
+import { test, expect, profile, connect, waitForTopic, selectTopic } from './fixtures.mjs';
 
 const tabCount = (page) => page.evaluate(() => window.__mqttscope.shell.tabs.length);
 const activate = (page, index) => page.evaluate((i) => window.__mqttscope.shell.activate(window.__mqttscope.shell.tabs[i].connId), index);
@@ -87,7 +87,8 @@ test('switching tabs keeps selection, expansion, scroll position and the inspect
   expect(before.tree).toBe(1200);
   expect(before.viewer).toBe(900);
 
-  await openTab(page);
+  const b = await env.broker();
+  await openTab(page, b.port);
   await expect(page.locator('#viewer-host .viewer-topic')).toHaveText('No topic selected');
   await expect(page.locator('#status-selected')).toHaveText('');
   await activate(page, 0);
@@ -210,8 +211,9 @@ test('connecting a tab to a profile open in another tab leaves the tab as it was
 });
 
 test('panel sizes are shared by all tabs', async ({ env }) => {
-  const { page, errors } = await env.launch();
-  await page.locator('.conn-dialog .modal-close').click();
+  const a = await env.broker();
+  const b = await env.broker();
+  const { page, errors } = await env.connected(a);
   const treeWidth = async () => (await box(page, '.tree-pane')).width;
   const pubHeight = async () => (await box(page, '#publisher-host')).height;
 
@@ -222,7 +224,7 @@ test('panel sizes are shared by all tabs', async ({ env }) => {
   await dragBy(page, '#split-right', 0, -60);
   const tall = await pubHeight();
 
-  await openTab(page);
+  await openTab(page, b.port);
   expect(await treeWidth()).toBe(wide);
   expect(await pubHeight()).toBe(tall);
 
@@ -249,9 +251,11 @@ test('each tab has its own publisher topic list', async ({ env }) => {
   expect(errors).toEqual([]);
 });
 
-test('a plot popped out of a tab without a profile is titled by the plot alone', async ({ env }) => {
-  const { app, page, errors } = await env.launch();
-  await page.locator('.conn-dialog .modal-close').click();
+test('a plot popped out of a tab whose profile has no name is titled by the plot alone', async ({ env }) => {
+  const a = await env.broker();
+  const { app, page, errors } = await env.connected(a, { connectNow: false });
+  await page.locator('.conn-dialog [name="name"]').fill(''); // connected unnamed
+  await connect(page);
   await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'hall/temp', null, { alias: 'Temperature' }));
   await page.locator('.right-tabs .tab[data-tab="plots"]').click();
   const opened = app.waitForEvent('window');

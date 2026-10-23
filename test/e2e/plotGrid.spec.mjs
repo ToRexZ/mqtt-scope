@@ -456,7 +456,7 @@ test('plots and layouts saved by an older version open as tabs', async ({ env })
     },
   });
   const { page, errors } = await env.launch({ userData });
-  await page.locator('.conn-dialog .modal-close').click();
+  await connect(page); // the plots show in a connected tab
   await plotsTab(page).click();
   await expect(page.locator('.plot-tabs .plot-tab .plot-tab-name')).toHaveText(['Robot view', 'Robot view (saved)', 'Climate']);
   await expect(page.locator('.plot-card .plot-title')).toHaveText(['Working']);

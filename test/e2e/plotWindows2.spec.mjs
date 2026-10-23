@@ -7,7 +7,8 @@ import { test, expect, makeUserData, profile, connect, waitForTopic, waitForFile
 test('each window keeps its own tab; edits reach the other window without moving it or leaving full screen', async ({ env }) => {
   const broker = await env.broker();
   await broker.publish('robot/state', JSON.stringify({ battery: 80, speed: 1 }), { retain: true });
-  const userData = makeUserData({ profiles: [profile(broker.port)] });
+  // A profile is open in one tab at a time: the second window connects its own.
+  const userData = makeUserData({ profiles: [profile(broker.port), profile(broker.port, { id: 'second', name: 'Second window' })] });
   const { app, page: a } = await env.launch({ userData });
   await connect(a);
   await waitForTopic(a, 'robot/state');
@@ -25,7 +26,8 @@ test('each window keeps its own tab; edits reach the other window without moving
   const b = await opened;
   await b.setViewportSize({ width: 1600, height: 1000 });
   await b.waitForFunction(() => !!window.__mqttscope);
-  await b.locator('.conn-dialog .modal-close').click();
+  await b.locator('.conn-dialog .conn-item', { hasText: 'Second window' }).click();
+  await connect(b); // the plots show in a connected tab
   await b.locator('.right-tabs .tab[data-tab="plots"]').click();
   await expect(b.locator('.plot-tab-name')).toHaveText(['Plots', 'Second']);
 

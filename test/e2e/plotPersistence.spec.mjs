@@ -65,7 +65,7 @@ test('tabs, arrangement, sizes and the settings panel survive a restart', async 
 
   ({ page } = await env.launch({ userData }));
   await page.setViewportSize({ width: 1600, height: 1300 });
-  await page.locator('.conn-dialog .modal-close').click();
+  await connect(page); // the plots show in a connected tab
   await page.locator('.right-tabs .tab[data-tab="plots"]').click();
   await expect(page.locator('.plot-tabs .plot-tab-name')).toHaveText(['Plots', 'Second']);
   await expect(page.locator('.plot-tab.active')).toContainText('Plots');
@@ -97,7 +97,7 @@ test('plots saved by the released 0.1.0 after an upgrade are kept as an extra ta
   const { writeFileSync } = await import('node:fs');
   writeFileSync(path.join(userData, 'plotTabs.json'), JSON.stringify({ version: 2, tabs, activeTabId: 't1', legacyMirror: tabs[0].plots }));
   const { page, errors } = await env.launch({ userData });
-  await page.locator('.conn-dialog .modal-close').click();
+  await connect(page); // the plots show in a connected tab
   await page.locator('.right-tabs .tab[data-tab="plots"]').click();
   await expect(page.locator('.plot-tab-name')).toHaveText(['Safety', 'Motion', 'Plots (older version)']);
   await page.locator('.plot-tab', { hasText: 'older version' }).click();

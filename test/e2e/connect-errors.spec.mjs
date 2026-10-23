@@ -1,21 +1,13 @@
 // Connecting: refused connections, bad credentials, TLS with a private CA,
 // WebSocket transport and disconnecting.
 
-import { test, expect, makeUserData, profile, closedPort, makeCerts, mockDialogs, waitForTopic, row, activeTabName } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, closedPort, makeCerts, mockDialogs, waitForTopic, row, activeTabName, recordDialogStatus, menu } from './fixtures.mjs';
 
-// Logs every text the dialog's status line shows, including short-lived ones.
-async function recordDialogStatus(page) {
-  await page.evaluate(() => {
-    window.__dialogStatus = [];
-    let last;
-    const read = () => {
-      const t = document.querySelector('.conn-dialog .conn-status-line')?.textContent ?? null;
-      if (t !== last) window.__dialogStatus.push((last = t));
-    };
-    read();
-    new MutationObserver(read).observe(document.body, { subtree: true, childList: true, characterData: true });
-  });
-  return () => page.evaluate(() => window.__dialogStatus.slice());
+// The Disconnect entry of the active tab's menu (the toolbar shows only once
+// the tab has connected).
+async function tabMenuDisconnect(page) {
+  await page.locator('.conn-tab.active').click({ button: 'right' });
+  return page.locator('.ctx-menu .ctx-item', { hasText: /^Disconnect$/ });
 }
 
 test('refused connection: the dialog reports the failure and keeps reporting it while retrying', async ({ env }) => {
@@ -27,8 +19,9 @@ test('refused connection: the dialog reports the failure and keeps reporting it 
 
   await dlg.locator('.connect-btn').click();
   await expect(line).toHaveText(/Error: connect ECONNREFUSED|Reconnecting/);
-  await expect(dlg).toBeVisible(); // stays open so the user can fix the settings
-  await expect(page.locator('#btn-disconnect')).toBeVisible();
+  await expect(dlg).toBeVisible(); // stays so the user can fix the settings
+  await expect(await tabMenuDisconnect(page)).not.toHaveClass(/disabled/);
+  await page.keyboard.press('Escape'); // closes the menu
 
   // Wait until the client has retried once, then look at everything the
   // dialog showed since Connect was clicked: once the attempt has failed the
@@ -40,13 +33,17 @@ test('refused connection: the dialog reports the failure and keeps reporting it 
   // Soft: a failure here is a reported bug; the rest of the test still runs.
   expect.soft(sinceConnect, `status line history: ${JSON.stringify(sinceConnect)}`).not.toContain('');
 
-  // Close the dialog; Disconnect in the top bar stops the attempts.
-  await dlg.locator('.modal-close').click();
-  await expect(dlg).toHaveCount(0);
-  await expect(page.locator('#status-text')).toHaveText(/ECONNREFUSED|Reconnecting|Offline/);
-  await page.locator('#btn-disconnect').click();
-  await expect(page.locator('#status-text')).toHaveText(`Disconnected — mqtt://127.0.0.1:${port}`);
-  await expect(page.locator('#btn-disconnect')).toBeHidden();
+  // Disconnect in the tab's menu stops the attempts. The tab never connected:
+  // it keeps the dialog, and has nothing to resume.
+  await expect(page.locator('.ctx-menu')).toHaveCount(0);
+  await expect(dlg).toBeVisible();
+  await tabMenuDisconnect(page);
+  await menu(page, 'Disconnect');
+  await expect(line).toHaveText('');
+  expect(await page.evaluate(() => window.__mqttscope.status)).toEqual({ state: 'disconnected', url: `mqtt://127.0.0.1:${port}` });
+  await expect(page.locator('.conn-tab.active')).toHaveAttribute('data-state', 'new');
+  await expect(dlg).toBeVisible();
+  await expect(await tabMenuDisconnect(page)).toHaveClass(/disabled/);
   expect(errors).toEqual([]);
 });
 
@@ -60,7 +57,9 @@ test('wrong credentials show the broker error; fixing the password connects; Dis
   await expect(dlg.locator('.conn-status-line')).toHaveText('Error: Connection refused: Bad username or password');
   await expect(dlg.locator('.conn-status-line')).toHaveClass(/\berror\b/);
   await expect(dlg).toBeVisible();
-  await expect(page.locator('#status-text')).toHaveText('Error: Connection refused: Bad username or password');
+  // The tab shows the failure on its dot, under the profile's name.
+  await expect(page.locator('.conn-tab.active')).toHaveAttribute('data-state', 'error');
+  await expect(activeTabName(page)).toHaveText(`Test broker ${broker.port}`);
 
   await dlg.locator('[name="password"]').fill('correct-horse');
   await dlg.locator('.connect-btn').click();

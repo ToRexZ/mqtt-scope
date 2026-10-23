@@ -79,7 +79,6 @@ test("the dot shows each connection's state, also for a background tab", async (
   expect(await dot(idB)).toBe(await dot(idA));
   // A tab that never connected has no dot.
   await page.locator('.tab-new').click();
-  await page.locator('.conn-dialog .modal-close').click();
   await expect(page.locator('.conn-tab.active')).toHaveAttribute('data-state', 'new');
   await expect(page.locator('.conn-tab.active .dot')).toBeHidden();
   await expect(activeTabName(page)).toHaveText('New connection');
@@ -199,11 +198,7 @@ test('a tab opened for a profile open in another tab stays a New connection', as
 });
 
 test('saved messages: a save in one tab shows in the others; switching back keeps the list as it was', async ({ env }) => {
-  const { page, errors } = await env.launch();
-  await page.locator('.conn-dialog .modal-close').click();
-  await page.locator('.tab-new').click();
-  await page.locator('.conn-dialog .modal-close').click();
-  const [first, second] = await page.evaluate(() => window.__mqttscope.shell.tabs.map((t) => t.connId));
+  const { idA: first, idB: second, page, errors } = await twoTabs(env);
   const list = page.locator('#publisher-host .lib-list');
   // The second tab saves enough messages for its list to scroll.
   await page.evaluate(() => {
@@ -234,7 +229,6 @@ test('saved messages: a save in one tab shows in the others; switching back keep
 async function manyTabs(env, count = 12) {
   const profiles = Array.from({ length: count }, (_, i) => profile(1883, { id: `long${i}`, name: `Production cluster number ${i + 1} east` }));
   const ctx = await env.launch({ userData: makeUserData({ profiles }) });
-  await ctx.page.locator('.conn-dialog .modal-close').click();
   await ctx.page.evaluate(async (ps) => {
     for (const p of ps) await window.__mqttscope.shell.openTab({ profile: p });
   }, profiles);

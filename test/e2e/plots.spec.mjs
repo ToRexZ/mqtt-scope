@@ -193,8 +193,8 @@ test('plots: add from tree and inspector, live values, window, freeze, remove, C
 
   const second = await env.launch({ userData });
   const page2 = second.page;
+  await connect(page2); // the Plots tab shows in a connected tab
   await expect(page2.locator('#plot-count')).toHaveText('2');
-  await connect(page2);
   await plotsTab(page2).click();
   const climate2 = card(page2, 'Climate');
   await expect(climate2.locator('.legend-label')).toHaveText(['m/temp']);
