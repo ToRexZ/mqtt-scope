@@ -73,6 +73,12 @@ export async function connect(page) {
   await page.waitForFunction(() => window.__mqttscope.status.state === 'connected', null, { timeout: 10000 });
 }
 
+// After a relaunch: waits for the active tab, reopened (Settings → General →
+// Reopen tabs on launch, on by default), to connect again.
+export async function reconnected(page) {
+  await page.waitForFunction(() => window.__mqttscope.status?.state === 'connected', null, { timeout: 10000 });
+}
+
 // Opens a new tab with + and connects it to the profile named `profileName`
 // in the connection dialog. Returns the new tab's id once it is connected.
 export async function openTabTo(page, profileName) {

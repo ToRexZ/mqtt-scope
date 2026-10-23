@@ -15,6 +15,9 @@ contextBridge.exposeInMainWorld('api', {
   onOpenProfilesChanged: (cb) => ipcRenderer.on('conn:openProfilesChanged', (_e, ids) => cb(ids)),
   onActivateTab: (cb) => ipcRenderer.on('tabs:activate', (_e, data) => cb(data)),
   connect: (connId, profile) => ipcRenderer.invoke('mqtt:connect', connId, profile),
+  // A tab reopened at launch that the user had disconnected holds its profile
+  // without connecting; answers like connect.
+  bind: (connId, profile) => ipcRenderer.invoke('conn:bind', connId, profile),
   disconnect: (connId) => ipcRenderer.invoke('mqtt:disconnect', connId),
   status: (connId) => ipcRenderer.invoke('mqtt:status', connId),
   publish: (connId, msg) => ipcRenderer.invoke('mqtt:publish', connId, msg),
@@ -28,6 +31,12 @@ contextBridge.exposeInMainWorld('api', {
   onMenu: (cb) => ipcRenderer.on('menu', (_e, action) => cb(action)),
   onFlush: (cb) => ipcRenderer.on('app:flush', () => cb()),
   newWindow: () => ipcRenderer.invoke('app:newWindow'),
+  // What to open the window with, asked once: the tabs of the last run
+  // { tabs: [{ profileId, connected }], active }, { tabs: [], adopt: true }
+  // for a window a tab moves into, or null for a New connection tab. The
+  // window reports its tabs on every change, for the next launch.
+  initialTabs: () => ipcRenderer.invoke('tabs:init'),
+  reportTabs: (state) => ipcRenderer.send('tabs:report', state),
   setMenuShortcuts: (map) => ipcRenderer.send('menu:shortcuts', map),
   flushed: () => ipcRenderer.send('app:flushed'),
 

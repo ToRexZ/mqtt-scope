@@ -5,7 +5,7 @@
 
 import path from 'node:path';
 import { readFileSync, statSync } from 'node:fs';
-import { test, expect, makeUserData, profile, connect, openTabTo, mockDialogs, waitForTopic, waitForFile, waitForLayout, readJson } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, reconnected, openTabTo, mockDialogs, waitForTopic, waitForFile, waitForLayout, readJson } from './fixtures.mjs';
 
 const box = (l) => l.boundingBox();
 
@@ -67,7 +67,7 @@ test('tabs, arrangement, sizes and the settings panel survive a restart', async 
 
   ({ page } = await env.launch({ userData }));
   await page.setViewportSize({ width: 1600, height: 1300 });
-  await connect(page); // the plots show in a connected tab
+  await reconnected(page); // its tab comes back
   await page.locator('.right-tabs .tab[data-tab="plots"]').click();
   await expect(page.locator('.plot-tabs .plot-tab-name')).toHaveText(['Plots', 'Second']);
   await expect(page.locator('.plot-tab.active')).toContainText('Plots');
@@ -117,7 +117,8 @@ test('plot layouts are kept per profile', async ({ env }) => {
   const broker = await env.broker();
   await broker.publish('robot/state', JSON.stringify({ battery: 80, speed: 1 }), { retain: true });
   const profiles = [profile(broker.port, { id: 'A', name: 'Profile A' }), profile(broker.port, { id: 'B', name: 'Profile B' })];
-  const userData = makeUserData({ profiles, plotTabs: globalTabs });
+  // Each restart starts with a New connection tab, to open a profile in.
+  const userData = makeUserData({ profiles, plotTabs: globalTabs, settings: { restoreTabs: false } });
   const first = await env.launch({ userData });
   let { page } = first;
   await connect(page); // Profile A
@@ -167,7 +168,7 @@ test('renaming a profile keeps its layout; deleting removes it', async ({ env })
   const broker = await env.broker();
   await broker.publish('robot/state', JSON.stringify({ battery: 80, speed: 1 }), { retain: true });
   const profiles = [profile(broker.port, { id: 'A', name: 'Profile A' }), profile(broker.port, { id: 'B', name: 'Profile B' })];
-  const userData = makeUserData({ profiles });
+  const userData = makeUserData({ profiles, settings: { restoreTabs: false } }); // restarts with a New connection tab
   const first = await env.launch({ userData });
   let { page } = first;
   await connect(page); // Profile A

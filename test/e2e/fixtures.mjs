@@ -14,7 +14,7 @@ import { launchApp, makeUserData, profile, connect } from '../helpers/app.mjs';
 
 export { expect };
 export { makeUserData, profile, connect };
-export { selectTopic, openTabTo, activeTabName } from '../helpers/app.mjs';
+export { selectTopic, openTabTo, activeTabName, reconnected } from '../helpers/app.mjs';
 export { makeCerts, until } from '../helpers/broker.mjs';
 
 export const test = base.extend({

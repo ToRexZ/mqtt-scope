@@ -1,12 +1,13 @@
 'use strict';
 
-const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, safeStorage, session: electronSession, shell } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, safeStorage, screen, session: electronSession, shell } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs');
 const { ConnectionRegistry } = require('./connections');
 const { createProfileStore } = require('./profileStore');
 const { createJsonStore } = require('./jsonStore');
 const { createLayoutStore } = require('./layoutStore');
+const { WindowState, placeBounds } = require('./windowState');
 const { Updater } = require('./updater');
 const { createEngine } = require('./updateEngine');
 const { releaseUrl, createFetchRelease } = require('./fetchRelease');
@@ -20,16 +21,19 @@ if (process.env.MQTTSCOPE_USER_DATA) app.setPath('userData', process.env.MQTTSCO
 
 const ICON = path.join(__dirname, 'icon.png');
 const MAX_FILE_BYTES = 256 * 1024 * 1024; // the MQTT payload limit
+const STATE_SAVE_MS = 500;
 
 // One process owns the data files; launching the app again opens another
 // window in it. Each main window has its own broker connections, which the
 // registry keeps by connection id; every MQTT call and event names one.
-const windows = new Map(); // webContents.id -> { win }
+const windows = new Map(); // webContents.id -> { win, init } (init: see createMainWindow)
 const childWindows = new Map(); // webContents.id -> { win, ownerId, connId, topics: Set, init } (see openChildWindow)
 const registry = new ConnectionRegistry();
 let profiles;
 let stores;
 let layouts;
+let windowState; // the windows and tabs to reopen at the next launch
+let stateTimer = null;
 let updater;
 let quitting = false;
 let menuShortcuts = {}; // action id -> accelerator label, from the renderer's settings
@@ -114,10 +118,40 @@ function focusedMain() {
   return (w && ownerOf(w.webContents)) || windows.values().next().value || null;
 }
 
-function createMainWindow() {
+// What to reopen at the next launch (see windowState.js): written soon after
+// each change, so that it survives a crash, and when the app quits.
+function saveWindowStateSoon() {
+  if (!stateTimer) stateTimer = setTimeout(saveWindowState, STATE_SAVE_MS);
+}
+
+function saveWindowState() {
+  clearTimeout(stateTimer);
+  stateTimer = null;
+  try {
+    stores.set('windowState', windowState.toDoc());
+  } catch (err) {
+    log.error('windowState', err);
+  }
+}
+
+// Reopening the last run's windows and tabs (Settings → General, on unless set to false).
+const restoreTabsOn = () => stores.get('settings')?.restoreTabs !== false;
+
+// The windows of the last run to reopen: none with the setting off.
+function windowsToRestore(doc) {
+  if (!restoreTabsOn()) return [];
+  return WindowState.restorable(doc, new Set(profiles.load().map((p) => p.id)));
+}
+
+// bounds: where it was in the last run; restore: { tabs, active } to reopen
+// in it; adopt: it opens for a tab that moves in, with no tab of its own. The
+// window asks for these once (tabs:init); without them it opens with a New
+// connection tab.
+function createMainWindow({ bounds = null, restore = null, adopt = false } = {}) {
   const win = new BrowserWindow({
     width: 1600,
     height: 1000,
+    ...placeBounds(bounds, screen.getAllDisplays().map((d) => d.workArea)),
     minWidth: 900,
     minHeight: 600,
     title: 'MQTT Scope',
@@ -129,7 +163,18 @@ function createMainWindow() {
   });
   hardenWindow(win);
   const id = win.webContents.id;
-  windows.set(id, { win });
+  windows.set(id, { win, init: restore ? { tabs: restore.tabs, active: restore.active } : adopt ? { tabs: [], adopt: true } : null });
+  // Until its page reports its tabs, it holds what it reopens.
+  if (restore) windowState.report(id, restore);
+  // The size and place it has when not maximized or full screen.
+  const trackBounds = () => {
+    if (win.isDestroyed()) return;
+    windowState.setBounds(id, win.getNormalBounds());
+    saveWindowStateSoon();
+  };
+  trackBounds();
+  win.on('resize', trackBounds);
+  win.on('move', trackBounds);
 
   // A reloaded page starts with no connections; the first load has none yet.
   // Not 'did-start-loading': a navigation blocked below fires that too, and
@@ -153,9 +198,8 @@ function createMainWindow() {
 
   // Give the UI a moment to write debounced edits (connections, plots) first.
   let flushed = false;
-  win.on('close', (e) => {
+  const flushAndClose = () => {
     if (flushed) return;
-    e.preventDefault();
     flushed = true;
     const done = () => {
       clearTimeout(timer);
@@ -166,10 +210,37 @@ function createMainWindow() {
     ipcMain.on('app:flushed', onFlushed);
     const timer = setTimeout(done, 1500);
     win.webContents.send('app:flush');
+  };
+  // With restore off, the connections of a window closing would not come
+  // back: several of them are worth a question. Quitting never asks.
+  let asking = false;
+  const confirmClose = async (n) => {
+    asking = true;
+    try {
+      const res = await dialog.showMessageBox(win, { type: 'warning', message: `Close ${n} connections?`, buttons: ['Close', 'Cancel'], defaultId: 1, cancelId: 1 });
+      return res.response === 0;
+    } finally {
+      asking = false;
+    }
+  };
+  win.on('close', (e) => {
+    if (flushed) return;
+    e.preventDefault();
+    if (quitting) return flushAndClose();
+    if (asking) return;
+    const n = registry.activeCount(id);
+    if (n < 2 || restoreTabsOn()) return flushAndClose();
+    confirmClose(n).then((ok) => ok && !win.isDestroyed() && flushAndClose());
   });
   win.on('closed', () => {
     windows.delete(id);
     closeConnectionsOf(id);
+    // Quitting keeps every window for the next launch; otherwise only the
+    // last one is (see windowState.js).
+    if (!quitting) {
+      windowState.closed(id, { last: windows.size === 0 });
+      saveWindowStateSoon();
+    }
     // A quit (e.g. Cmd+Q) was paused by the flush above; resume it.
     if (quitting) app.quit();
   });
@@ -252,6 +323,7 @@ function createUpdater(kind) {
 // window for it on the way out.
 function quitForUpdate() {
   quitting = true;
+  saveWindowState(); // the new version reads it before this one has quit
   app.releaseSingleInstanceLock();
 }
 
@@ -290,12 +362,18 @@ function registerIpc() {
     closeConnection(connId);
   });
   const sessionOf = (e, connId) => connectionOf(e, connId).session;
+  // A profile open in another tab: that tab may be in this very window,
+  // which then shows it itself.
+  const withSameWindow = (e, res) => (res.duplicate ? { ...res, duplicate: { ...res.duplicate, sameWindow: res.duplicate.ownerId === ownerIdOf(e.sender) } } : res);
   ipcMain.handle('mqtt:connect', (e, connId, profile) => {
     connectionOf(e, connId);
-    const res = registry.connect(connId, profile || {});
-    // The other tab may be in this very window, which then shows it itself.
-    if (res.duplicate) res.duplicate = { ...res.duplicate, sameWindow: res.duplicate.ownerId === ownerIdOf(e.sender) };
-    return res;
+    return withSameWindow(e, registry.connect(connId, profile || {}));
+  });
+  // A tab reopened at launch that the user had disconnected takes its profile
+  // without connecting.
+  ipcMain.handle('conn:bind', (e, connId, profile) => {
+    connectionOf(e, connId);
+    return withSameWindow(e, registry.bind(connId, profile || {}));
   });
   // Brings the window that owns a connection forward and has it show that tab.
   ipcMain.handle('conn:focus', (e, connId) => {
@@ -362,6 +440,20 @@ function registerIpc() {
   ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(String(text)));
   ipcMain.handle('app:newWindow', () => {
     createMainWindow();
+  });
+  // A main window asks once what to open with (see createMainWindow), then
+  // reports its tabs whenever they change.
+  ipcMain.handle('tabs:init', (e) => {
+    const entry = windows.get(e.sender.id);
+    if (!entry) return null;
+    const { init } = entry;
+    entry.init = null;
+    return init;
+  });
+  ipcMain.on('tabs:report', (e, state) => {
+    if (!windows.has(e.sender.id)) return;
+    windowState.report(e.sender.id, state);
+    saveWindowStateSoon();
   });
   ipcMain.on('menu:shortcuts', (_e, map) => {
     if (!map || typeof map !== 'object') return;
@@ -566,6 +658,9 @@ function start() {
     },
   });
   stores = createJsonStore(userData);
+  // Read once: a broken file is set aside as it is read (see jsonStore.js).
+  const lastRun = stores.get('windowState');
+  windowState = new WindowState(lastRun);
   layouts = createLayoutStore({ stores, profileIds: () => profiles.load().map((p) => p.id), log });
   try {
     // Every profile there is now starts with the plots of the version before.
@@ -580,11 +675,17 @@ function start() {
   forwardConnectionEvents();
   if (!app.isPackaged) globalThis.__mqttscopeConnections = registry; // for tests, like __mqttscopeUpdater
   registerIpc();
+  // The windows of the last run, each where it was with its tabs; else one
+  // with a New connection tab.
+  const restore = windowsToRestore(lastRun);
+  const created = restore.length ? restore.map((w) => createMainWindow({ bounds: w.bounds, restore: w })) : [createMainWindow()];
   // Started by the Windows installer after Restart to update: that window comes to the front.
-  frontAfterUpdate({ argv: process.argv, win: createMainWindow(), log });
+  frontAfterUpdate({ argv: process.argv, win: created[0], log });
   updater.start();
-  // No check starts while the app shuts down.
-  app.on('will-quit', () => updater.stop());
+  app.on('will-quit', () => {
+    updater.stop(); // no check starts while the app shuts down
+    saveWindowState();
+  });
   app.on('activate', () => {
     if (windows.size === 0) createMainWindow();
   });

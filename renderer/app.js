@@ -19,6 +19,7 @@ const $ = (sel) => document.querySelector(sel);
 
 const RENDER_INTERVAL_MS = 120;
 const RATE_INTERVAL_MS = 1000;
+const REPORT_DELAY_MS = 300;
 
 let settings = { ...DEFAULT_SETTINGS };
 let bindings = resolveBindings({});
@@ -85,15 +86,17 @@ async function newTab() {
 
 // A tab gets its own connection in main; its id is the tab's id. A tab to
 // connect takes its profile when connect() does; one open in another tab
-// closes it again (see showDuplicate).
-async function openTab({ profile = null, connect = false, activate: show = true } = {}) {
+// closes it again (see showDuplicate). A restored tab (see restoreTabs) is a
+// session from the start, and connects or binds to its profile after.
+async function openTab({ profile = null, connect = false, restored = false, activate: show = true } = {}) {
   const connId = await api.openConnection();
   const tab = new ConnectionTab({ api, connId, settings, shell });
-  if (profile && !connect) tab.profile = { ...profile };
+  if (restored) tab.restoreAs(profile);
+  else if (profile && !connect) tab.profile = { ...profile };
   tabs.set(connId, tab);
   savedSeen.set(connId, savedGen); // tab.load() reads them
   order.add(connId, { activate: false });
-  if (show || !activeTab().active) activate(connId);
+  if (show || !activeTab()?.active) activate(connId);
   refresh();
   await tab.load();
   if (profile && connect && tabOf(connId) === tab) await tab.connect(profile);
@@ -153,6 +156,45 @@ async function closeTabs(ids) {
     if (!ok) return;
   }
   for (const tab of list) if (tabOf(tab.connId) === tab) await closeTab(tab.connId, { confirmed: true });
+}
+
+// The tabs the window had when the app last ran (main/windowState.js), in
+// their order and with the same one active: one that was connected connects,
+// one the user had disconnected comes back disconnected, with Reconnect.
+async function restoreTabs({ tabs: list, active }) {
+  for (const [i, { profileId, connected }] of list.entries()) {
+    const profile = connections.profiles.find((p) => p.id === profileId);
+    if (!profile) continue;
+    const tab = await openTab({ profile, restored: true, activate: i === active });
+    if (tabOf(tab.connId) === tab) await (connected ? tab.connect(profile) : tab.bind());
+  }
+}
+
+// What main reopens at the next launch: the tabs that connected, each
+// connected unless the user disconnected it, and the active one (for a New
+// connection tab, which is not reopened, the one next to it). Sent once the
+// tabs have settled; a closing window sends it at once (see onFlush).
+let reportedTabs = null; // the last state reported or about to be, as JSON
+let pendingReport = null;
+let reportTimer = null;
+
+function reportTabs() {
+  const all = stripTabs();
+  const kept = all.filter((t) => t.mode === 'session' && t.profile);
+  const before = all.slice(0, Math.max(0, all.indexOf(activeTab()))).filter((t) => kept.includes(t)).length;
+  const state = { tabs: kept.map((t) => ({ profileId: t.profile.id, connected: !t.canReconnect })), active: Math.min(before, Math.max(0, kept.length - 1)) };
+  const json = JSON.stringify(state);
+  if (json === reportedTabs) return;
+  reportedTabs = json;
+  pendingReport = state;
+  clearTimeout(reportTimer);
+  reportTimer = setTimeout(sendReport, REPORT_DELAY_MS);
+}
+
+function sendReport() {
+  clearTimeout(reportTimer);
+  if (pendingReport) api.reportTabs(pendingReport);
+  pendingReport = null;
 }
 
 // Opens the newest closed tab whose profile still exists, connected; its
@@ -215,6 +257,7 @@ function refresh() {
     }
   }
   placeDialog(current);
+  reportTabs();
 }
 
 // The dialog is drawn in the active tab while it is a picker; Connect
@@ -266,6 +309,7 @@ setInterval(() => {
 
 // The main process asks for this before closing the window.
 api.onFlush(async () => {
+  sendReport();
   await Promise.allSettled([connections.flush(), ...stripTabs().map((t) => t.flush())]);
   api.flushed();
 });
@@ -355,9 +399,16 @@ document.addEventListener('keydown', (e) => {
 
 // ------------------------------------------------------------------ start
 
-const [saved] = await Promise.all([api.storeGet('settings').catch(() => null), connections.load()]);
+const [saved, init] = await Promise.all([api.storeGet('settings').catch(() => null), api.initialTabs().catch(() => null), connections.load()]);
 applySettings(normalizeSettings(saved));
-await openTab();
+// The tabs of the last run, else a New connection tab; a window that a tab
+// moves into gets none of its own.
+try {
+  if (init?.tabs?.length) await restoreTabs(init);
+} catch (err) {
+  toast(`Could not reopen the tabs: ${err.message}`, 'error');
+}
+if (!tabs.size && !init?.adopt) await openTab();
 
 // Exposed for end-to-end tests and debugging from DevTools. The views are
 // the active tab's.

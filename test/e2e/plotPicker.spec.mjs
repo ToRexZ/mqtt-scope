@@ -3,7 +3,7 @@
 
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { test, expect, makeUserData, profile, connect, rowByPath, waitForTopic, menu, mockDialogs, tempDir, waitForFile } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, reconnected, rowByPath, waitForTopic, menu, mockDialogs, tempDir, waitForFile } from './fixtures.mjs';
 
 const picker = (page) => page.locator('.modal.picker');
 const topicRows = (page) => picker(page).locator('.picker-topic');
@@ -154,7 +154,7 @@ test('picker: scrollable topic list, message structure, multi-select with aliase
   // Aliases persist across restarts.
   await env.closeApp({ app });
   const again = await env.launch({ userData });
-  await connect(again.page); // the plots show in a connected tab
+  await reconnected(again.page); // its tab comes back
   await again.page.locator('.right-tabs .tab[data-tab="plots"]').click();
   await expect(legendLabels(again.page)).toHaveText(['Battery %', 'Voltage', 'fleet/robot-007/temp']);
   expect(errors).toEqual([]);

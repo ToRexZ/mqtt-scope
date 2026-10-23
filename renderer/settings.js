@@ -10,6 +10,7 @@ export const DEFAULT_SETTINGS = {
   historyMB: 64, // payload megabytes kept per topic
   autoExpand: true, // clicking a topic in the tree also expands it one level
   checkForUpdates: true, // automatic update checks (main reads it from settings.json)
+  restoreTabs: true, // reopen the windows and tabs of the last run at launch (main reads it too)
   keys: {}, // keyboard shortcut overrides: action id -> combo
 };
 
@@ -28,6 +29,7 @@ export function normalizeSettings(raw) {
   }
   if (typeof raw?.autoExpand === 'boolean') out.autoExpand = raw.autoExpand;
   if (typeof raw?.checkForUpdates === 'boolean') out.checkForUpdates = raw.checkForUpdates;
+  if (typeof raw?.restoreTabs === 'boolean') out.restoreTabs = raw.restoreTabs;
   out.keys = normalizeOverrides(raw?.keys);
   return out;
 }
@@ -57,12 +59,14 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
     };
     const autoExpand = checkbox('autoExpand', ' Expand a topic one level when you click it in the tree');
     const checkUpdates = checkbox('checkForUpdates', ' Check for updates (asks GitHub at startup and every 6 hours)');
+    const restoreTabs = checkbox('restoreTabs', ' Reopen tabs on launch');
     const general = el('div', 'settings-page');
     general.dataset.page = 'general';
     general.append(
       numberField('historyLimit', 'Messages kept per topic', 'Older messages are dropped. Used by History, Diff and Chart.'),
       numberField('historyMB', 'History size per topic (MB)', 'Caps memory for topics with large payloads. The latest message is always kept.'),
       autoExpand.wrap,
+      restoreTabs.wrap,
       checkUpdates.wrap,
     );
 
@@ -151,7 +155,13 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
       e.preventDefault();
       if (conflicts(bindings).size) return showTab('keyboard');
       const raw = Object.fromEntries(Object.entries(fields).map(([k, i]) => [k, i.value]));
-      const next = normalizeSettings({ ...raw, autoExpand: autoExpand.input.checked, checkForUpdates: checkUpdates.input.checked, keys: bindings });
+      const next = normalizeSettings({
+        ...raw,
+        autoExpand: autoExpand.input.checked,
+        checkForUpdates: checkUpdates.input.checked,
+        restoreTabs: restoreTabs.input.checked,
+        keys: bindings,
+      });
       try {
         await api.storeSet('settings', next);
       } catch (err) {

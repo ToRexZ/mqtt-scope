@@ -151,3 +151,39 @@ test('openProfiles fires when the bound set changes', () => {
   r.close(a);
   assert.deepEqual(seen[1], ['openProfiles', []]);
 });
+
+test('bind takes a profile without connecting, with the same duplicate rule', () => {
+  const r = reg();
+  const seen = collect(r, 'openProfiles');
+  const a = r.create(1);
+  const b = r.create(2);
+  assert.deepEqual(r.bind(a, { id: 'a' }), { ok: true });
+  assert.equal(r.get(a).session.active, false);
+  assert.deepEqual(seen, [['openProfiles', ['a']]]);
+  assert.deepEqual(r.bind(b, { id: 'a' }), { ok: false, duplicate: { connId: 'c1', ownerId: 1 } });
+  assert.deepEqual(r.connect(b, { id: 'a' }), { ok: false, duplicate: { connId: 'c1', ownerId: 1 } });
+  assert.deepEqual(r.bind(a, { id: 'a' }), { ok: true });
+  assert.equal(seen.length, 1, 'unchanged: no event');
+  assert.equal(r.connect(a, { id: 'a' }).ok, true, 'it connects to its own profile later');
+  assert.deepEqual(r.bind('c9', { id: 'x' }), { ok: false, error: 'Unknown connection' });
+});
+
+test('activeCount of one owner counts only its connections', () => {
+  const r = reg();
+  const a = r.create(1);
+  const b = r.create(1);
+  const c = r.create(2);
+  for (const [id, p] of [
+    [a, 'a'],
+    [b, 'b'],
+    [c, 'c'],
+  ]) {
+    r.connect(id, { id: p });
+  }
+  assert.equal(r.activeCount(1), 2);
+  assert.equal(r.activeCount(2), 1);
+  assert.equal(r.activeCount(3), 0);
+  r.disconnect(b);
+  assert.equal(r.activeCount(1), 1);
+  assert.equal(r.activeCount(), 2);
+});

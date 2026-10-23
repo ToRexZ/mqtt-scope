@@ -10,6 +10,7 @@ export function bindConnection(api, connId, { name }) {
   return {
     ...api,
     connect: (profile) => api.connect(connId, profile),
+    bind: (profile) => api.bind(connId, profile),
     disconnect: () => api.disconnect(connId),
     status: () => api.status(connId),
     publish: (msg) => api.publish(connId, msg),

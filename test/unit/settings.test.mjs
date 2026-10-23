@@ -11,7 +11,7 @@ const NUMERIC_DEFAULTS = { historyLimit: DEFAULT_SETTINGS.historyLimit, historyM
 
 describe('normalizeSettings', () => {
   test('defaults', () => {
-    assert.deepEqual(DEFAULT_SETTINGS, { historyLimit: 100, historyMB: 64, autoExpand: true, checkForUpdates: true, keys: {} });
+    assert.deepEqual(DEFAULT_SETTINGS, { historyLimit: 100, historyMB: 64, autoExpand: true, checkForUpdates: true, restoreTabs: true, keys: {} });
     assert.deepEqual(normalizeAll(undefined), DEFAULT_SETTINGS);
     assert.deepEqual(normalizeAll(null), DEFAULT_SETTINGS);
     assert.deepEqual(normalizeAll({}), DEFAULT_SETTINGS);
@@ -88,6 +88,14 @@ describe('normalizeSettings: switches and keyboard shortcuts', () => {
     assert.equal(normalizeAll({ checkForUpdates: true }).checkForUpdates, true);
     for (const bad of ['false', 0, null, 'off', [], {}]) assert.equal(normalizeAll({ checkForUpdates: bad }).checkForUpdates, true, JSON.stringify(bad));
     assert.equal(normalizeAll({ checkForUpdates: false, historyLimit: 5 }).checkForUpdates, false, 'kept alongside other settings');
+  });
+  // Main reads it at launch (off only when exactly false).
+  test('restoreTabs defaults to true and keeps a saved false', () => {
+    assert.equal(normalizeAll({}).restoreTabs, true);
+    assert.equal(normalizeAll({ restoreTabs: false }).restoreTabs, false);
+    assert.equal(normalizeAll({ restoreTabs: true }).restoreTabs, true);
+    for (const bad of ['false', 0, null, 'off', [], {}]) assert.equal(normalizeAll({ restoreTabs: bad }).restoreTabs, true, JSON.stringify(bad));
+    assert.equal(normalizeAll({ restoreTabs: false, checkForUpdates: false }).restoreTabs, false, 'kept alongside other settings');
   });
   test('keys keeps overrides of known actions that differ from the default', () => {
     const k = normalizeAll({ keys: { connections: 'Mod+J', settings: 'Mod+,', bogus: 'Mod+B', clear: '', find: 5 } }).keys;

@@ -47,12 +47,19 @@ class ConnectionRegistry extends EventEmitter {
   }
 
   connect(connId, profile) {
+    const res = this.bind(connId, profile);
+    return res.ok ? this._entries.get(connId).session.connect(profile) : res;
+  }
+
+  // Takes the profile without connecting (a tab reopened at launch that the
+  // user had disconnected): from then on no other connection may open it.
+  bind(connId, profile) {
     const entry = this._entries.get(connId);
     if (!entry) return { ok: false, error: 'Unknown connection' };
     const other = profile.id != null ? this.findProfile(profile.id) : null;
     if (other && other.connId !== connId) return { ok: false, duplicate: other };
     this._bind(entry, profile.id ?? null);
-    return entry.session.connect(profile);
+    return { ok: true };
   }
 
   disconnect(connId) {
@@ -84,9 +91,10 @@ class ConnectionRegistry extends EventEmitter {
     return [...this._entries.values()].map((e) => e.profileId).filter((id) => id != null);
   }
 
-  activeCount() {
+  // Of every window, or of one.
+  activeCount(ownerId) {
     let n = 0;
-    for (const e of this._entries.values()) if (e.session.active) n++;
+    for (const e of this._entries.values()) if (e.session.active && (ownerId === undefined || e.ownerId === ownerId)) n++;
     return n;
   }
 

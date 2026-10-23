@@ -60,7 +60,7 @@ export class ConnectionTab {
     this.tabApi = bindConnection(api, connId, { name: () => this.profile?.name || '' });
     this.profile = null; // snapshot of the profile last connected
     this.status = { state: 'disconnected' };
-    this.mode = 'picker'; // 'session' from the first 'connected' on, for good
+    this.mode = 'picker'; // 'session' from the first 'connected' on (or a restore), for good
     this.failed = false; // the last attempt failed (a picker's dialog offers Retry)
     this.everConnected = false;
     this.canReconnect = false; // disconnected by the user after connecting
@@ -387,6 +387,25 @@ export class ConnectionTab {
     this.shell.onChange(this);
     // A picker's dialog already shows it on its status line.
     if (!res.ok && !(this.mode === 'picker' && this.status.error === res.error)) toast(res.error, 'error');
+    return res;
+  }
+
+  // A tab reopened at launch (app.js restoreTabs) is a session from the
+  // start: it connected when the app last ran. Set before it is first shown.
+  restoreAs(profile) {
+    this.profile = { ...profile };
+    this.everConnected = true;
+    this.mode = 'session';
+  }
+
+  // A restored tab the user had disconnected: it holds its profile in main
+  // (no other tab opens it, and it cannot be deleted) and offers Reconnect.
+  async bind() {
+    const res = await this.tabApi.bind(this.profile);
+    if (res.ok) {
+      this.onStatus({ state: 'disconnected' });
+      this.checkSaved();
+    }
     return res;
   }
 
