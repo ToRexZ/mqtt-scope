@@ -166,3 +166,40 @@ test('tracking again (e.g. after any edit) does not trim series that are within 
   d.track([series('a')]);
   assert.equal(d.points('a').length, 1050);
 });
+
+test('plot data round-trips', () => {
+  const d = new PlotData({ maxPoints: 5 });
+  d.track([series('t'), series('r', ['battery'])], () => [{ t: 0, v: 9 }]);
+  for (let i = 1; i <= 8; i++) d.ingest(msg('t', String(i), i));
+  d.ingest(msg('r', { battery: 80 }, 3));
+  const snap = d.snapshot();
+  assert.deepEqual(snap.map((s) => [s.topic, s.segs]), [['t', null], ['r', ['battery']]]);
+
+  const copy = new PlotData({ maxPoints: 5 });
+  copy.track([series('other')]);
+  copy.ingest(msg('other', '1', 1));
+  copy.restore(structuredClone(snap)); // as it crosses to another window
+  assert.deepEqual(copy.snapshot(), snap);
+  assert.deepEqual(copy.points('t'), d.points('t'));
+  assert.deepEqual(copy.points('r', ['battery']), [{ t: 0, v: 9 }, { t: 3, v: 80 }]);
+  assert.equal(copy.limit, d.limit);
+  assert.deepEqual(copy.points('other'), [], 'what was tracked before is replaced');
+  assert.equal(copy.ingest(msg('other', '2', 2)), false);
+
+  // Collecting goes on.
+  assert.equal(copy.ingest(msg('r', { battery: 79 }, 4)), true);
+  assert.deepEqual(copy.points('r', ['battery']).map((p) => p.v), [9, 80, 79]);
+  // The snapshot is a copy.
+  d.ingest(msg('t', '9', 9));
+  assert.equal(snap[0].points.at(-1).v, 8);
+});
+
+test('restoring keeps every point, whatever was tracked before', () => {
+  const d = new PlotData({ maxPoints: 3000, budget: 6000 });
+  d.track([series('a')], () => Array.from({ length: 2000 }, (_, i) => ({ t: i, v: i })));
+  const copy = new PlotData({ maxPoints: 3000, budget: 6000 });
+  copy.track(['a', 'b', 'c', 'd', 'e', 'f'].map((t) => series(t))); // 1000 points each
+  copy.restore(d.snapshot());
+  assert.equal(copy.points('a').length, 2000);
+  assert.equal(copy.limit, 3000);
+});

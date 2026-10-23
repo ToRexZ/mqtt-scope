@@ -51,9 +51,10 @@ export class TopicTree {
     this.messageCount = 0;
   }
 
-  addMessage(msg) {
+  // The node of a topic, made (with the levels above it) when missing.
+  nodeFor(topic) {
     let node = this.root;
-    for (const level of msg.topic.split('/')) {
+    for (const level of topic.split('/')) {
       let child = node.children.get(level);
       if (!child) {
         child = new TopicNode(level, node);
@@ -62,6 +63,11 @@ export class TopicTree {
       }
       node = child;
     }
+    return node;
+  }
+
+  addMessage(msg) {
+    const node = this.nodeFor(msg.topic);
     const isNewTopic = node.messageCount === 0;
     node.message = msg;
     node.messageCount++;
@@ -145,6 +151,52 @@ export class TopicTree {
     node.history = [];
     node.historySize = 0;
     node.retained = false;
+  }
+
+  // What restore() needs to rebuild the tree elsewhere (structured-clone
+  // friendly; the messages are shared, not copied): the topics with their
+  // kept messages, and the expanded nodes. Topics come in the order of the
+  // tree, so the rebuilt one lists them the same way.
+  snapshot() {
+    const topics = [];
+    const expanded = [];
+    const visit = (node) => {
+      for (const n of node.children.values()) {
+        if (n.messageCount) topics.push({ path: n.path, history: n.history.slice(), messageCount: n.messageCount, retained: n.retained, selfUpdate: n.selfUpdate });
+        if (n.expanded) expanded.push(n.path);
+        visit(n);
+      }
+    };
+    visit(this.root);
+    return { topics, expanded };
+  }
+
+  // Replaces the tree with a snapshot's, counting everything again; the
+  // histories are trimmed to this tree's limits. lastUpdate becomes the
+  // newest message in the subtree.
+  restore({ topics, expanded }) {
+    this.clear();
+    for (const t of topics) {
+      const node = this.nodeFor(t.path);
+      node.history = t.history.slice();
+      node.historySize = node.history.reduce((sum, m) => sum + m.payload.length, 0);
+      this.trim(node);
+      node.message = node.history[node.history.length - 1];
+      node.messageCount = t.messageCount;
+      node.selfUpdate = t.selfUpdate;
+      node.retained = t.retained;
+      for (let n = node; n; n = n.parent) {
+        n.subtreeMessages += t.messageCount;
+        n.subtreeTopics++;
+        n.lastUpdate = Math.max(n.lastUpdate, t.selfUpdate);
+      }
+      this.topicCount++;
+      this.messageCount += t.messageCount;
+    }
+    for (const path of expanded) {
+      const node = this.find(path);
+      if (node) node.expanded = true;
+    }
   }
 
   setExpandedRecursive(node, expanded) {

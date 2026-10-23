@@ -652,6 +652,63 @@ export class ConnectionTab {
     showMenu(x, y, items);
   }
 
+  // ---------------------------------------------------------------- moving
+
+  // Everything the tab holds, for fromState() in this or another window
+  // (structured-clone friendly; payloads stay Uint8Array). The connection
+  // goes on in main as it is.
+  exportState() {
+    return {
+      connId: this.connId,
+      mode: this.mode,
+      profile: this.profile,
+      status: this.status,
+      everConnected: this.everConnected,
+      failed: this.failed,
+      droppedTotal: this.droppedTotal,
+      tree: this.tree.snapshot(),
+      plots: this.plots.snapshot(),
+      selectedPath: this.selected?.path ?? null,
+      viewer: this.viewer.snapshot(),
+      publisher: this.publisher.draft(),
+      filter: { text: this.els.filter.value, values: this.$('#filter-values').checked },
+      rightTab: this.rightPanel,
+      paused: this.paused,
+      pauseQueue: this.pauseQueue.slice(),
+    };
+  }
+
+  // The tab of an exported state, not shown yet: the same connection (still
+  // open in main; the shell routes its events here), data and views.
+  static fromState(opts, state) {
+    const tab = new ConnectionTab({ ...opts, connId: state.connId });
+    tab.restoreState(state);
+    return tab;
+  }
+
+  restoreState(s) {
+    this.profile = s.profile;
+    this.mode = s.mode;
+    this.everConnected = s.everConnected;
+    this.failed = s.failed; // onStatus() keeps it while the client retries
+    this.droppedTotal = s.droppedTotal;
+    this.tree.restore(s.tree); // trimmed to this tab's history limits
+    this.plots.restoreSnapshot(s.plots);
+    const node = s.selectedPath === null ? null : this.tree.find(s.selectedPath);
+    if (node) this.treeView.select(node);
+    this.viewer.restore(s.viewer);
+    this.publisher.setDraft(s.publisher); // after the selection, which a following topic takes
+    this.els.filter.value = s.filter.text;
+    this.$('#filter-values').checked = s.filter.values;
+    this.treeView.setFilter(s.filter.text, s.filter.values);
+    this.showPanel(s.rightTab);
+    if (s.paused) this.togglePause();
+    this.pauseQueue = s.pauseQueue;
+    this.pauseBytes = s.pauseQueue.reduce((sum, m) => sum + m.payload.length, 0);
+    this.onStatus(s.status);
+    this.checkSaved();
+  }
+
   // ---------------------------------------------------------------- teardown
 
   // Saves pending plot changes (to the tab's profile).

@@ -231,6 +231,30 @@ export class Publisher {
     this.renderList();
   }
 
+  // The message being composed, as typed, and whether the topic follows the
+  // tree (the saved and recent messages are shared, not part of it).
+  draft() {
+    return {
+      topic: this.topic.value,
+      payload: this.payload.value,
+      format: this.format.value,
+      qos: Number(this.qos.value),
+      retain: this.retain.checked,
+      follow: this.follow,
+    };
+  }
+
+  setDraft(d) {
+    this.topic.value = d.topic;
+    this.payload.value = d.payload;
+    this.format.value = d.format;
+    this.qos.value = String(d.qos);
+    this.retain.checked = d.retain;
+    this.setFollow(d.follow);
+    this.validate();
+    this.renderList();
+  }
+
   current() {
     return {
       topic: this.topic.value.trim(),

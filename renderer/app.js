@@ -144,6 +144,22 @@ async function closeTab(id, { confirmed = false } = {}) {
   if (!tabs.size) await openTab();
 }
 
+// Rebuilds a tab in place from its exported state, as a window that a tab
+// moves into does (for tests): the state goes through structuredClone, as
+// between windows. The connection stays open; its events reach the new tab.
+function reimport(id) {
+  const old = tabOf(id);
+  if (!old) return;
+  const shown = old.active;
+  const state = structuredClone(old.exportState());
+  old.flush(); // before dispose stops its save timer
+  old.dispose();
+  tabs.set(id, ConnectionTab.fromState({ api, settings, shell }, state));
+  savedSeen.delete(id); // its publisher reads the saved messages when shown
+  if (shown) activate(id);
+  refresh();
+}
+
 // Closes several tabs with one question when any of their plots holds data.
 async function closeTabs(ids) {
   const list = ids.map(tabOf).filter(Boolean);
@@ -447,5 +463,6 @@ window.__mqttscope = {
     closeTabs,
     reopenClosed,
     activate,
+    reimport,
   },
 };

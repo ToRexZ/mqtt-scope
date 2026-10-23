@@ -276,6 +276,33 @@ export class MessageViewer {
     this.render(true);
   }
 
+  // What restore() brings back (structured-clone friendly). The held message
+  // is named by its time and its place from the newest, since the restored
+  // history holds copies of the messages.
+  snapshot() {
+    const h = this.source?.history;
+    return {
+      pinned: this.pinned && { topic: this.source.path, ts: this.pinned.ts, back: h.length - 1 - h.indexOf(this.pinned) },
+      expandedByTopic: [...this.expandedByTopic].map(([topic, paths]) => [topic, [...paths]]),
+      plotByTopic: [...this.plotByTopic],
+      query: this.query,
+    };
+  }
+
+  // After show() of the topic that was shown: the held message is looked up
+  // in its history (gone from it, the inspector follows the latest).
+  restore(s) {
+    this.expandedByTopic = new Map(s.expandedByTopic.map(([topic, paths]) => [topic, new Set(paths)]));
+    this.plotByTopic = new Map(s.plotByTopic);
+    this.query = this.search.value = s.query;
+    if (s.pinned && this.source?.path === s.pinned.topic) {
+      const h = this.source.history;
+      const at = h[h.length - 1 - s.pinned.back];
+      this.pinned = at?.ts === s.pinned.ts ? at : h.find((m) => m.ts === s.pinned.ts) || null;
+    }
+    this.render(true);
+  }
+
   expandedFor(topic, value) {
     let set = this.expandedByTopic.get(topic);
     if (!set) {

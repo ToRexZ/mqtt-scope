@@ -163,6 +163,41 @@ export class PlotsPanel {
     }
   }
 
+  // What restoreSnapshot() brings back (structured-clone friendly): the
+  // plots as they are now, saved or not, the profile they are saved for,
+  // their points and the view (zoom, freeze, selected plot).
+  snapshot() {
+    return {
+      profileId: this.profileId,
+      saveTo: this.saveTo,
+      doc: structuredClone(this.model.toDoc()),
+      newer: this.model.newer,
+      data: this.data.snapshot(),
+      zoomByTab: [...this.zoomByTab],
+      yZoom: [...this.yZoom],
+      frozenAt: this.frozenAt,
+      selectedId: this.model.selectedId,
+    };
+  }
+
+  // Not read again from main (the snapshot may hold changes not saved yet);
+  // later changes are saved for the same profile.
+  restoreSnapshot(s) {
+    this.loadSeq++; // a profile's plots still being read are not shown
+    this.profileId = s.profileId;
+    this.saveTo = s.saveTo;
+    this.model.load(s.doc);
+    this.model.newer = s.newer;
+    this.warnedNewer = s.newer;
+    this.model.select(s.selectedId);
+    this.data.restore(s.data);
+    this.zoomByTab = new Map(s.zoomByTab);
+    this.yZoom = new Map(s.yZoom);
+    this.setFrozen(s.frozenAt);
+    this.trackSeries();
+    this.renderAll();
+  }
+
   // Collect data for exactly the plotted series; new ones start from the
   // messages the topic tree has kept.
   trackSeries() {
@@ -290,7 +325,12 @@ export class PlotsPanel {
   }
 
   toggleFreeze() {
-    this.frozenAt = this.frozenAt ? null : Date.now();
+    this.setFrozen(this.frozenAt ? null : Date.now());
+  }
+
+  // Stops the time axis at `at` (ms), or lets it run again (null).
+  setFrozen(at) {
+    this.frozenAt = at;
     this.freezeBtn.textContent = this.frozenAt ? 'Resume' : 'Freeze';
     this.freezeBtn.classList.toggle('on', !!this.frozenAt);
     this.redraw();

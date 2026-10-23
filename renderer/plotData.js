@@ -88,6 +88,19 @@ export class PlotData {
   clear() {
     for (const s of this.series.values()) s.points.length = 0;
   }
+
+  // The tracked series and their points, for restore() (structured-clone
+  // friendly; later points are not added to it).
+  snapshot() {
+    return [...this.series.values()].map((s) => ({ topic: s.topic, segs: s.segs, points: s.points.slice() }));
+  }
+
+  // Tracks exactly the series of a snapshot, with its points.
+  restore(snapshot) {
+    this.series = new Map();
+    this.limit = this.maxPoints; // not the cut of the series tracked before
+    this.track(snapshot, (s) => s.points);
+  }
 }
 
 const EMPTY = Object.freeze([]);

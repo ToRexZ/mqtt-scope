@@ -249,6 +249,157 @@ test('each tab has its own publisher topic list', async ({ env }) => {
   expect(errors).toEqual([]);
 });
 
+// What a tab shows and holds, read from the active tab and the document.
+const tabState = (page) =>
+  page.evaluate(() => {
+    const tab = window.__mqttscope.shell.active;
+    const { tree, viewer, plots, publisher } = tab;
+    const text = (m) => new TextDecoder().decode(m.payload);
+    const nodes = [];
+    const walk = (node) => {
+      for (const n of node.children.values()) {
+        const history = n.history.map((m) => [m.ts, text(m), m.payload instanceof Uint8Array, m.qos, m.retain]);
+        nodes.push([n.path, n.messageCount, n.subtreeMessages, n.subtreeTopics, n.lastUpdate, n.selfUpdate, n.retained, n.expanded, history]);
+        walk(n);
+      }
+    };
+    walk(tree.root);
+    const $ = (s) => document.querySelector(s);
+    return {
+      tab: [tab.connId, tab.label, tab.mode, tab.status.state, tab.everConnected, tab.rightPanel, !$('#plots-host').hidden],
+      counts: [tree.topicCount, tree.messageCount],
+      nodes,
+      rows: tab.treeView.rows.map((r) => r.node.path),
+      selected: [tab.selected?.path, tab.treeView.selected?.path, $('#status-selected').textContent],
+      filter: [$('#tree-filter').value, $('#filter-values').checked, !!tab.treeView.filter],
+      viewer: {
+        source: viewer.source?.path,
+        held: viewer.pinned && [viewer.pinned.ts, text(viewer.pinned), viewer.pinned === viewer.source.history[0]],
+        query: [viewer.query, viewer.search.value],
+        expanded: [...viewer.expandedByTopic].map(([t, s]) => [t, [...s].sort()]),
+        chart: [...viewer.plotByTopic],
+      },
+      publisher: [publisher.topic.value, publisher.payload.value, publisher.format.value, publisher.qos.value, publisher.retain.checked, publisher.follow],
+      plots: {
+        doc: JSON.stringify(plots.model.toDoc()),
+        points: plots.points('robot/value', null),
+        zoom: [[...plots.zoomByTab], [...plots.yZoom]],
+        frozenAt: plots.frozenAt,
+        selected: plots.selectedId,
+        drawn: [document.querySelectorAll('#plots-host .plot-card').length, $('#plots-host .zoom-reset').hidden, $('#plots-host .plots-toolbar').textContent],
+      },
+      pause: [tab.paused, $('#btn-pause').textContent, tab.pauseQueue.map(text), tab.droppedTotal],
+    };
+  });
+
+test("a tab's state survives export and import", async ({ env }) => {
+  const a = await env.broker();
+  await a.publish('robot/state', JSON.stringify({ battery: 80, pose: { x: 1, y: 2 } }), { retain: true });
+  await a.publish('robot/arm/joint1', '1', { retain: true });
+  await a.publish('robot/arm/joint2', '2', { retain: true });
+  const { app, page, errors } = await env.connected(a);
+  await waitForTopic(page, 'robot/arm/joint2');
+  await a.publish('robot/state', JSON.stringify({ battery: 79, pose: { x: 1, y: 3 } }));
+  await expect.poll(() => page.evaluate(() => window.__mqttscope.tree.find('robot/state').messageCount)).toBe(2);
+
+  // A second tab, so the tab's place in the strip counts.
+  await openTab(page);
+  await activate(page, 0);
+  const id = await page.evaluate(() => window.__mqttscope.shell.active.connId);
+
+  // Expanded nodes, the selection and the inspector: held on the older
+  // message, its JSON collapsed, searched, a field charted.
+  await page.evaluate(() => {
+    const { tree, treeView } = window.__mqttscope;
+    tree.find('robot/arm').expanded = true; // a branch with no message of its own
+    treeView.refresh();
+  });
+  await selectTopic(page, 'robot/state');
+  await page.evaluate(() => {
+    const { viewer } = window.__mqttscope;
+    viewer.pinned = viewer.source.history[0];
+    viewer.render(true);
+    viewer.expandAll(false);
+    viewer.plotByTopic.set('robot/state', { segs: ['battery'], label: 'battery' });
+  });
+  await page.locator('#viewer-host .viewer .search').fill('pose');
+  await expect.poll(() => page.evaluate(() => window.__mqttscope.viewer.query)).toBe('pose');
+
+  // The filter and a publisher draft.
+  await page.locator('#tree-filter').fill('robot');
+  await page.locator('#filter-values').check();
+  await expect.poll(() => page.evaluate(() => !!window.__mqttscope.treeView.filter)).toBe(true);
+  await page.locator('#publisher-host .topic-input').fill('cmd/go');
+  await page.locator('#publisher-host .payload-editor').fill('go now');
+  await page.locator('#publisher-host select').nth(0).selectOption('2');
+  await page.locator('#publisher-host select').nth(1).selectOption('text');
+  await page.locator('#publisher-host .pub-row .check input').check();
+
+  // A plot with points, zoomed and frozen, on screen.
+  await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/value', null));
+  for (let i = 1; i <= 5; i++) await a.publish('robot/value', String(i));
+  await expect.poll(() => page.evaluate(() => window.__mqttscope.plots.points('robot/value', null).length)).toBe(5);
+  await page.locator('.right-tabs .tab[data-tab="plots"]').click();
+  await page.evaluate(() => {
+    const { plots } = window.__mqttscope;
+    const pts = plots.points('robot/value', null);
+    plots.zoom(plots.plots[0], { t0: pts[0].t - 1, t1: pts[4].t + 1, yMin: 0, yMax: 10 });
+    plots.toggleFreeze();
+  });
+
+  // Paused with a queue.
+  await page.locator('#btn-pause').click();
+  for (let i = 6; i <= 8; i++) await a.publish('robot/value', String(i));
+  await expect.poll(() => page.evaluate(() => window.__mqttscope.shell.active.pauseQueue.length)).toBe(3);
+  await page.evaluate(() => (window.__mqttscope.shell.active.droppedTotal = 7));
+
+  const before = await tabState(page);
+  expect(before.viewer.held).toEqual([expect.any(Number), expect.stringContaining('80'), true]);
+  expect(before.plots.zoom[1]).toHaveLength(1);
+  const order = await page.evaluate(() => window.__mqttscope.shell.tabs.map((t) => t.connId));
+
+  await page.evaluate((i) => {
+    window.__old = window.__mqttscope.shell.active;
+    window.__mqttscope.shell.reimport(i);
+  }, id);
+  expect(await page.evaluate(() => window.__mqttscope.shell.active !== window.__old && !document.contains(window.__old.root))).toBe(true);
+  expect(await page.evaluate(() => window.__mqttscope.shell.tabs.map((t) => t.connId))).toEqual(order);
+  expect(await tabState(page)).toEqual(before);
+  await expect(page.locator('#stat-rate')).toHaveText('paused · 3 queued');
+  await expect(page.locator('#status-dropped')).toHaveText('7 messages dropped (too fast)');
+  await expect(page.locator('#status-text')).toContainText('Connected');
+  await expect(page.locator('#plots-host .plot-card')).toHaveCount(1);
+
+  // The same connection: what was queued and what arrives now reach the new tab.
+  await page.locator('#btn-pause').click();
+  await a.publish('robot/value', '9');
+  await expect.poll(() => page.evaluate(() => window.__mqttscope.plots.points('robot/value', null).map((p) => p.v))).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+  expect(await page.evaluate(() => window.__mqttscope.tree.find('robot/value').messageCount)).toBe(9);
+  expect(a.aedes.connectedClients).toBe(1);
+  expect(await app.evaluate(() => globalThis.__mqttscopeConnections.size)).toBe(2);
+
+  // Plot changes are still saved for the profile: one not saved yet when the
+  // tab is rebuilt, and one made after.
+  const savedTitle = () => page.evaluate(async () => (await window.api.layoutGet(window.__mqttscope.shell.active.profile.id)).doc.tabs[0].plots[0].title);
+  await page.evaluate((i) => {
+    const { plots, shell } = window.__mqttscope;
+    plots.model.updatePlot(plots.plots[0].id, { title: 'Unsaved' });
+    shell.reimport(i);
+  }, id);
+  await expect.poll(savedTitle).toBe('Unsaved');
+  await page.evaluate(() => window.__mqttscope.plots.model.updatePlot(window.__mqttscope.plots.plots[0].id, { title: 'Later' }));
+  await expect.poll(savedTitle).toBe('Later');
+
+  // An inactive tab stays where it was, inactive.
+  const other = order.find((t) => t !== id);
+  await page.evaluate((i) => window.__mqttscope.shell.reimport(i), other);
+  expect(await page.evaluate(() => window.__mqttscope.shell.tabs.map((t) => t.connId))).toEqual(order);
+  expect(await page.evaluate(() => window.__mqttscope.shell.active.connId)).toBe(id);
+  await activate(page, 1);
+  await expect(page.locator('.conn-dialog')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
 test('a plot popped out of a tab whose profile has no name is titled by the plot alone', async ({ env }) => {
   const a = await env.broker();
   const { app, page, errors } = await env.connected(a, { connectNow: false });

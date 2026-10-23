@@ -680,3 +680,79 @@ test('retained flag: set by retained messages, cleared by an empty payload, rese
   tree.removeTopic(tree.find('y'));
   assert.equal(tree.find('y').retained, false);
 });
+
+describe('snapshot and restore', () => {
+  // Every node with what restore() rebuilds, in the tree's own order.
+  const describeTree = (tree) =>
+    allNodes(tree).map((n) => ({
+      path: n.path,
+      messageCount: n.messageCount,
+      subtreeMessages: n.subtreeMessages,
+      subtreeTopics: n.subtreeTopics,
+      lastUpdate: n.lastUpdate,
+      selfUpdate: n.selfUpdate,
+      historySize: n.historySize,
+      retained: n.retained,
+      expanded: n.expanded,
+      history: n.history,
+      message: n.message,
+    }));
+
+  function sample() {
+    const tree = new TopicTree({ historyLimit: 3 });
+    const add = (topic, text, retain = false) =>
+      tree.addMessage({ topic, payload: new TextEncoder().encode(text), qos: 1, retain, ts: ++clock, props: { contentType: 'text/plain' } });
+    add('robot/arm/joint1', '1');
+    add('robot/arm/joint2', '2', true);
+    for (let i = 0; i < 6; i++) add('robot/state', `{"battery":${80 - i}}`); // 3 of 6 kept
+    add('robot', 'a topic with children');
+    add('gone/away', 'x');
+    add('/leading', 'empty top level');
+    tree.remove(tree.find('gone/away'));
+    add('robot/arm/joint1', '3');
+    tree.find('robot').expanded = true;
+    tree.find('robot/arm').expanded = true; // a branch with no message of its own
+    tree.find('').expanded = true;
+    return tree;
+  }
+
+  test('snapshot and restore give the same tree', () => {
+    const tree = sample();
+    const snap = tree.snapshot();
+    assert.deepEqual(snap.expanded.sort(), ['', 'robot', 'robot/arm']);
+    const copy = new TopicTree({ historyLimit: 3 });
+    copy.addMessage(msg('stale/topic')); // replaced by the restore
+    copy.restore(structuredClone(snap)); // as it crosses to another window
+    checkInvariants(copy);
+    assert.deepEqual(describeTree(copy), describeTree(tree));
+    assert.deepEqual(rowPaths(copy.rows()), rowPaths(tree.rows()));
+    assert.equal(copy.topicCount, tree.topicCount);
+    assert.equal(copy.messageCount, tree.messageCount);
+    assert.equal(copy.find('gone'), null);
+    assert.ok(copy.find('robot/state').message.payload instanceof Uint8Array);
+    assert.equal(copy.find('robot/state').messageCount, 6);
+    assert.equal(copy.find('robot/state').history.length, 3);
+
+    // It keeps counting from there.
+    copy.addMessage(msg('robot/state', 4));
+    assert.equal(copy.find('robot/state').messageCount, 7);
+    assert.equal(copy.find('robot/state').history.length, 3);
+    assert.equal(copy.messageCount, tree.messageCount + 1);
+    checkInvariants(copy);
+  });
+
+  test('the snapshot is a copy; restore trims histories to its own limits', () => {
+    const tree = sample();
+    const snap = tree.snapshot();
+    const kept = snap.topics.find((t) => t.path === 'robot/state').history;
+    tree.addMessage(msg('robot/state'));
+    assert.equal(kept.at(-1).ts, tree.find('robot/state').history.at(-2).ts, 'later messages do not change it');
+    const small = new TopicTree({ historyLimit: 2, historyBytes: 1e9 });
+    small.restore(snap);
+    checkInvariants(small);
+    const state = small.find('robot/state');
+    assert.equal(state.history.length, 2);
+    assert.equal(state.messageCount, 6);
+    assert.equal(state.history.at(-1), kept.at(-1), 'the newest are kept');
+  });
+});
