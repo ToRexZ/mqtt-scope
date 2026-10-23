@@ -190,7 +190,7 @@ export class ConnectionTab {
   }
 
   wireChrome() {
-    this.els.disconnect.addEventListener('click', () => (this.canReconnect ? this.reconnect() : this.tabApi.disconnect()));
+    this.els.disconnect.addEventListener('click', () => this.toggleConnection());
     this.els.subscriptions.addEventListener('click', () => this.showSubscriptions());
     this.els.pause.addEventListener('click', () => this.togglePause());
     this.$('#btn-clear').addEventListener('click', () => this.clearTree());
@@ -346,6 +346,12 @@ export class ConnectionTab {
     this.shell.onChange(this);
     if (!res.ok) toast(res.error, 'error');
     return res;
+  }
+
+  // The toolbar button and the tab menu: Reconnect once the user
+  // disconnected, else Disconnect.
+  toggleConnection() {
+    return this.canReconnect ? this.reconnect() : this.tabApi.disconnect();
   }
 
   // Connects again to the profile the user disconnected from, as saved now

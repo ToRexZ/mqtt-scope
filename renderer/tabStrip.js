@@ -31,6 +31,8 @@ export function dotState(status, everConnected) {
 export class TabStrip {
   // handlers: onActivate(id), onClose(id), onNew(), onContextMenu(id, x, y),
   //           onMove(id, toIndex)
+//           (dragging inside this strip only; a drag from or to another
+//           window would enter through dragover/drop below)
   constructor(header, handlers) {
     this.handlers = handlers;
     this.list = header.querySelector('.conn-tabs');
@@ -39,6 +41,8 @@ export class TabStrip {
     this.brand = header.querySelector('.brand');
     this.plus = header.querySelector('.tab-new');
     this.activeId = null;
+    this.focusBefore = null; // the focused element when a tab was pressed
+    this.dragId = null; // the tab being dragged inside this strip
     this.keyframes = new Set(); // ping-pong keyframes made so far, by name
     this.sheet = document.head.appendChild(document.createElement('style')).sheet;
     // The strip gives way to the window's width; the right-hand buttons
@@ -48,8 +52,50 @@ export class TabStrip {
     for (const b of header.querySelectorAll('.spacer ~ *')) observer.observe(b);
     header.querySelector('.tab-new').addEventListener('click', () => handlers.onNew());
     // A click on a tab leaves the focus where it was, so the tab being left
-    // keeps its focused element for when it is shown again.
-    this.list.addEventListener('mousedown', (e) => e.target.closest('.conn-tab') && e.preventDefault());
+    // keeps its focused element for when it is shown again. (Not by
+    // cancelling mousedown: that would also cancel the drag.) The middle
+    // button must not autoscroll.
+    this.list.addEventListener('mousedown', (e) => {
+      if (!e.target.closest('.conn-tab')) return;
+      if (e.button === 1) e.preventDefault();
+      else this.focusBefore = document.activeElement;
+    });
+    for (const type of ['mouseup', 'dragend']) document.addEventListener(type, () => this.restoreFocus());
+    this.list.addEventListener('auxclick', (e) => {
+      const item = e.button === 1 && e.target.closest('.conn-tab');
+      if (!item) return;
+      e.preventDefault();
+      handlers.onClose(item.dataset.id);
+    });
+    this.list.addEventListener('keydown', (e) => this.onKey(e));
+    this.list.addEventListener('dragstart', (e) => {
+      const item = e.target.closest?.('.conn-tab');
+      if (!item) return;
+      this.dragId = item.dataset.id;
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', this.dragId);
+    });
+    this.list.addEventListener('dragover', (e) => {
+      if (!this.dragId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      this.mark(this.dropTarget(e));
+    });
+    this.list.addEventListener('dragleave', (e) => !this.list.contains(e.relatedTarget) && this.mark(null));
+    this.list.addEventListener('drop', (e) => {
+      if (!this.dragId) return;
+      e.preventDefault();
+      const target = this.dropTarget(e);
+      const id = this.dragId;
+      this.endDrag();
+      if (!target) return;
+      const order = [...this.list.children].map((c) => c.dataset.id);
+      let to = order.indexOf(target.item.dataset.id) + (target.after ? 1 : 0);
+      const from = order.indexOf(id);
+      if (from < to) to--; // the dragged tab leaves its place first
+      if (to !== from) handlers.onMove(id, to);
+    });
+    this.list.addEventListener('dragend', () => this.endDrag());
     this.list.addEventListener('click', (e) => {
       const item = e.target.closest('.conn-tab');
       if (!item) return;
@@ -62,6 +108,51 @@ export class TabStrip {
       e.preventDefault();
       handlers.onContextMenu(item.dataset.id, e.clientX, e.clientY);
     });
+  }
+
+  // The tab under the pointer and whether the drop goes after it (the right
+  // half), or null over nothing.
+  dropTarget(e) {
+    const item = e.target.closest?.('.conn-tab');
+    if (!item) return null;
+    const r = item.getBoundingClientRect();
+    return { item, after: e.clientX > r.left + r.width / 2 };
+  }
+
+  // The insertion marker: a bar on the near edge of the target tab.
+  mark(target) {
+    for (const item of this.items.values()) {
+      item.classList.toggle('drop-before', target?.item === item && !target.after);
+      item.classList.toggle('drop-after', target?.item === item && target.after);
+    }
+  }
+
+  restoreFocus() {
+    const before = this.focusBefore;
+    this.focusBefore = null;
+    if (!before || !this.list.contains(document.activeElement)) return;
+    if (before.isConnected && !this.list.contains(before)) before.focus({ preventScroll: true });
+    else document.activeElement.blur();
+  }
+
+  endDrag() {
+    this.dragId = null;
+    this.mark(null);
+  }
+
+  // Arrow keys, Home and End move focus and activate; Delete closes.
+  onKey(e) {
+    const item = e.target.closest?.('.conn-tab');
+    if (!item || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    const all = [...this.list.children];
+    const i = all.indexOf(item);
+    const to = { ArrowLeft: (i + all.length - 1) % all.length, ArrowRight: (i + 1) % all.length, Home: 0, End: all.length - 1 }[e.key];
+    if (e.key === 'Delete') this.handlers.onClose(item.dataset.id);
+    else if (to !== undefined) {
+      this.handlers.onActivate(all[to].dataset.id);
+      all[to].focus();
+    } else return;
+    e.preventDefault();
   }
 
   // tabs: [{ id, label, state (see dotState), active }] in strip order. Tabs
@@ -78,6 +169,7 @@ export class TabStrip {
       item.dataset.state = t.state;
       item.classList.toggle('active', t.active);
       item.setAttribute('aria-selected', String(t.active));
+      item.tabIndex = t.active ? 0 : -1; // roving: one tab stop for the strip
       item.title = t.label;
       const label = item.querySelector('.conn-tab-label');
       if (label.textContent !== t.label) label.textContent = t.label;
@@ -151,8 +243,13 @@ export class TabStrip {
     item.type = 'button';
     item.dataset.id = id;
     item.setAttribute('role', 'tab');
+    item.draggable = true;
+    // Mouse only (Delete closes from the keyboard); hidden so the tab's
+    // accessible name is just its label.
     const close = el('span', 'conn-tab-close', '×');
     close.title = 'Close tab';
+    close.setAttribute('aria-label', 'Close tab');
+    close.setAttribute('aria-hidden', 'true');
     const name = el('span', 'conn-tab-name');
     name.append(el('span', 'conn-tab-label'));
     item.append(el('span', 'dot'), name, close);

@@ -292,6 +292,27 @@ span.icon {
   outline: 2px solid var(--accent);
   outline-offset: -1px;
 }
+.conn-tab {
+  position: relative;
+}
+/* The insertion marker while a tab is dragged over this one. */
+.conn-tab.drop-before::before,
+.conn-tab.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.conn-tab.drop-before::before {
+  left: -3px;
+}
+.conn-tab.drop-after::after {
+  right: -3px;
+}
 .conn-tab .dot {
   flex: none;
 }

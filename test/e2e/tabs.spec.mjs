@@ -2,7 +2,7 @@
 // click, closing with ×, the window title, and Disconnect / Reconnect in the
 // tab's toolbar.
 
-import { test, expect, makeUserData, profile, connect, selectTopic, waitForTopic, viewerBody, mockDialogs, dialogCalls, toast, openTabTo, activeTabName } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, selectTopic, waitForTopic, viewerBody, mockDialogs, dialogCalls, toast, openTabTo, activeTabName, menu, menuLabels } from './fixtures.mjs';
 
 const tabEl = (page, id) => page.locator(`.conn-tab[data-id="${id}"]`);
 // A tab's plot series and the values it recorded, also while the tab is hidden.
@@ -336,5 +336,134 @@ test('no tab overlaps +, whatever the width', async ({ env }) => {
     expect(r.stripRight, `width ${w}`).toBeLessThanOrEqual(r.plusLeft + 0.5);
     if (!r.scrolled) expect(r.last, `width ${w}`).toBeLessThanOrEqual(r.plusLeft + 0.5);
   }
+  expect(errors).toEqual([]);
+});
+
+const tabIds = (page) => page.evaluate(() => window.__mqttscope.shell.tabs.map((t) => t.connId));
+const newTab = (page) => page.evaluate(() => window.__mqttscope.shell.openTab().then((t) => t.connId));
+
+test('the tab menu lists its actions and closes others and to the right', async ({ env }) => {
+  const { idA, idB, page, errors } = await twoTabs(env);
+  const idC = await newTab(page);
+  await tabEl(page, idB).click({ button: 'right' });
+  expect(await menuLabels(page)).toEqual(['Close', 'Close other tabs', 'Close tabs to the right', 'Move to new window', 'Disconnect']);
+  const disabled = () => page.locator('.ctx-menu .ctx-item.disabled').allTextContents();
+  expect(await disabled()).toEqual(['Move to new window']);
+  await menu(page, 'Close tabs to the right');
+  await expect(tabEl(page, idC)).toHaveCount(0);
+  expect(await tabIds(page)).toEqual([idA, idB]);
+
+  // Reconnect once the user disconnected.
+  await tabEl(page, idB).click({ button: 'right' });
+  await menu(page, 'Disconnect');
+  await expect(tabEl(page, idB)).toHaveAttribute('data-state', 'disconnected');
+  await tabEl(page, idB).click({ button: 'right' });
+  expect(await menuLabels(page)).toContain('Reconnect');
+  await menu(page, 'Reconnect');
+  await expect(tabEl(page, idB)).toHaveAttribute('data-state', 'connected');
+
+  // Nothing to the right of the last tab.
+  await tabEl(page, idB).click({ button: 'right' });
+  expect(await disabled()).toEqual(['Close tabs to the right', 'Move to new window']);
+  await page.keyboard.press('Escape');
+
+  await tabEl(page, idB).click({ button: 'right' });
+  await menu(page, 'Close other tabs');
+  await expect(tabEl(page, idA)).toHaveCount(0);
+  expect(await tabIds(page)).toEqual([idB]);
+  await tabEl(page, idB).click({ button: 'right' });
+  expect(await disabled()).toEqual(['Close other tabs', 'Close tabs to the right', 'Move to new window']);
+  await page.keyboard.press('Escape');
+  expect(errors).toEqual([]);
+});
+
+test('closing several tabs asks once when plots hold data', async ({ env }) => {
+  const { app, b, idA, idB, page, errors } = await twoTabs(env);
+  const idC = await newTab(page);
+  await addSeries(page, idB, 'b/value');
+  await b.publish('b/value', '1');
+  await expect.poll(() => plotValues(page, idB, 'b/value')).toEqual([1]);
+  await mockDialogs(app, { confirm: false });
+  await tabEl(page, idA).click({ button: 'right' });
+  await menu(page, 'Close other tabs');
+  await expect.poll(() => dialogCalls(app)).toHaveLength(1);
+  expect((await dialogCalls(app))[0].message).toBe('Close 2 tabs?');
+  expect(await tabIds(page)).toEqual([idA, idB, idC]);
+  await mockDialogs(app, { confirm: true });
+  await tabEl(page, idA).click({ button: 'right' });
+  await menu(page, 'Close other tabs');
+  await expect.poll(() => tabIds(page)).toEqual([idA]);
+  expect(errors).toEqual([]);
+});
+
+test('middle-click closes a tab', async ({ env }) => {
+  const { idA, idB, page, errors } = await twoTabs(env);
+  await tabEl(page, idA).click({ button: 'middle' });
+  await expect(tabEl(page, idA)).toHaveCount(0);
+  expect(await tabIds(page)).toEqual([idB]);
+  expect(errors).toEqual([]);
+});
+
+test('dragging a tab reorders the strip', async ({ env }) => {
+  const { idA, idB, page, errors } = await twoTabs(env);
+  const idC = await newTab(page);
+  await tabEl(page, idC).dragTo(tabEl(page, idA), { targetPosition: { x: 5, y: 10 } });
+  await expect.poll(() => tabIds(page)).toEqual([idC, idA, idB]);
+  await expect(page.locator('.conn-tab')).toHaveCount(3);
+  await expect(page.locator('.conn-tab.drop-before, .conn-tab.drop-after')).toHaveCount(0);
+  await tabEl(page, idC).dragTo(tabEl(page, idB), { targetPosition: { x: 5, y: 10 } });
+  await expect.poll(() => tabIds(page)).toEqual([idA, idC, idB]);
+  // The right half of the last tab: after it.
+  const box = await tabEl(page, idB).boundingBox();
+  await tabEl(page, idA).dragTo(tabEl(page, idB), { targetPosition: { x: box.width - 5, y: 10 } });
+  await expect.poll(() => tabIds(page)).toEqual([idC, idB, idA]);
+  expect(errors).toEqual([]);
+});
+
+test('reopen brings the last closed tab back, connected and empty', async ({ env }) => {
+  const { app, idA, idB, b, page, errors } = await twoTabs(env);
+  await addSeries(page, idB, 'b/value');
+  await b.publish('b/value', '1');
+  await expect.poll(() => plotValues(page, idB, 'b/value')).toEqual([1]);
+  await mockDialogs(app, { confirm: true });
+  await page.evaluate(() => window.__mqttscope.shell.closeTab(window.__mqttscope.shell.tabs[1].connId));
+  await expect(tabEl(page, idB)).toHaveCount(0);
+  await page.evaluate(() => window.__mqttscope.shell.reopenClosed());
+  await expect(page.locator('.conn-tab')).toHaveCount(2);
+  await expect(activeTabName(page)).toHaveText('Broker B');
+  await expect(page.locator('.conn-tab.active')).toHaveAttribute('data-state', 'connected');
+  expect(await page.evaluate(() => window.__mqttscope.tree.find('b/value'))).toBeFalsy();
+  expect(await tabIds(page)).toContain(idA);
+  // Nothing left to reopen: no new tab.
+  await page.evaluate(() => window.__mqttscope.shell.reopenClosed());
+  await expect(page.locator('.conn-tab')).toHaveCount(2);
+  expect(errors).toEqual([]);
+});
+
+test('a double-click on + opens one tab', async ({ env }) => {
+  const { page, errors } = await twoTabs(env);
+  await page.locator('.tab-new').dblclick();
+  await expect(page.locator('.conn-dialog')).toBeVisible();
+  await expect(page.locator('.conn-tab')).toHaveCount(3);
+  expect(errors).toEqual([]);
+});
+
+test('the strip is a tablist with roving tabindex and arrow keys', async ({ env }) => {
+  const { idA, idB, page, errors } = await twoTabs(env);
+  await expect(page.locator('.conn-tabs')).toHaveAttribute('role', 'tablist');
+  await expect(tabEl(page, idB)).toHaveAttribute('tabindex', '0');
+  await expect(tabEl(page, idA)).toHaveAttribute('tabindex', '-1');
+  await expect(tabEl(page, idA)).toHaveAccessibleName('Broker A');
+  await tabEl(page, idB).focus();
+  await page.keyboard.press('ArrowLeft');
+  await expect(activeTabName(page)).toHaveText('Broker A');
+  await expect(tabEl(page, idA)).toBeFocused();
+  await page.keyboard.press('End');
+  await expect(tabEl(page, idB)).toBeFocused();
+  await page.keyboard.press('Home');
+  await expect(tabEl(page, idA)).toBeFocused();
+  await page.keyboard.press('Delete');
+  await expect(tabEl(page, idA)).toHaveCount(0);
+  expect(await tabIds(page)).toEqual([idB]);
   expect(errors).toEqual([]);
 });

@@ -6,7 +6,7 @@
 
 import { ConnectionTab } from './connectionTab.js';
 import { ConnectionDialog } from './connectionDialog.js';
-import { closeMenu, toast } from './ui.js';
+import { closeMenu, showMenu, toast } from './ui.js';
 import { DEFAULT_SETTINGS, normalizeSettings, openSettings } from './settings.js';
 import { TabSet } from './tabSet.js';
 import { TabStrip, dotState } from './tabStrip.js';
@@ -65,10 +65,22 @@ const strip = new TabStrip($('.topbar'), {
   // Until the dialog is drawn inside the tab, it opens over the window and
   // connects the new tab; cancelling leaves a "New connection" tab.
   onNew: async () => {
-    await openTab();
+    if (opening) return; // a double-click would make two tabs
+    opening = true;
+    try {
+      await openTab();
+    } finally {
+      opening = false;
+    }
     connections.open();
   },
+  onContextMenu: (id, x, y) => tabMenu(id, x, y),
+  onMove: (id, to) => {
+    order.move(id, to);
+    refresh();
+  },
 });
+let opening = false;
 
 // A tab gets its own connection in main; its id is the tab's id. A tab to
 // connect takes its profile when connect() does: one open in another tab
@@ -90,10 +102,10 @@ async function openTab({ profile = null, connect = false, activate: show = true 
 // Closes the tab and its connection, after asking when its plots hold
 // recorded data. The window always keeps a tab: closing the last one opens a
 // fresh one.
-async function closeTab(id) {
+async function closeTab(id, { confirmed = false } = {}) {
   const tab = tabOf(id);
   if (!tab) return;
-  if (tab.hasPlotData) {
+  if (tab.hasPlotData && !confirmed) {
     const ok = await api.confirm({
       message: `Close “${tab.label}”?`,
       detail: 'Its plots hold recorded data, which is lost when the tab closes. The plots themselves are kept.',
@@ -114,6 +126,48 @@ async function closeTab(id) {
     await openTab();
     if (!updates.installing()) connections.open();
   }
+}
+
+// Closes several tabs with one question when any of their plots holds data.
+async function closeTabs(ids) {
+  const list = ids.map(tabOf).filter(Boolean);
+  if (list.some((t) => t.hasPlotData)) {
+    const ok = await api.confirm({
+      message: `Close ${list.length} tabs?`,
+      detail: 'Some plots hold recorded data, which is lost when their tabs close. The plots themselves are kept.',
+      okLabel: 'Close',
+    });
+    if (!ok) return;
+  }
+  for (const tab of list) if (tabOf(tab.connId) === tab) await closeTab(tab.connId, { confirmed: true });
+}
+
+// Opens the newest closed tab whose profile still exists, connected; its
+// data starts empty.
+async function reopenClosed() {
+  for (let entry = order.popClosed(); entry; entry = order.popClosed()) {
+    const profile = connections.profiles.find((p) => p.id === entry.profileId);
+    if (profile) return openTab({ profile, connect: true });
+  }
+  return null;
+}
+
+function tabMenu(id, x, y) {
+  const tab = tabOf(id);
+  if (!tab) return;
+  const others = order.othersOf(id);
+  const right = order.rightOf(id);
+  showMenu(x, y, [
+    { label: 'Close', action: () => closeTab(id) },
+    { label: 'Close other tabs', disabled: !others.length, action: () => closeTabs(others) },
+    { label: 'Close tabs to the right', disabled: !right.length, action: () => closeTabs(right) },
+    { label: 'Move to new window', disabled: true }, // enabled by moving tabs between windows
+    'separator',
+    // A tab that never connected has nothing to disconnect or resume.
+    tab.canReconnect
+      ? { label: 'Reconnect', action: () => tab.toggleConnection() }
+      : { label: 'Disconnect', disabled: tab.status.state === 'disconnected', action: () => tab.toggleConnection() },
+  ]);
 }
 
 // Draws the tab in the window. The tab shown is always the TabSet's active one.
@@ -272,6 +326,8 @@ window.__mqttscope = {
     },
     openTab,
     closeTab,
+    closeTabs,
+    reopenClosed,
     activate,
   },
 };

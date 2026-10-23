@@ -10,6 +10,13 @@ const setOf = (...ids) => {
   return s;
 };
 
+test('add ignores an id already in the set', () => {
+  const s = setOf('a', 'b');
+  s.add('a', { index: 1 });
+  assert.deepEqual(s.ids(), ['a', 'b']);
+  assert.equal(s.activeId, 'b');
+});
+
 test('add appends and activates; index inserts', () => {
   const s = new TabSet();
   s.add('a');

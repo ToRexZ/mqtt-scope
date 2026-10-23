@@ -20,7 +20,9 @@ export class TabSet {
     return [...this.#ids];
   }
 
+  // An id already in the set is left as it is.
   add(id, { index = this.#ids.length, activate = true } = {}) {
+    if (this.#ids.includes(id)) return;
     this.#ids.splice(Math.max(0, Math.min(index, this.#ids.length)), 0, id);
     if (activate || this.#active === null) this.#active = id;
   }
