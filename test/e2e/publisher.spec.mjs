@@ -36,10 +36,10 @@ test('publisher: suggestions, validation, formats, QoS/retain, Ctrl+Enter, error
 
   // Topic suggestions come from the tree.
   await pub.topic.fill('sens');
-  await expect(page.locator('#pub-topics option')).toHaveCount(2);
-  expect(await page.locator('#pub-topics option').evaluateAll((os) => os.map((o) => o.value).sort())).toEqual(['sensors/a/temp', 'sensors/b/temp']);
+  await expect(page.locator('#publisher-host datalist option')).toHaveCount(2);
+  expect(await page.locator('#publisher-host datalist option').evaluateAll((os) => os.map((o) => o.value).sort())).toEqual(['sensors/a/temp', 'sensors/b/temp']);
   await pub.topic.fill('');
-  await expect(page.locator('#pub-topics option')).toHaveCount(3);
+  await expect(page.locator('#publisher-host datalist option')).toHaveCount(3);
 
   // JSON validity indicator.
   await pub.topic.fill('pub/json');

@@ -7,6 +7,7 @@ import { decode, parseHex, formatTime, unsafeJson, hasUnsafeIntegers } from './p
 
 const RECENT_LIMIT = 50;
 const newId = () => Math.random().toString(36).slice(2, 10);
+let instances = 0; // each connection tab has a publisher; their topic lists need distinct ids
 
 export class Publisher {
   // opts: api, getTopics(prefix) -> string[], onToggle(collapsed)
@@ -32,9 +33,9 @@ export class Publisher {
     this.topic = el('input', 'input topic-input');
     this.topic.placeholder = 'Topic to publish to';
     this.topic.spellcheck = false;
-    this.topic.setAttribute('list', 'pub-topics');
     this.topicList = el('datalist');
-    this.topicList.id = 'pub-topics';
+    this.topicList.id = `pub-topics-${++instances}`;
+    this.topic.setAttribute('list', this.topicList.id);
     this.topic.addEventListener('input', () => {
       this.setFollow(false);
       this.fillTopicList();
@@ -81,11 +82,10 @@ export class Publisher {
     this.payload = el('textarea', 'payload-editor');
     this.payload.spellcheck = false;
     this.payload.placeholder = 'Payload — JSON, text or hex bytes depending on the format above';
-    let vTimer;
     this.payload.addEventListener('input', () => {
       this.setFollow(false);
-      clearTimeout(vTimer);
-      vTimer = setTimeout(() => this.validate(), 200);
+      clearTimeout(this.validateTimer);
+      this.validateTimer = setTimeout(() => this.validate(), 200);
     });
     this.payload.addEventListener('keydown', (e) => {
       if (e.key === 'Tab' && !e.shiftKey) {
@@ -116,6 +116,12 @@ export class Publisher {
     this.validate();
     this.setFollow(true);
     this.setListMode('saved');
+  }
+
+  // The tab closed: nothing of it may run later.
+  dispose() {
+    clearTimeout(this.validateTimer);
+    this.root.remove();
   }
 
   setFollow(on) {

@@ -103,10 +103,9 @@ export class MessageViewer {
     this.search = el('input', 'search');
     this.search.placeholder = 'Search message…';
     this.search.spellcheck = false;
-    let searchTimer;
     this.search.addEventListener('input', () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = setTimeout(() => {
         this.query = this.search.value;
         this.hitIndex = 0;
         this.render(true);
@@ -188,6 +187,32 @@ export class MessageViewer {
 
     this.root.append(head, bar, main);
     this.root.classList.toggle('no-history', !this.showHistory);
+  }
+
+  // The view mode, wrapping and history column are shared through
+  // localStorage; another tab may have changed them while this one was hidden.
+  reloadPrefs() {
+    const mode = loadPref('mode', 'tree');
+    const wrap = loadPref('wrap', false);
+    const showHistory = loadPref('history', true);
+    if (showHistory !== this.showHistory) {
+      this.showHistory = showHistory;
+      this.root.classList.toggle('no-history', !showHistory);
+    }
+    if (mode === this.mode && wrap === this.wrap) return;
+    this.mode = mode;
+    this.wrap = wrap;
+    this.render(true);
+  }
+
+  // Stops pending renders and the chart (the tab closed).
+  dispose() {
+    clearTimeout(this.updateTimer);
+    clearTimeout(this.searchTimer);
+    this.updateTimer = null;
+    this.disposeChart?.();
+    this.disposeChart = null;
+    this.root.remove();
   }
 
   focusSearch() {

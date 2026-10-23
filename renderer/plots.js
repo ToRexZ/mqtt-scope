@@ -68,8 +68,23 @@ export class PlotsPanel {
     this.visible = false;
     this.build(host);
     this.trackSeries();
-    setInterval(() => this.visible && !this.frozenAt && this.redraw(), REDRAW_MS);
-    document.addEventListener('fullscreenchange', () => this.onFullscreenChange());
+    this.redrawTimer = setInterval(() => this.visible && !this.frozenAt && this.redraw(), REDRAW_MS);
+    this.onFullscreen = () => this.onFullscreenChange();
+    document.addEventListener('fullscreenchange', this.onFullscreen);
+  }
+
+  // Stops the redraw timer, the charts and the document listener (the tab
+  // closed). Collected data is left to the garbage collector.
+  dispose() {
+    clearInterval(this.redrawTimer);
+    this.redrawTimer = null;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    document.removeEventListener('fullscreenchange', this.onFullscreen);
+    if (this.soloId) this.leaveSolo();
+    this.disposeCharts();
+    this.visible = false;
+    this.root.remove();
   }
 
   // ------------------------------------------------------------ reading
@@ -529,7 +544,8 @@ export class PlotsPanel {
       initial: 300,
       min: 200,
       max: () => Math.max(220, Math.min(700, this.root.clientWidth - 360)),
-      apply: (px) => this.root.style.setProperty('--ps-w', `${px}px`),
+      // On the body: every connection tab shares the width.
+      apply: (px) => document.body.style.setProperty('--ps-w', `${px}px`),
     });
   }
 

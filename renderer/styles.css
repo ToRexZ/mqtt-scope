@@ -258,6 +258,26 @@ span.icon {
   margin-right: 6px;
 }
 
+/* ------------------------------------------------------------ connection tab */
+
+/* The active tab's content (connectionTab.js): its toolbar, the layout and
+   its status bar, below the top bar. */
+.tab-host,
+.tab-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tab-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+}
+
 /* ------------------------------------------------------------ update notice */
 
 /* A quiet button beside Settings (updateButton.js); data-tone is its state. */
@@ -447,7 +467,8 @@ span.icon {
 /* Narrower than the window's minimum width, which tiling window managers
    ignore: the tree goes above the inspector instead of beside it. */
 @media (max-width: 899px) {
-  .topbar {
+  .topbar,
+  .tab-toolbar {
     flex-wrap: wrap;
   }
   .layout {

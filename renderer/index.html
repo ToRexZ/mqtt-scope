@@ -15,50 +15,62 @@
       <button id="btn-connections" class="conn-pill" title="Manage connections">
         <span class="dot"></span><span id="conn-label">Not connected</span>
       </button>
-      <button id="btn-disconnect" class="btn" hidden>Disconnect</button>
-      <button id="btn-subscriptions" class="btn" title="Add or remove subscriptions on the live connection" hidden>Subscriptions</button>
       <span class="spacer"></span>
-      <div class="stats">
-        <span id="stat-topics">0 topics</span>
-        <span id="stat-msgs">0 messages</span>
-        <span id="stat-rate">0 msg/s</span>
-      </div>
-      <button id="btn-pause" class="btn" title="Stop updating the view; messages are queued">Pause</button>
-      <button id="btn-clear" class="btn" title="Forget all received topics and messages">Clear</button>
       <button id="btn-update" class="btn update" hidden></button>
       <button id="btn-settings" class="btn" title="Settings">Settings</button>
     </header>
 
-    <main class="layout" id="layout">
-      <section class="pane tree-pane">
-        <div class="pane-head">
-          <input id="tree-filter" class="input" placeholder="Filter topics…  (Ctrl+F, supports + and #)" spellcheck="false" />
-          <label class="check small" title="Also search the latest value of each topic"><input type="checkbox" id="filter-values" /> values</label>
-          <button id="btn-collapse-all" class="btn icon" title="Collapse all">⊟</button>
-        </div>
-        <div class="tree-scroll" id="tree-scroll"></div>
-      </section>
-      <div class="splitter x" id="split-main"></div>
-      <section class="right" id="right">
-        <div class="right-tabs">
-          <button class="tab active" data-tab="inspector">Inspector</button>
-          <button class="tab" data-tab="plots">Plots <span id="plot-count" class="count"></span></button>
-        </div>
-        <div class="right-body">
-          <div class="viewer-host" id="viewer-host"></div>
-          <div class="plots-host" id="plots-host" hidden></div>
-        </div>
-        <div class="splitter y" id="split-right"></div>
-        <div class="publisher-host" id="publisher-host"></div>
-      </section>
-    </main>
+    <!-- The active connection tab (connectionTab.js). Only one tab is in the
+         document at a time, so the ids in the template stay unique. -->
+    <div class="tab-host" id="tab-host"></div>
 
-    <footer class="statusbar">
-      <span id="status-text">Not connected</span>
-      <span class="spacer"></span>
-      <span id="status-dropped" class="warn" hidden></span>
-      <span id="status-selected"></span>
-    </footer>
+    <template id="tab-template">
+      <div class="tab-root">
+        <div class="tab-toolbar">
+          <button id="btn-disconnect" class="btn" hidden>Disconnect</button>
+          <button id="btn-subscriptions" class="btn" title="Add or remove subscriptions on the live connection" hidden>Subscriptions</button>
+          <span class="spacer"></span>
+          <div class="stats">
+            <span id="stat-topics">0 topics</span>
+            <span id="stat-msgs">0 messages</span>
+            <span id="stat-rate">0 msg/s</span>
+          </div>
+          <button id="btn-pause" class="btn" title="Stop updating the view; messages are queued">Pause</button>
+          <button id="btn-clear" class="btn" title="Forget all received topics and messages">Clear</button>
+        </div>
+
+        <main class="layout" id="layout">
+          <section class="pane tree-pane">
+            <div class="pane-head">
+              <input id="tree-filter" class="input" placeholder="Filter topics…  (Ctrl+F, supports + and #)" spellcheck="false" />
+              <label class="check small" title="Also search the latest value of each topic"><input type="checkbox" id="filter-values" /> values</label>
+              <button id="btn-collapse-all" class="btn icon" title="Collapse all">⊟</button>
+            </div>
+            <div class="tree-scroll" id="tree-scroll"></div>
+          </section>
+          <div class="splitter x" id="split-main"></div>
+          <section class="right" id="right">
+            <div class="right-tabs">
+              <button class="tab active" data-tab="inspector">Inspector</button>
+              <button class="tab" data-tab="plots">Plots <span id="plot-count" class="count"></span></button>
+            </div>
+            <div class="right-body">
+              <div class="viewer-host" id="viewer-host"></div>
+              <div class="plots-host" id="plots-host" hidden></div>
+            </div>
+            <div class="splitter y" id="split-right"></div>
+            <div class="publisher-host" id="publisher-host"></div>
+          </section>
+        </main>
+
+        <footer class="statusbar">
+          <span id="status-text">Not connected</span>
+          <span class="spacer"></span>
+          <span id="status-dropped" class="warn" hidden></span>
+          <span id="status-selected"></span>
+        </footer>
+      </div>
+    </template>
 
     <script type="module" src="app.js"></script>
   </body>

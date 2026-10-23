@@ -442,8 +442,9 @@ test('notice: button, panel, Later keeps it, Skip hides it until a newer release
   await expect(button).toHaveText('↑ Update 9.9.9');
   await expect(page.getByRole('button', { name: 'Update 9.9.9', exact: true })).toBeVisible();
   const box = async (sel) => page.locator(sel).boundingBox();
-  const [clear, update, settings] = [await box('#btn-clear'), await button.boundingBox(), await box('#btn-settings')];
-  expect(clear.x + clear.width).toBeLessThanOrEqual(update.x);
+  // (Clear and the other connection buttons are in the tab's toolbar, below.)
+  const [pill, update, settings] = [await box('#btn-connections'), await button.boundingBox(), await box('#btn-settings')];
+  expect(pill.x + pill.width).toBeLessThanOrEqual(update.x);
   expect(update.x + update.width).toBeLessThanOrEqual(settings.x);
   expect(update.y).toBe(settings.y);
   await expect(button).toHaveAttribute('aria-expanded', 'false');

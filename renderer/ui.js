@@ -76,17 +76,23 @@ export function toast(message, kind = 'info') {
 // ------------------------------------------------------------ splitter
 
 // Drag `handle` to resize; `apply(px)` receives the new size. Sizes persist.
-// Drags are ignored while `active()` is false.
+// Drags are ignored while `active()` is false. A drag starts from the stored
+// size, which another splitter with the same key (another tab's) may have
+// changed since.
 export function splitter(handle, { axis, storageKey, initial, min, max, apply, invert = false, active = () => true }) {
   let size = initial;
-  try {
-    const saved = Number(localStorage.getItem(storageKey));
-    if (saved) size = saved;
-  } catch {}
+  const reload = () => {
+    try {
+      const saved = Number(localStorage.getItem(storageKey));
+      if (saved) size = saved;
+    } catch {}
+  };
+  reload();
   apply(size);
   handle.addEventListener('mousedown', (e) => {
     if (!active()) return;
     e.preventDefault();
+    reload();
     const start = axis === 'x' ? e.clientX : e.clientY;
     const startSize = size;
     document.body.classList.add(axis === 'x' ? 'resizing-x' : 'resizing-y');

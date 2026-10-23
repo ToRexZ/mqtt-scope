@@ -5,6 +5,8 @@
 // Every other api member is passed through.
 
 export function bindConnection(api, connId, { name }) {
+  // "<profile name> — <what>", or just <what> before the tab has a profile.
+  const title = (what) => (name() ? `${name()} — ${what}` : what);
   return {
     ...api,
     connect: (profile) => api.connect(connId, profile),
@@ -14,8 +16,8 @@ export function bindConnection(api, connId, { name }) {
     subscribe: (topic, qos) => api.subscribe(connId, topic, qos),
     unsubscribe: (topic) => api.unsubscribe(connId, topic),
     subscriptions: () => api.subscriptions(connId),
-    openPopout: (topic, history) => api.openPopout({ connId, topic, title: `${name()} — ${topic}`, history }),
-    openPlotWindow: (init) => api.openPlotWindow({ ...init, connId, title: `${name()} — ${init.plot.title}` }),
+    openPopout: (topic, history) => api.openPopout({ connId, topic, title: title(topic), history }),
+    openPlotWindow: (init) => api.openPlotWindow({ ...init, connId, title: title(init.plot.title) }),
     resetChildWindows: () => api.resetChildWindows(connId),
   };
 }
