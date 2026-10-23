@@ -8,6 +8,7 @@ import { ConnectionTab, STATE_LABELS } from './connectionTab.js';
 import { ConnectionDialog } from './connectionDialog.js';
 import { closeMenu, toast } from './ui.js';
 import { DEFAULT_SETTINGS, normalizeSettings, openSettings } from './settings.js';
+import { TabSet } from './tabSet.js';
 import { initUpdateButton } from './updateButton.js';
 import { ACTIONS, bindingIndex, comboFromEvent, keyBelongsToTarget, pointerFocus, resolveBindings, toAccelerator } from './keys.js';
 
@@ -20,13 +21,15 @@ const RATE_INTERVAL_MS = 1000;
 let settings = { ...DEFAULT_SETTINGS };
 let bindings = resolveBindings({});
 let keyIndex = bindingIndex(bindings);
-const tabs = []; // in strip order
+const tabs = new Map(); // id → ConnectionTab
+const order = new TabSet(); // the ids in strip order, and the active one
+const stripTabs = () => order.ids().map((id) => tabs.get(id));
 let active = null;
 let dialogStatus = null; // the active tab's status the connection dialog last saw
 
 function applySettings(next) {
   settings = next;
-  for (const tab of tabs) tab.applySettings(settings); // history limits apply to each tab
+  for (const tab of tabs.values()) tab.applySettings(settings); // history limits apply to each tab
   bindings = resolveBindings(settings.keys);
   keyIndex = bindingIndex(bindings);
   // The menu shows the current shortcuts (the keys themselves are handled here).
@@ -51,14 +54,15 @@ const shell = {
   onChange: (tab) => tab === active && showActive(),
 };
 
-const tabOf = (id) => tabs.find((t) => t.connId === id) || null;
+const tabOf = (id) => tabs.get(id) || null;
 
 // A tab gets its own connection in main; its id is the tab's id.
 async function openTab({ profile = null, connect = false, activate: show = true } = {}) {
   const connId = await api.openConnection();
   const tab = new ConnectionTab({ api, connId, settings, shell });
   if (profile) tab.profile = { ...profile };
-  tabs.push(tab);
+  tabs.set(connId, tab);
+  order.add(connId, { activate: false });
   if (show || !active) activate(connId);
   await tab.load();
   if (profile && connect) await tab.connect(profile);
@@ -70,18 +74,16 @@ async function openTab({ profile = null, connect = false, activate: show = true 
 async function closeTab(id) {
   const tab = tabOf(id);
   if (!tab) return;
-  const index = tabs.indexOf(tab);
-  tabs.splice(index, 1);
+  tabs.delete(id);
+  const nextId = order.remove(id); // the right neighbour, else the left
   const saved = tab.flush(); // before dispose stops its save timer
   tab.dispose();
   if (tab === active) {
     active = null;
-    // The neighbour on the right takes its place, else the one on the left.
-    const next = tabs[index] || tabs[index - 1];
-    if (next) activate(next.connId);
+    if (nextId) activate(nextId);
   }
   await Promise.allSettled([saved, api.closeConnection(id)]);
-  if (!tabs.length) {
+  if (!tabs.size) {
     await openTab();
     if (!updates.installing()) connections.open();
   }
@@ -93,6 +95,7 @@ function activate(id) {
   closeMenu(); // a menu of the tab being left would act on it
   active?.deactivate();
   active = tab;
+  order.activate(id);
   tab.activate($('#tab-host'));
   // Saved and recent messages are shared; another tab may have changed them.
   tab.publisher.load();
@@ -121,12 +124,12 @@ api.onWarning((event) => tabOf(event.connId)?.onWarning(event.message));
 // Hidden tabs record but are not drawn; message rates count for every tab.
 setInterval(() => active?.render(), RENDER_INTERVAL_MS);
 setInterval(() => {
-  for (const tab of tabs) tab.tickRate();
+  for (const tab of tabs.values()) tab.tickRate();
 }, RATE_INTERVAL_MS);
 
 // The main process asks for this before closing the window.
 api.onFlush(async () => {
-  await Promise.allSettled([connections.flush(), ...tabs.map((t) => t.flush())]);
+  await Promise.allSettled([connections.flush(), ...stripTabs().map((t) => t.flush())]);
   api.flushed();
 });
 
@@ -139,8 +142,8 @@ api.onMenu((action) => {
 // Another window saved shared data: pick up its changes.
 api.onStoreChanged(async (name) => {
   if (name === 'profiles') await connections.reload();
-  else if (name === 'savedMessages') await Promise.all(tabs.map((t) => t.publisher.load()));
-  else if (name === 'plotTabs') await Promise.all(tabs.map((t) => t.plots.reload()));
+  else if (name === 'savedMessages') await Promise.all(stripTabs().map((t) => t.publisher.load()));
+  else if (name === 'plotTabs') await Promise.all(stripTabs().map((t) => t.plots.reload()));
   else if (name === 'settings') applySettings(normalizeSettings(await api.storeGet('settings')));
 });
 
@@ -217,7 +220,7 @@ window.__mqttscope = {
   },
   shell: {
     get tabs() {
-      return [...tabs];
+      return stripTabs();
     },
     get active() {
       return active;
