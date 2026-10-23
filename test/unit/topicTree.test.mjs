@@ -755,4 +755,19 @@ describe('snapshot and restore', () => {
     assert.equal(state.messageCount, 6);
     assert.equal(state.history.at(-1), kept.at(-1), 'the newest are kept');
   });
+
+  test('the snapshot holds plain copies of the messages, without what views cached on them', () => {
+    const tree = sample();
+    const node = tree.find('robot/state');
+    for (const m of node.history) Object.assign(m, { _decoded: { kind: 'json' }, _preview: 'p', _search: 's', _hasNumbers: true });
+    const kept = tree.snapshot().topics.find((t) => t.path === 'robot/state').history;
+    assert.equal(kept.length, node.history.length);
+    for (const [i, m] of kept.entries()) {
+      const own = node.history[i];
+      assert.deepEqual(m, { topic: own.topic, payload: own.payload, qos: own.qos, retain: own.retain, ts: own.ts, props: own.props });
+      assert.notEqual(m, own);
+      assert.equal(m.payload, own.payload, 'the payload is shared');
+    }
+    assert.equal(node.history[0]._preview, 'p', "the tree's own messages keep their caches");
+  });
 });

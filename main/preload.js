@@ -2,6 +2,18 @@
 
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Main asks a window for something on `channel` ({ reqId, ...request });
+// cb(request) returns a promise, whose result or error goes back to main.
+function answer(channel, cb) {
+  ipcRenderer.on(channel, async (_e, { reqId, ...request }) => {
+    try {
+      ipcRenderer.send('tab:reply', { reqId, result: await cb(request) });
+    } catch (err) {
+      ipcRenderer.send('tab:reply', { reqId, error: String(err?.message || err) });
+    }
+  });
+}
+
 contextBridge.exposeInMainWorld('api', {
   // A window can hold several broker connections; main gives each an id
   // (see renderer/tabApi.js), and every MQTT call and event names one.
@@ -31,12 +43,21 @@ contextBridge.exposeInMainWorld('api', {
   onMenu: (cb) => ipcRenderer.on('menu', (_e, action) => cb(action)),
   onFlush: (cb) => ipcRenderer.on('app:flush', () => cb()),
   newWindow: () => ipcRenderer.invoke('app:newWindow'),
-  // What to open the window with, asked once: the tabs of the last run
-  // { tabs: [{ profileId, connected }], active }, { tabs: [], adopt: true }
-  // for a window a tab moves into, or null for a New connection tab. The
-  // window reports its tabs on every change, for the next launch.
+  // What to open the window with, asked once, with the window's id: the tabs
+  // of the last run { windowId, tabs: [{ profileId, connected }], active },
+  // { windowId, tabs: [], adopt: true } for a window a tab moves into, or
+  // { windowId } for a New connection tab. The window reports its tabs on
+  // every change, for the next launch.
   initialTabs: () => ipcRenderer.invoke('tabs:init'),
   reportTabs: (state) => ipcRenderer.send('tabs:report', state),
+  // Moving a tab with its connection to another main window (main/tabMove.js):
+  // main asks the window it leaves for its state { connId, drop } (the tab
+  // goes; answer { state, index, active }) and has the window it joins build
+  // it { connId, state, index, activate }.
+  moveTab: (connId, toWindowId, index) => ipcRenderer.invoke('tabs:move', { connId, toWindowId, index }),
+  tearOffTab: (connId) => ipcRenderer.invoke('tabs:tearOff', { connId }),
+  onTabExport: (cb) => answer('tab:export', cb),
+  onTabImport: (cb) => answer('tab:import', cb),
   setMenuShortcuts: (map) => ipcRenderer.send('menu:shortcuts', map),
   flushed: () => ipcRenderer.send('app:flushed'),
 

@@ -345,7 +345,7 @@ test('the tab menu lists its actions and closes others and to the right', async 
   await tabEl(page, idB).click({ button: 'right' });
   expect(await menuLabels(page)).toEqual(['Close', 'Close other tabs', 'Close tabs to the right', 'Move to new window', 'Disconnect']);
   const disabled = () => page.locator('.ctx-menu .ctx-item.disabled').allTextContents();
-  expect(await disabled()).toEqual(['Move to new window']);
+  expect(await disabled()).toEqual([]);
   await menu(page, 'Close tabs to the right');
   await expect(tabEl(page, idC)).toHaveCount(0);
   expect(await tabIds(page)).toEqual([idA, idB]);
@@ -361,7 +361,7 @@ test('the tab menu lists its actions and closes others and to the right', async 
 
   // Nothing to the right of the last tab.
   await tabEl(page, idB).click({ button: 'right' });
-  expect(await disabled()).toEqual(['Close tabs to the right', 'Move to new window']);
+  expect(await disabled()).toEqual(['Close tabs to the right']);
   await page.keyboard.press('Escape');
 
   await tabEl(page, idB).click({ button: 'right' });

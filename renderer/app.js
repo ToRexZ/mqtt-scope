@@ -29,6 +29,11 @@ const order = new TabSet(); // the ids in strip order, and the active one
 const stripTabs = () => order.ids().map((id) => tabs.get(id));
 const activeTab = () => tabs.get(order.activeId) || null;
 let dialogStatus = null; // the active tab's status the connection dialog last saw
+let windowId = null; // main's id of this window
+// Settled once the window has its settings (see start), which a tab moving
+// in is built with.
+let markStarted;
+const started = new Promise((resolve) => (markStarted = resolve));
 
 function applySettings(next) {
   settings = next;
@@ -131,17 +136,24 @@ async function closeTab(id, { confirmed = false } = {}) {
     });
     if (!ok || tabOf(id) !== tab) return;
   }
-  tabs.delete(id);
-  savedSeen.delete(id);
-  order.remove(id); // an active tab's right neighbour becomes active, else its left one
-  const saved = tab.flush(); // before dispose stops its save timer
-  tab.dispose();
+  const saved = removeTab(tab);
   // Reopen brings back what had worked: not a tab that never connected.
   if (tab.mode === 'session' && tab.profile) order.pushClosed({ profileId: tab.profile.id });
-  if (order.activeId) activate(order.activeId); // draws it, unless it already is
-  refresh();
   await Promise.allSettled([saved, api.closeConnection(id)]);
   if (!tabs.size) await openTab();
+}
+
+// Takes a tab out of the window, its connection left as it is, and shows
+// the next one. Returns the save of its plot changes not saved yet.
+function removeTab(tab) {
+  tabs.delete(tab.connId);
+  savedSeen.delete(tab.connId);
+  order.remove(tab.connId); // an active tab's right neighbour becomes active, else its left one
+  const saved = tab.flush(); // before dispose stops its save timer
+  tab.dispose();
+  if (order.activeId) activate(order.activeId); // draws it, unless it already is
+  refresh();
+  return saved;
 }
 
 // Rebuilds a tab in place from its exported state, as a window that a tab
@@ -158,6 +170,37 @@ function reimport(id) {
   savedSeen.delete(id); // its publisher reads the saved messages when shown
   if (shown) activate(id);
   refresh();
+}
+
+// Main moves a tab with its connection to another window (main/tabMove.js),
+// holding the connection's events until the tab is there. Leaving, the tab's
+// calls in flight (connecting, loading its plots) finish first and a plot
+// change not saved yet is saved; then it goes, answering with its state and
+// its place here, for the window it joins (or this one again, should that
+// fail). drop: it just goes (a copy main gave up waiting for).
+async function exportTab({ connId, drop = false }) {
+  const tab = tabOf(connId);
+  if (!tab) throw new Error('Unknown tab');
+  await tab.settle();
+  if (tabOf(connId) !== tab) throw new Error('Unknown tab'); // closed meanwhile
+  const out = { index: order.ids().indexOf(connId), active: tab.active, state: drop ? null : tab.exportState() };
+  removeTab(tab);
+  sendReport();
+  return out;
+}
+
+// A tab joining, built from its state at `index`; it is shown unless it
+// comes back to a window where it was not. Main then brings the window
+// forward and delivers the connection's events here.
+async function importTab({ connId, state, index, activate: show = true }) {
+  await started;
+  if (tabs.has(connId)) throw new Error('The tab is here already');
+  tabs.set(connId, ConnectionTab.fromState({ api, settings, shell }, state));
+  order.add(connId, { index, activate: false });
+  if (show || !activeTab()?.active) activate(connId);
+  refresh();
+  sendReport();
+  return true;
 }
 
 // Closes several tabs with one question when any of their plots holds data.
@@ -238,7 +281,7 @@ function tabMenu(id, x, y) {
     { label: 'Close', action: () => closeTab(id) },
     { label: 'Close other tabs', disabled: !others.length, action: () => closeTabs(others) },
     { label: 'Close tabs to the right', disabled: !right.length, action: () => closeTabs(right) },
-    { label: 'Move to new window', disabled: true }, // enabled by moving tabs between windows
+    { label: 'Move to new window', disabled: tabs.size < 2, action: () => api.tearOffTab(id) },
     'separator',
     // A tab that never connected has nothing to disconnect or resume.
     tab.canReconnect
@@ -316,6 +359,8 @@ api.onMessages((batch) => tabOf(batch.connId)?.ingestBatch(batch));
 api.onStatus((event) => tabOf(event.connId)?.onStatus(event.status));
 api.onWarning((event) => tabOf(event.connId)?.onWarning(event.message));
 api.onActivateTab(({ connId }) => activate(connId)); // another window opened a profile this one has
+api.onTabExport((request) => exportTab(request));
+api.onTabImport((request) => importTab(request));
 
 // Hidden tabs record but are not drawn; message rates count for every tab.
 setInterval(() => activeTab()?.render(), RENDER_INTERVAL_MS);
@@ -416,7 +461,9 @@ document.addEventListener('keydown', (e) => {
 // ------------------------------------------------------------------ start
 
 const [saved, init] = await Promise.all([api.storeGet('settings').catch(() => null), api.initialTabs().catch(() => null), connections.load()]);
+windowId = init?.windowId ?? null;
 applySettings(normalizeSettings(saved));
+markStarted();
 // The tabs of the last run, else a New connection tab; a window that a tab
 // moves into gets none of its own.
 try {
@@ -452,6 +499,9 @@ window.__mqttscope = {
     return settings;
   },
   shell: {
+    get windowId() {
+      return windowId;
+    },
     get tabs() {
       return stripTabs();
     },

@@ -6,6 +6,7 @@ import { el, button, showMenu, markMatches, toast } from './ui.js';
 import { iconButton } from './icons.js';
 import {
   decode,
+  plainMessage,
   preview,
   formatBytes,
   formatTime,
@@ -278,11 +279,12 @@ export class MessageViewer {
 
   // What restore() brings back (structured-clone friendly). The held message
   // is named by its time and its place from the newest, since the restored
-  // history holds copies of the messages.
+  // history holds copies of the messages; it comes along itself too, for
+  // when it is no longer in the history (trimmed).
   snapshot() {
     const h = this.source?.history;
     return {
-      pinned: this.pinned && { topic: this.source.path, ts: this.pinned.ts, back: h.length - 1 - h.indexOf(this.pinned) },
+      pinned: this.pinned && { topic: this.source.path, ts: this.pinned.ts, back: h.length - 1 - h.indexOf(this.pinned), message: plainMessage(this.pinned) },
       expandedByTopic: [...this.expandedByTopic].map(([topic, paths]) => [topic, [...paths]]),
       plotByTopic: [...this.plotByTopic],
       query: this.query,
@@ -290,7 +292,7 @@ export class MessageViewer {
   }
 
   // After show() of the topic that was shown: the held message is looked up
-  // in its history (gone from it, the inspector follows the latest).
+  // in its history (gone from it, the copy that came along is held).
   restore(s) {
     this.expandedByTopic = new Map(s.expandedByTopic.map(([topic, paths]) => [topic, new Set(paths)]));
     this.plotByTopic = new Map(s.plotByTopic);
@@ -298,7 +300,7 @@ export class MessageViewer {
     if (s.pinned && this.source?.path === s.pinned.topic) {
       const h = this.source.history;
       const at = h[h.length - 1 - s.pinned.back];
-      this.pinned = at?.ts === s.pinned.ts ? at : h.find((m) => m.ts === s.pinned.ts) || null;
+      this.pinned = at?.ts === s.pinned.ts ? at : s.pinned.message;
     }
     this.render(true);
   }

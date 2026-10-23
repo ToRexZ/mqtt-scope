@@ -12,7 +12,7 @@ import { MessageViewer } from './viewer.js';
 import { PlotsPanel } from './plots.js';
 import { Publisher } from './publisher.js';
 import { el, showMenu, splitter, toast } from './ui.js';
-import { decode, extractNumber, hexDump } from './payload.js';
+import { decode, extractNumber, hexDump, plainMessage } from './payload.js';
 import { hasNumbers } from './fields.js';
 import { openSubscriptions } from './subscriptionsDialog.js';
 import { bindConnection } from './tabApi.js';
@@ -43,10 +43,6 @@ const brokerKey = (p) => p && `${p.id}|${p.protocol}|${p.host}|${p.port}|${p.wsP
 const stacked = matchMedia('(max-width: 899px)');
 const INITIAL_TREE_HEIGHT = Math.round(window.innerHeight * 0.35);
 
-function stripMessage(m) {
-  return { topic: m.topic, payload: m.payload, qos: m.qos, retain: m.retain, ts: m.ts, props: m.props };
-}
-
 export class ConnectionTab {
   // shell: getBinding(id), setSubscriptions(profileId, subs),
   //        savedProfile(profile) — its saved version,
@@ -65,6 +61,7 @@ export class ConnectionTab {
     this.everConnected = false;
     this.canReconnect = false; // disconnected by the user after connecting
     this.active = false;
+    this.work = new Set(); // calls in flight (see track)
 
     this.tree = new TopicTree();
     this.selected = null;
@@ -161,7 +158,21 @@ export class ConnectionTab {
 
   // Saved messages, and the plots of the tab's profile (none before it has one).
   load() {
-    return Promise.all([this.publisher.load(), this.plots.loadProfile(this.profile?.id ?? null)]);
+    return this.track(Promise.all([this.publisher.load(), this.plots.loadProfile(this.profile?.id ?? null)]));
+  }
+
+  // Calls in flight that change the tab (loading, connecting, binding): a tab
+  // moving to another window waits for them (settle), so none lands on it
+  // once it is gone.
+  track(promise) {
+    this.work.add(promise);
+    const done = () => this.work.delete(promise);
+    promise.then(done, done);
+    return promise;
+  }
+
+  async settle() {
+    while (this.work.size) await Promise.allSettled([...this.work]);
   }
 
   // ---------------------------------------------------------------- views
@@ -176,7 +187,7 @@ export class ConnectionTab {
     this.viewer = new MessageViewer(this.$('#viewer-host'), {
       api: this.tabApi,
       onMaximize: () => this.toggleMaximize(),
-      onPopout: (node) => this.tabApi.openPopout(node.path, node.history.map(stripMessage)),
+      onPopout: (node) => this.tabApi.openPopout(node.path, node.history.map(plainMessage)),
       onUseInPublisher: (topic, msg) => this.publisher.loadMessage(topic, msg),
       onSelectTopic: (node) => {
         this.treeView.reveal(node);
@@ -367,7 +378,11 @@ export class ConnectionTab {
 
   // ---------------------------------------------------------------- connection
 
-  async connect(profile) {
+  connect(profile) {
+    return this.track(this.#connect(profile));
+  }
+
+  async #connect(profile) {
     // The profile's plots first, so the session shows them from its start. A
     // picker reads them on every attempt (nothing changes them there, and the
     // profile may have been open in another tab meanwhile). A session only
@@ -400,7 +415,11 @@ export class ConnectionTab {
 
   // A restored tab the user had disconnected: it holds its profile in main
   // (no other tab opens it, and it cannot be deleted) and offers Reconnect.
-  async bind() {
+  bind() {
+    return this.track(this.#bind());
+  }
+
+  async #bind() {
     const res = await this.tabApi.bind(this.profile);
     if (res.ok) {
       this.onStatus({ state: 'disconnected' });
@@ -626,7 +645,7 @@ export class ConnectionTab {
         },
       },
       { label: 'Publish to this topic…', action: () => (msg ? publisher.loadMessage(node.path, msg) : publisher.useTopic(node.path)) },
-      { label: 'Open in new window', disabled: !msg, action: () => tabApi.openPopout(node.path, node.history.map(stripMessage)) },
+      { label: 'Open in new window', disabled: !msg, action: () => tabApi.openPopout(node.path, node.history.map(plainMessage)) },
       'separator',
       ...(numeric
         ? plots.menuItems(node.path, null)

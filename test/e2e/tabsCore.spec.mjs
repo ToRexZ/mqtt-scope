@@ -2,7 +2,7 @@
 // are opened, switched and closed through the test hook's shell here; the
 // tab strip itself is tested in tabs.spec.mjs.
 
-import { test, expect, profile, connect, waitForTopic, selectTopic } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, waitForTopic, selectTopic } from './fixtures.mjs';
 
 const tabCount = (page) => page.evaluate(() => window.__mqttscope.shell.tabs.length);
 const activate = (page, index) => page.evaluate((i) => window.__mqttscope.shell.activate(window.__mqttscope.shell.tabs[i].connId), index);
@@ -397,6 +397,31 @@ test("a tab's state survives export and import", async ({ env }) => {
   expect(await page.evaluate(() => window.__mqttscope.shell.active.connId)).toBe(id);
   await activate(page, 1);
   await expect(page.locator('.conn-dialog')).toBeVisible();
+  expect(errors).toEqual([]);
+});
+
+test('a held message no longer in the history stays held through export and import', async ({ env }) => {
+  const a = await env.broker();
+  const userData = makeUserData({ profiles: [profile(a.port)], settings: { historyLimit: 3 } });
+  const { page, errors } = await env.connected(a, { userData });
+  const held = () => page.evaluate(() => (window.__mqttscope.viewer.pinned ? new TextDecoder().decode(window.__mqttscope.viewer.pinned.payload) : null));
+  await a.publish('h', 'one');
+  await a.publish('h', 'two');
+  await selectTopic(page, 'h');
+  await expect.poll(() => page.evaluate(() => window.__mqttscope.tree.find('h').messageCount)).toBe(2);
+  await page.evaluate(() => {
+    const { viewer } = window.__mqttscope;
+    viewer.pinned = viewer.source.history[0];
+    viewer.render(true);
+  });
+  for (const p of ['three', 'four', 'five']) await a.publish('h', p);
+  await expect.poll(() => page.evaluate(() => window.__mqttscope.tree.find('h').history.length)).toBe(3);
+  expect(await page.evaluate(() => window.__mqttscope.tree.find('h').history.includes(window.__mqttscope.viewer.pinned))).toBe(false);
+  expect(await held()).toBe('one');
+
+  await page.evaluate(() => window.__mqttscope.shell.reimport(window.__mqttscope.shell.active.connId));
+  expect(await held()).toBe('one');
+  await expect(page.locator('#viewer-host .btn.live')).toHaveText('❚❚ Held');
   expect(errors).toEqual([]);
 });
 

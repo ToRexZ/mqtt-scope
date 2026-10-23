@@ -95,10 +95,12 @@ export class PlotData {
     return [...this.series.values()].map((s) => ({ topic: s.topic, segs: s.segs, points: s.points.slice() }));
   }
 
-  // Tracks exactly the series of a snapshot, with its points.
+  // Tracks exactly the series of a snapshot, with all of its points: none is
+  // cut on the way in, so trimming then goes as it would have without the
+  // move (only a series over its limit and slack is cut back to its limit).
   restore(snapshot) {
     this.series = new Map();
-    this.limit = this.maxPoints; // not the cut of the series tracked before
+    this.limit = Infinity;
     this.track(snapshot, (s) => s.points);
   }
 }

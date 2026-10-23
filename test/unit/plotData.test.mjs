@@ -203,3 +203,23 @@ test('restoring keeps every point, whatever was tracked before', () => {
   assert.equal(copy.points('a').length, 2000);
   assert.equal(copy.limit, 3000);
 });
+
+test('a series grown into its slack round-trips exactly, and trimming goes on as before', () => {
+  const d = new PlotData({ maxPoints: 1000, budget: 1_000_000 });
+  d.track([series('a'), series('b')]);
+  for (let i = 1; i <= 1050; i++) d.ingest(msg('a', String(i), i)); // within the limit and its 10% slack
+  for (let i = 1; i <= 1200; i++) d.ingest(msg('b', String(i), i)); // cut back to 1000 at 1101, then grown again
+  assert.equal(d.points('a').length, 1050);
+  assert.equal(d.points('b').length, 1099);
+
+  const copy = new PlotData({ maxPoints: 1000, budget: 1_000_000 });
+  copy.restore(structuredClone(d.snapshot()));
+  assert.deepEqual(copy.points('a'), d.points('a'));
+  assert.deepEqual(copy.points('b'), d.points('b'));
+  assert.equal(copy.limit, d.limit);
+  for (const data of [d, copy]) {
+    for (let i = 1051; i <= 1101; i++) data.ingest(msg('a', String(i), i));
+  }
+  assert.equal(copy.points('a').length, 1000);
+  assert.deepEqual(copy.points('a'), d.points('a'));
+});

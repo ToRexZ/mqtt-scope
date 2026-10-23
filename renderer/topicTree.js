@@ -1,6 +1,8 @@
 // Topic tree data model. Each MQTT topic level is a node; nodes that have
 // received messages keep the latest message plus a bounded history.
 
+import { plainMessage } from './payload.js';
+
 const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
 
 export class TopicNode {
@@ -154,15 +156,16 @@ export class TopicTree {
   }
 
   // What restore() needs to rebuild the tree elsewhere (structured-clone
-  // friendly; the messages are shared, not copied): the topics with their
-  // kept messages, and the expanded nodes. Topics come in the order of the
+  // friendly): the topics with their kept messages, and the expanded nodes.
+  // The messages are copied without what views cached on them (decoded
+  // text, previews), their payloads shared. Topics come in the order of the
   // tree, so the rebuilt one lists them the same way.
   snapshot() {
     const topics = [];
     const expanded = [];
     const visit = (node) => {
       for (const n of node.children.values()) {
-        if (n.messageCount) topics.push({ path: n.path, history: n.history.slice(), messageCount: n.messageCount, retained: n.retained, selfUpdate: n.selfUpdate });
+        if (n.messageCount) topics.push({ path: n.path, history: n.history.map(plainMessage), messageCount: n.messageCount, retained: n.retained, selfUpdate: n.selfUpdate });
         if (n.expanded) expanded.push(n.path);
         visit(n);
       }

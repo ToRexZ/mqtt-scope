@@ -8,6 +8,7 @@ const { createProfileStore } = require('./profileStore');
 const { createJsonStore } = require('./jsonStore');
 const { createLayoutStore } = require('./layoutStore');
 const { WindowState, placeBounds } = require('./windowState');
+const { Requests, TabMover, TIMEOUT_MS } = require('./tabMove');
 const { Updater } = require('./updater');
 const { createEngine } = require('./updateEngine');
 const { releaseUrl, createFetchRelease } = require('./fetchRelease');
@@ -22,11 +23,16 @@ if (process.env.MQTTSCOPE_USER_DATA) app.setPath('userData', process.env.MQTTSCO
 const ICON = path.join(__dirname, 'icon.png');
 const MAX_FILE_BYTES = 256 * 1024 * 1024; // the MQTT payload limit
 const STATE_SAVE_MS = 500;
+// A window of its own for a tab: cascaded this far from the tab's window, or
+// placed with its top-left corner this far up and left of a drop point, so
+// the pointer lands on its tab strip.
+const CASCADE = 30;
+const DROP_GRAB = { x: 60, y: 15 };
 
 // One process owns the data files; launching the app again opens another
 // window in it. Each main window has its own broker connections, which the
 // registry keeps by connection id; every MQTT call and event names one.
-const windows = new Map(); // webContents.id -> { win, init } (init: see createMainWindow)
+const windows = new Map(); // webContents.id -> { win, init, started, emptied } (see createMainWindow, pageStarted, closeIfEmpty)
 const childWindows = new Map(); // webContents.id -> { win, ownerId, connId, topics: Set, init } (see openChildWindow)
 const registry = new ConnectionRegistry();
 let profiles;
@@ -107,10 +113,95 @@ function closeConnection(connId) {
   closeChildren((child) => child.connId === connId);
 }
 
-// A window closing, crashing or reloading ends all of its connections.
+// A window closing, crashing or reloading ends all of its connections, and
+// will not answer what main asked of it.
 function closeConnectionsOf(ownerId) {
   registry.closeOwner(ownerId);
   closeChildren((child) => child.ownerId === ownerId);
+  requests.windowGone(ownerId);
+}
+
+function bringForward(win) {
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+
+// A tab moves with its connection between main windows (see tabMove.js); the
+// windows answer main's requests on tab:reply. A connection's pop-outs
+// belong to the window that has its tab.
+const requests = new Requests((id, channel, message) => {
+  const win = windows.get(id)?.win;
+  if (!win || win.isDestroyed()) return false;
+  win.webContents.send(channel, message);
+  return true;
+});
+const mover = new TabMover({
+  registry,
+  ask: (id, channel, data) => requests.ask(id, channel, data),
+  isWindow: (id) => windows.has(id),
+  setOwner: (connId, ownerId) => {
+    registry.setOwner(connId, ownerId);
+    for (const child of childWindows.values()) if (child.connId === connId) child.ownerId = ownerId;
+  },
+  closeConnection: (connId) => closeConnection(connId),
+  left: (id) => closeIfEmpty(id),
+});
+
+// Moves a tab to another main window, at `index` in its strip; that window
+// comes forward. Resolves with whether it moved (one that could not stays,
+// or is back, where it was).
+async function moveTab(connId, toWindowId, index = 0) {
+  const moved = await mover.move(connId, toWindowId, index);
+  const win = windows.get(toWindowId)?.win;
+  if (moved && win && !win.isDestroyed()) bringForward(win);
+  return moved;
+}
+
+// A new window for just this tab (the tab menu's Move to new window, a tab
+// dropped outside every window): near `point` on the screen (Wayland places
+// it where it likes) or, without one, cascaded from the tab's window; the
+// size of that window.
+async function tearOff(connId, point = null) {
+  const source = windows.get(registry.get(connId)?.ownerId)?.win;
+  if (!source || source.isDestroyed() || mover.moving(connId)) throw new Error('Unknown connection');
+  const { x, y, width, height } = source.getNormalBounds();
+  const at = point ? { x: Math.round(point.x) - DROP_GRAB.x, y: Math.round(point.y) - DROP_GRAB.y } : { x: x + CASCADE, y: y + CASCADE };
+  const win = createMainWindow({ bounds: { ...at, width, height }, adopt: true });
+  const id = win.webContents.id;
+  try {
+    await pageStarted(id);
+    return await moveTab(connId, id, 0);
+  } finally {
+    closeIfEmpty(id); // it did not get the tab
+  }
+}
+
+// Resolves once the window's page has asked what to open with (tabs:init),
+// from when on it takes tabs that move in.
+function pageStarted(id) {
+  const entry = windows.get(id);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('The new window did not open')), TIMEOUT_MS);
+    entry.started = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    entry.win.once('closed', () => {
+      clearTimeout(timer);
+      reject(new Error('The new window closed'));
+    });
+  });
+}
+
+// A main window whose tabs all went to other windows closes, once. Its flush
+// runs as for any close; with no connections left, nothing asks first. One
+// that a tab is still on its way from or to waits for that move.
+function closeIfEmpty(id) {
+  const entry = windows.get(id);
+  if (!entry || entry.emptied || entry.win.isDestroyed() || mover.busy(id) || registry.ofOwner(id).length) return;
+  entry.emptied = true;
+  entry.win.close();
 }
 
 function focusedMain() {
@@ -380,9 +471,7 @@ function registerIpc() {
     if (!windows.has(e.sender.id)) return;
     const win = windows.get(registry.get(connId)?.ownerId)?.win;
     if (!win || win.isDestroyed()) return;
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
+    bringForward(win);
     win.webContents.send('tabs:activate', { connId });
   });
   ipcMain.handle('conn:openProfiles', () => registry.openProfileIds());
@@ -441,20 +530,36 @@ function registerIpc() {
   ipcMain.handle('app:newWindow', () => {
     createMainWindow();
   });
-  // A main window asks once what to open with (see createMainWindow), then
-  // reports its tabs whenever they change.
+  // A main window asks once what to open with (see createMainWindow), and
+  // learns its id; it then reports its tabs whenever they change.
   ipcMain.handle('tabs:init', (e) => {
     const entry = windows.get(e.sender.id);
     if (!entry) return null;
     const { init } = entry;
     entry.init = null;
-    return init;
+    entry.started?.();
+    entry.started = null;
+    return { windowId: e.sender.id, ...init };
   });
   ipcMain.on('tabs:report', (e, state) => {
     if (!windows.has(e.sender.id)) return;
     windowState.report(e.sender.id, state);
     saveWindowStateSoon();
   });
+  // A window moves its own tabs (see moveTab, tearOff).
+  const ownTab = (e, connId) => {
+    if (!windows.has(e.sender.id)) throw new Error('Unknown window');
+    connectionOf(e, connId);
+  };
+  ipcMain.handle('tabs:move', (e, { connId, toWindowId, index } = {}) => {
+    ownTab(e, connId);
+    return moveTab(connId, toWindowId, Number.isInteger(index) ? index : 0);
+  });
+  ipcMain.handle('tabs:tearOff', (e, { connId } = {}) => {
+    ownTab(e, connId);
+    return tearOff(connId, null);
+  });
+  ipcMain.on('tab:reply', (e, reply) => requests.answer(e.sender.id, reply));
   ipcMain.on('menu:shortcuts', (_e, map) => {
     if (!map || typeof map !== 'object') return;
     menuShortcuts = Object.fromEntries(Object.entries(map).filter(([k, v]) => typeof k === 'string' && (typeof v === 'string' || v === null)));
@@ -673,7 +778,11 @@ function start() {
   integrateDesktop({ kind, isPackaged: app.isPackaged, log });
   updater = createUpdater(kind);
   forwardConnectionEvents();
-  if (!app.isPackaged) globalThis.__mqttscopeConnections = registry; // for tests, like __mqttscopeUpdater
+  // For tests, like __mqttscopeUpdater.
+  if (!app.isPackaged) {
+    globalThis.__mqttscopeConnections = registry;
+    globalThis.__mqttscopeMoveTab = moveTab;
+  }
   registerIpc();
   // The windows of the last run, each where it was with its tabs; else one
   // with a New connection tab.
