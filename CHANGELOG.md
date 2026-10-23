@@ -9,6 +9,9 @@ All notable changes to MQTT Scope. The format follows
 ### Changed
 
 - Settings shows the MQTT Scope version at the bottom.
+- No menu bar on Linux and Windows: Check for updates, Show log file and Open
+  data folder are at the bottom of Settings, next to the version. Keyboard
+  shortcuts work as before.
 
 ## [0.3.0] - 2026-10-23
 

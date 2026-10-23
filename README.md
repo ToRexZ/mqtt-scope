@@ -21,7 +21,7 @@ saved messages. Runs on Linux, Windows and macOS.
 - Each connection has its own subscription list (default `#` and `$SYS/#`), so
   the tree fills automatically. **Subscriptions…** adds or removes filters on the
   live connection, optionally saving the change to the connection.
-- **Several brokers at once**: File → New Window (or start the app again) opens
+- **Several brokers at once**: Ctrl+Shift+N (or start the app again) opens
   another window with its own connection. Saved connections, messages and plots
   are shared between windows.
 - Passwords are encrypted with the operating system keychain when one is
@@ -175,7 +175,8 @@ MQTT Scope checks GitHub for a newer release at startup and every 6 hours
 (switch it off in **Settings → General → Check for updates**). When there is
 one, an **Update x.y.z** button appears in the top bar and opens a panel with
 the release notes. **Later** closes it; **Skip this version** hides that
-version until a newer one comes out. **Help → Check for Updates…** always asks,
+version until a newer one comes out. **Settings → Check for updates** (at the
+bottom of the dialog; on macOS also Help → Check for Updates…) always asks,
 is the only check that says "latest version" or reports an error (automatic
 checks stay silent, e.g. when offline), and un-skips a skipped version.
 
@@ -245,9 +246,13 @@ new keys; clashes are flagged). Defaults (Ctrl is Cmd on macOS):
 Settings → General: messages kept per topic (default 100), history size per
 topic (default 64 MB; the latest message is always kept), whether clicking a
 topic in the tree also expands it one level (default on), and whether to check
-for updates (default on).
+for updates (default on). The bottom of the dialog shows the MQTT Scope
+version and has **Check for updates**, **Show log file** and **Open data
+folder**. There is no menu bar on Linux and Windows; the shortcuts that used to
+live only in it still work (Ctrl+Q quit, Ctrl+Plus / Ctrl+Minus / Ctrl+0 zoom,
+Shift+F11 full screen, Ctrl+Shift+I developer tools).
 
-Data lives in the app data folder (File → Open Data Folder):
+Data lives in the app data folder (Settings → Open data folder):
 `profiles.json` (connections), `savedMessages.json`, `plotTabs.json` (plot
 tabs; `plots.json` keeps the tab on screen in the 0.1 format for older
 versions),
