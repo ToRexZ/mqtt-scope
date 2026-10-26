@@ -7,7 +7,7 @@ import { mkdirSync } from 'node:fs';
 import { createServer } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { launchApp, makeUserData, profile } from '../test/helpers/app.mjs';
+import { launchApp, makeUserData, profile, openTabTo } from '../test/helpers/app.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.join(root, 'docs', 'screenshots');
@@ -58,11 +58,18 @@ const select = (topic) =>
 try {
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForSelector('.conn-dialog');
+  await page.waitForTimeout(500);
   await shot('connections');
   await page.click('.connect-btn');
   await page.waitForFunction(() => window.__mqttscope.status.state === 'connected');
   await page.waitForFunction(() => !!window.__mqttscope.tree.find('uagv/v2/DemoRobotics/AGV-001/state'), null, { timeout: 15000 });
   await page.waitForFunction(() => !!window.__mqttscope.tree.find('robot/status/safety/hardware'), null, { timeout: 15000 });
+  // A second connection tab (the demo broker over WebSocket), so every shot
+  // shows the tab strip with two tabs; the first tab stays the active one.
+  const firstTab = await page.evaluate(() => window.__mqttscope.shell.active.connId);
+  await openTabTo(page, 'Demo over WebSocket');
+  await page.click(`.conn-tab[data-id="${firstTab}"]`);
+  await page.waitForFunction((id) => window.__mqttscope.shell.active.connId === id, firstTab);
   // Two plot tabs: Fleet (lines) and Safety (state transitions + speed).
   await page.evaluate(() => {
     const { plots } = window.__mqttscope;
