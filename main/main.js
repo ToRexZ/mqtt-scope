@@ -651,6 +651,7 @@ function registerIpc() {
     const outcome = await tabDrag.end({ overSource: overSource !== false });
     if (!tabDrag.active()) broadcastDragging(null); // unless another drag started meanwhile
     if (outcome !== 'tearOff' || registry.ofOwner(drag.fromWindowId).length < 2) return null;
+    // By design, also when let go on another window's content (not its top bar).
     return tearOff(drag.connId, cursorPoint());
   });
   ipcMain.on('tab:reply', (e, reply) => requests.answer(e.sender.id, reply));

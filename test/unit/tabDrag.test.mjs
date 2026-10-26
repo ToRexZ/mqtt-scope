@@ -11,7 +11,7 @@ const mainRequire = Module.createRequire(path.join(ROOT, 'main', 'tabDrag.js'));
 const { TabDrag } = mainRequire('./tabDrag.js');
 
 const GRACE = 250;
-const HOVER = 300;
+const HOVER = 750;
 const HOVER_GRACE = 1500;
 const MAX_AGE = 60000;
 const tick = () => new Promise((resolve) => setImmediate(resolve));
@@ -133,6 +133,8 @@ test('cancel ends a drag: an end waiting for a drop does nothing', async () => {
 });
 
 test('another window that had the drag over its top bar just before the end gets longer for its drop', async () => {
+  // A resting pointer's dragover comes every 350 ms ± 200 ms: the default covers that.
+  assert.equal(new TabDrag().hoverMs, HOVER);
   const { drag, advance } = setup();
   drag.start('c1', 1);
   drag.hover(2);

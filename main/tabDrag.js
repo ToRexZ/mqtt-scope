@@ -13,7 +13,9 @@
 // Electron dependency, so it can be tested under plain Node.
 
 const GRACE_MS = 250;
-const HOVER_MS = 300;
+// Long enough for a pointer resting on that top bar, whose dragover comes
+// only every 350 ms ± 200 ms.
+const HOVER_MS = 750;
 const HOVER_GRACE_MS = 1500;
 const MAX_AGE_MS = 60000;
 
