@@ -60,6 +60,7 @@ export class ConnectionTab {
     this.failed = false; // the last attempt failed (a picker's dialog offers Retry)
     this.everConnected = false;
     this.canReconnect = false; // disconnected by the user after connecting
+    this.restored = false; // reopened at launch, its profile not taken yet (see restoreAs)
     this.active = false;
     this.work = new Set(); // calls in flight (see track)
 
@@ -390,27 +391,60 @@ export class ConnectionTab {
     // they collected.
     if (this.mode === 'picker') await this.plots.loadProfile(profile.id ?? null);
     const res = await this.tabApi.connect(profile);
-    // Open in another tab: two clients with one client ID would throw each
-    // other off the broker. The shell shows that tab; this one stays as it was.
-    if (res.duplicate) {
-      await this.shell.showDuplicate(this, res.duplicate);
-      return res;
-    }
+    if (await this.refused(res)) return res;
+    this.restored = false; // it holds its profile now
     if (brokerKey(this.profile) !== brokerKey(profile)) this.clearTree();
     this.profile = { ...profile };
     this.checkSaved();
     this.shell.onChange(this);
     // A picker's dialog already shows it on its status line.
-    if (!res.ok && !(this.mode === 'picker' && this.status.error === res.error)) toast(res.error, 'error');
+    if (!res.ok && !(this.mode === 'picker' && this.status.error === res.error)) this.notify(res.error);
     return res;
+  }
+
+  // Whether main refused the profile (see main/connections.js): it is open in
+  // another tab, or another profile open in a tab has the same client ID on
+  // the same broker. Two clients with one client ID would throw each other
+  // off the broker. The shell shows the tab that has the profile; this one
+  // stays as it was, except a tab reopened at launch that has not taken its
+  // profile yet: one whose profile is open closes (see app.js showDuplicate),
+  // one whose client ID is in use goes back to the connection dialog.
+  async refused(res) {
+    if (res.duplicate) {
+      await this.shell.showDuplicate(this, res.duplicate);
+      return true;
+    }
+    if (!res.clientIdInUse) return false;
+    const { clientId, profileId, name } = res.clientIdInUse;
+    const holder = this.shell.savedProfile({ id: profileId, name }).name;
+    this.notify(`Client ID “${clientId}” is already used by “${holder}” on this broker`);
+    if (this.restored) this.becomePicker();
+    return true;
   }
 
   // A tab reopened at launch (app.js restoreTabs) is a session from the
   // start: it connected when the app last ran. Set before it is first shown.
+  // It is `restored` until it takes its profile in main (connect or bind).
   restoreAs(profile) {
     this.profile = { ...profile };
     this.everConnected = true;
     this.mode = 'session';
+    this.restored = true;
+  }
+
+  // A restored tab that could not take its profile (see refused): a New
+  // connection tab again, with that profile selected in its dialog.
+  becomePicker() {
+    this.restored = false;
+    this.everConnected = false;
+    this.mode = 'picker';
+    if (this.active) {
+      this.plots.setVisible(false);
+      // Shown, the session is in the window (replaceWith would take the
+      // picker's root out of wherever it is, even with no session to replace).
+      if (this.root.parentNode) this.root.replaceWith(this.pickerRoot);
+    }
+    this.shell.onChange(this);
   }
 
   // A restored tab the user had disconnected: it holds its profile in main
@@ -421,7 +455,9 @@ export class ConnectionTab {
 
   async #bind() {
     const res = await this.tabApi.bind(this.profile);
+    if (await this.refused(res)) return res;
     if (res.ok) {
+      this.restored = false;
       this.onStatus({ state: 'disconnected' });
       this.checkSaved();
     }
@@ -486,7 +522,12 @@ export class ConnectionTab {
   }
 
   onWarning(message) {
-    toast(message, 'error');
+    this.notify(message);
+  }
+
+  // An error toast of this tab; one from a hidden tab names it.
+  notify(message) {
+    toast(this.active ? message : `${this.label}: ${message}`, 'error');
   }
 
   showSubscriptions() {
@@ -698,9 +739,10 @@ export class ConnectionTab {
   }
 
   // The tab of an exported state, not shown yet: the same connection (still
-  // open in main; the shell routes its events here), data and views.
+  // open in main; the shell routes its events here, opts.connId), data and
+  // views.
   static fromState(opts, state) {
-    const tab = new ConnectionTab({ ...opts, connId: state.connId });
+    const tab = new ConnectionTab(opts);
     tab.restoreState(state);
     return tab;
   }

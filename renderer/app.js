@@ -116,11 +116,15 @@ async function openTab({ profile = null, connect = false, restored = false, acti
 
 // A profile is open in one tab app-wide: connecting to it shows the tab that
 // has it (in another window, that window comes forward). The tab that tried
-// goes, unless it is its window's only one.
+// goes, unless it is its window's only one: a New connection tab, or one
+// reopened at launch that had not taken its profile yet, which then becomes
+// a New connection tab.
 async function showDuplicate(tab, duplicate) {
   if (duplicate.sameWindow) activate(duplicate.connId);
   else api.focusConnection(duplicate.connId);
-  if (tab.mode === 'picker' && tabs.size > 1) await closeTab(tab.connId);
+  if (tab.mode !== 'picker' && !tab.restored) return;
+  if (tabs.size > 1) await closeTab(tab.connId);
+  else if (tab.restored) tab.becomePicker();
 }
 
 // Each session tab compares its profile with the saved one (see checkSaved).
@@ -143,8 +147,9 @@ async function closeTab(id, { confirmed = false } = {}) {
     if (!ok || tabOf(id) !== tab) return;
   }
   const saved = removeTab(tab);
-  // Reopen brings back what had worked: not a tab that never connected.
-  if (tab.mode === 'session' && tab.profile) order.pushClosed({ profileId: tab.profile.id });
+  // Reopen brings back what had worked: not a tab that never connected (nor
+  // a reopened one that never took its profile).
+  if (tab.mode === 'session' && tab.profile && !tab.restored) order.pushClosed({ profileId: tab.profile.id });
   await Promise.allSettled([saved, api.closeConnection(id)]);
   if (!tabs.size) await openTab();
 }
@@ -172,7 +177,7 @@ function reimport(id) {
   const state = structuredClone(old.exportState());
   old.flush(); // before dispose stops its save timer
   old.dispose();
-  tabs.set(id, ConnectionTab.fromState({ api, settings, shell }, state));
+  tabs.set(id, ConnectionTab.fromState({ api, settings, shell, connId: id }, state));
   savedSeen.delete(id); // its publisher reads the saved messages when shown
   if (shown) activate(id);
   refresh();
@@ -181,18 +186,26 @@ function reimport(id) {
 // Main moves a tab with its connection to another window (main/tabMove.js),
 // holding the connection's events until the tab is there. Leaving, the tab's
 // calls in flight (connecting, loading its plots) finish first and a plot
-// change not saved yet is saved; then it goes, answering with its state and
-// its place here, for the window it joins (or this one again, should that
-// fail). drop: it just goes (a copy main gave up waiting for).
+// change not saved yet is saved; then it answers with its state and its
+// place here, for the window it joins (or this one again, should that fail).
+// It goes once main has that answer (tabExported): an answer that cannot be
+// sent (a value that cannot be copied to main) fails the move, and the tab
+// stays. drop: it just goes (a copy main gave up waiting for).
 async function exportTab({ connId, drop = false }) {
   const tab = tabOf(connId);
   if (!tab) throw new Error('Unknown tab');
   await tab.settle();
   if (tabOf(connId) !== tab) throw new Error('Unknown tab'); // closed meanwhile
-  const out = { index: order.ids().indexOf(connId), active: tab.active, state: drop ? null : tab.exportState() };
+  return { index: order.ids().indexOf(connId), active: tab.active, state: drop ? null : tab.exportState() };
+}
+
+// The answer went to main, in the same task as exportTab's: nothing reached
+// the tab in between.
+function tabExported({ connId }) {
+  const tab = tabOf(connId);
+  if (!tab) return;
   removeTab(tab);
   sendReport();
-  return out;
 }
 
 // A tab joining, built from its state at `index`; it is shown unless it
@@ -201,7 +214,8 @@ async function exportTab({ connId, drop = false }) {
 async function importTab({ connId, state, index, activate: show = true }) {
   await started;
   if (tabs.has(connId)) throw new Error('The tab is here already');
-  tabs.set(connId, ConnectionTab.fromState({ api, settings, shell }, state));
+  if (state?.connId !== connId) throw new Error('The tab is of another connection');
+  tabs.set(connId, ConnectionTab.fromState({ api, settings, shell, connId }, state));
   order.add(connId, { index, activate: false });
   if (show || !activeTab()?.active) activate(connId);
   refresh();
@@ -235,9 +249,11 @@ async function settleMove(moving) {
   }
 }
 
-// Closes several tabs with one question when any of their plots holds data.
+// Closes several tabs with one question when any of their plots holds data
+// (one tab: the question of closeTab).
 async function closeTabs(ids) {
   const list = ids.map(tabOf).filter(Boolean);
+  if (list.length === 1) return closeTab(list[0].connId);
   if (list.some((t) => t.hasPlotData)) {
     const ok = await api.confirm({
       message: `Close ${list.length} tabs?`,
@@ -391,7 +407,10 @@ api.onMessages((batch) => tabOf(batch.connId)?.ingestBatch(batch));
 api.onStatus((event) => tabOf(event.connId)?.onStatus(event.status));
 api.onWarning((event) => tabOf(event.connId)?.onWarning(event.message));
 api.onActivateTab(({ connId }) => activate(connId)); // another window opened a profile this one has
-api.onTabExport((request) => exportTab(request));
+api.onTabExport(
+  (request) => exportTab(request),
+  (request) => tabExported(request),
+);
 api.onTabDragging((drag) => strip.setDragging(drag));
 api.onTabImport((request) => importTab(request));
 

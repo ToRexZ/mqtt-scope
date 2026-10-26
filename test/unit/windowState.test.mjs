@@ -147,3 +147,47 @@ test('a saved position off every display is dropped; the size is kept', () => {
   assert.deepEqual(placeBounds({ width: 1000, height: 700 }, screens), { width: 1000, height: 700 });
   assert.equal(placeBounds(null, screens), null);
 });
+
+test('a maximized or full-screen window is saved and restored as such, with its normal bounds', () => {
+  const s = new WindowState(null);
+  s.setBounds(1, B1, { maximized: true });
+  s.report(1, { tabs: [tab('a')], active: 0 });
+  s.setBounds(2, B2, { fullScreen: true, maximized: false });
+  s.report(2, { tabs: [tab('b')], active: 0 });
+  s.setBounds(3, B2, { maximized: 'yes', fullScreen: 1 }); // only true counts
+  s.report(3, { tabs: [tab('c')], active: 0 });
+  const doc = s.toDoc();
+  assert.deepEqual(doc.windows, [
+    { bounds: B1, maximized: true, tabs: [tab('a')], active: 0 },
+    { bounds: B2, fullScreen: true, tabs: [tab('b')], active: 0 },
+    { bounds: B2, tabs: [tab('c')], active: 0 },
+  ]);
+  // Restored back to normal: the flag goes.
+  s.setBounds(1, B1, { maximized: false });
+  assert.deepEqual(s.toDoc().windows[0], { bounds: B1, tabs: [tab('a')], active: 0 });
+  s.setBounds(1, B1);
+  assert.equal('maximized' in s.toDoc().windows[0], false);
+
+  const ids = new Set(['a', 'b', 'c']);
+  assert.deepEqual(WindowState.restorable(doc, ids), doc.windows);
+  // Kept as saved until a window reports.
+  assert.deepEqual(new WindowState(doc).toDoc(), doc);
+  const odd = { version: 1, windows: [{ bounds: B1, maximized: 'true', fullScreen: null, tabs: [tab('a')], active: 0 }] };
+  assert.deepEqual(WindowState.restorable(odd, ids), [{ bounds: B1, tabs: [tab('a')], active: 0 }]);
+});
+
+test('a saved size larger than the display it opens on is made to fit', () => {
+  const screens = [
+    { x: 0, y: 0, width: 1920, height: 1040 },
+    { x: 1920, y: 0, width: 1280, height: 984 },
+  ];
+  const big = (x, y) => ({ x, y, width: 2400, height: 1300 });
+  assert.deepEqual(placeBounds(big(100, 0), screens), { x: 100, y: 0, width: 1920, height: 1040 });
+  assert.deepEqual(placeBounds(big(2000, 20), screens), { x: 2000, y: 20, width: 1280, height: 984 }, 'the second display');
+  // Placed by the system: on the primary display.
+  assert.deepEqual(placeBounds(big(9000, 0), screens, screens[1]), { width: 1280, height: 984 });
+  assert.deepEqual(placeBounds({ width: 2400, height: 1300 }, screens), { width: 1920, height: 1040 }, 'the first one, without a primary');
+  assert.deepEqual(placeBounds({ width: 2400, height: 1300 }, []), { width: 2400, height: 1300 }, 'no display known');
+  // A size that fits is kept.
+  assert.deepEqual(placeBounds({ x: 1950, y: 10, width: 1200, height: 900 }, screens), { x: 1950, y: 10, width: 1200, height: 900 });
+});

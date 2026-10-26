@@ -85,6 +85,16 @@ test("the dot shows each connection's state, also for a background tab", async (
   expect(errors).toEqual([]);
 });
 
+test("a background tab's warning names the tab", async ({ env }) => {
+  const { app, idA, idB, page, errors } = await twoTabs(env);
+  const warn = (id, message) => app.evaluate((_electron, [c, m]) => globalThis.__mqttscopeConnections.get(c).session.emit('warning', m), [id, message]);
+  await warn(idA, 'Subscription "a/#/b" was rejected');
+  await expect(toast(page, 'error')).toHaveText(['Broker A: Subscription "a/#/b" was rejected']);
+  await warn(idB, 'Subscription "x/#/y" was rejected');
+  await expect(toast(page, 'error').last()).toHaveText('Subscription "x/#/y" was rejected');
+  expect(errors).toEqual([]);
+});
+
 test('closing a tab with recorded plot data asks first', async ({ env }) => {
   const { app, b, idA, idB, page, errors } = await twoTabs(env);
   await addSeries(page, idB, 'b/value');
@@ -386,6 +396,36 @@ test('closing several tabs asks once when plots hold data', async ({ env }) => {
   await expect.poll(() => dialogCalls(app)).toHaveLength(1);
   expect((await dialogCalls(app))[0].message).toBe('Close 2 tabs?');
   expect(await tabIds(page)).toEqual([idA, idB, idC]);
+  await mockDialogs(app, { confirm: true });
+  await tabEl(page, idA).click({ button: 'right' });
+  await menu(page, 'Close other tabs');
+  await expect.poll(() => tabIds(page)).toEqual([idA]);
+  expect(errors).toEqual([]);
+});
+
+test('closing one tab from the tab menu asks as for that tab', async ({ env }) => {
+  const { app, b, idA, idB, page, errors } = await twoTabs(env);
+  await addSeries(page, idB, 'b/value');
+  await b.publish('b/value', '1');
+  await expect.poll(() => plotValues(page, idB, 'b/value')).toEqual([1]);
+  await mockDialogs(app, { confirm: false });
+  const single = [
+    {
+      kind: 'confirm',
+      message: 'Close “Broker B”?',
+      detail: 'Its plots hold recorded data, which is lost when the tab closes. The plots themselves are kept.',
+    },
+  ];
+  for (const [id, item] of [
+    [idA, 'Close tabs to the right'],
+    [idA, 'Close other tabs'],
+  ]) {
+    await tabEl(page, id).click({ button: 'right' });
+    await menu(page, item);
+    await expect.poll(() => dialogCalls(app), item).toEqual(single);
+    await app.evaluate(() => (globalThis.__dialogCalls.length = 0));
+  }
+  expect(await tabIds(page)).toEqual([idA, idB]);
   await mockDialogs(app, { confirm: true });
   await tabEl(page, idA).click({ button: 'right' });
   await menu(page, 'Close other tabs');

@@ -15,12 +15,17 @@ if (init) {
   const source = { path: init.topic, history: init.history || [], messageCount: (init.history || []).length };
   const viewer = new MessageViewer(document.querySelector('#viewer-host'), { api, standalone: true });
   viewer.show(source);
-  // The search shortcut follows the user's key bindings.
+  // The search shortcut follows the user's key bindings, and so does Close
+  // the tab (Mod+W), which closes this window.
   const keys = resolveBindings(normalizeSettings(await api.storeGet('settings').catch(() => null)).keys);
   document.addEventListener('keydown', (e) => {
-    if (keys.find && comboFromEvent(e) === keys.find) {
+    const combo = comboFromEvent(e);
+    if (keys.find && combo === keys.find) {
       e.preventDefault();
       viewer.focusSearch();
+    } else if (keys.closeTab && combo === keys.closeTab) {
+      e.preventDefault();
+      window.close();
     }
   });
   let dirty = false;

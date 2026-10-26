@@ -40,8 +40,9 @@ export const ACTIONS = [
   { id: 'clear', label: 'Clear all topics', default: '' },
 ];
 
-// Shortcuts the app fixes (they were menu accelerators): shown read-only in
-// Settings → Keyboard. Quit is Alt+F4 on Windows (Electron gives it no key there).
+// Shortcuts the app fixes (menu accelerators): shown read-only in Settings →
+// Keyboard. Quit is Alt+F4 on Windows (Electron gives it no key there). Close
+// window is macOS's (main/menu.js); elsewhere the system closes windows.
 export function fixedShortcuts(platform = typeof navigator !== 'undefined' ? navigator.platform || '' : '') {
   const mac = /Mac/i.test(platform);
   const win = /Win/i.test(platform);
@@ -53,6 +54,7 @@ export function fixedShortcuts(platform = typeof navigator !== 'undefined' ? nav
     { label: 'Reset zoom', combo: join(mod, '0') },
     { label: 'Full screen', combo: mac ? '⌃⌘F' : 'Shift+F11' },
     { label: 'Developer tools', combo: mac ? '⌥⌘I' : 'Ctrl+Shift+I' },
+    ...(mac ? [{ label: 'Close window', combo: '⌘⇧W' }] : []),
     { label: 'Quit', combo: win ? 'Alt+F4' : join(mod, 'Q') },
   ];
 }

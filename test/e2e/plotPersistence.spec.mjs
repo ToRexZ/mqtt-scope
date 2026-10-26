@@ -5,7 +5,7 @@
 
 import path from 'node:path';
 import { readFileSync, statSync } from 'node:fs';
-import { test, expect, makeUserData, profile, connect, reconnected, openTabTo, mockDialogs, waitForTopic, waitForFile, waitForLayout, readJson } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, reconnected, openTabTo, mockDialogs, waitForTopic, waitForFile, waitForLayout, readJson, selectTopic, popupFrom } from './fixtures.mjs';
 
 const box = (l) => l.boundingBox();
 
@@ -232,4 +232,26 @@ test('plotTabs.json and plots.json are never rewritten', async ({ env }) => {
   }
   await env.closeApp(first);
   expect(snapshot()).toEqual(before);
+});
+
+// Only main windows read and write layouts (main/main.js layouts:get/set),
+// and only of profiles there are.
+test('a pop-out cannot reach the layouts, nor can anything reach one of no profile', async ({ env }) => {
+  const broker = await env.broker();
+  await broker.publish('po/a', '1', { retain: true });
+  const userData = makeUserData({ profiles: [profile(broker.port, { id: 'a' })] });
+  const { app, page, errors } = await env.launch({ userData });
+  await connect(page);
+  await selectTopic(page, 'po/a');
+  const { popup } = await popupFrom(app, () => page.locator('#viewer-host').getByRole('button', { name: '⤢ Pop out' }).click());
+  await expect(popup.locator('.viewer-topic')).toHaveText('po/a');
+  await expect(popup.evaluate(() => window.api.layoutGet('a'))).rejects.toThrow('Unknown window');
+  await expect(popup.evaluate(() => window.api.layoutSet('a', { version: 3, tabs: [] }))).rejects.toThrow('Unknown window');
+  await expect(page.evaluate(() => window.api.layoutGet('nope'))).rejects.toThrow('Unknown connection profile');
+  await expect(page.evaluate(() => window.api.layoutSet('nope', { version: 3, tabs: [] }))).rejects.toThrow('Unknown connection profile');
+  expect(await page.evaluate(() => window.api.layoutGet('a').then((r) => typeof r))).toBe('object');
+  const doc = readJson(path.join(userData, 'profileLayouts.json'));
+  expect(Object.keys(doc.byProfile)).not.toContain('nope');
+  expect(doc.lastUsed).toBe('a');
+  expect(errors).toEqual([]);
 });

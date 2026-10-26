@@ -241,7 +241,8 @@ test('a tab moves with its connection; messages published during the move all ar
   expect(await w2.page.evaluate(() => window.__mqttscope.publisher.publish())).toBe(true);
   expect((await listener.waitFor((m) => m.topic === 'cmd/go')).payload.toString()).toBe('draft payload');
   await expect(w1.evaluate((id) => window.api.status(id), idA)).rejects.toThrow('Unknown connection');
-  await expect(w1.evaluate(([id, w]) => window.api.moveTab(id, w, 0), [idA, w2Id])).rejects.toThrow('Unknown connection');
+  await expect(w1.evaluate((id) => window.api.tearOffTab(id), idA)).rejects.toThrow('Unknown connection');
+  expect(await w1.evaluate(() => 'moveTab' in window.api), 'moves to a window are main\'s (drop, test hook)').toBe(false);
   expect(errors).toEqual([]);
   expect(w2.errors).toEqual([]);
 });
@@ -445,6 +446,54 @@ test('a move that fails gives the tab back to its window, with what arrived mean
   // Window 2 is as it was.
   expect(await tabIds(w2.page)).toEqual([idC]);
   expect(await mainWindowCount(app)).toBe(2);
+  expect(errors).toEqual([]);
+  expect(w2.errors).toEqual([]);
+});
+
+test('a tab whose state cannot go to main stays, with its connection', async ({ env }) => {
+  const {
+    brokers: [a],
+    app,
+    page: w1,
+    errors,
+  } = await launchThree(env);
+  const { idA, idB, idC, w2 } = await twoWindows(app, w1);
+  const w1Id = await windowIdOf(w1);
+  const w2Id = await windowIdOf(w2.page);
+  // Tab A's state holds a value that cannot be copied to main.
+  await w1.evaluate((id) => {
+    const tab = window.__mqttscope.shell.tabs.find((t) => t.connId === id);
+    const exportState = tab.exportState.bind(tab);
+    tab.exportState = () => ({ ...exportState(), unclonable: () => {} });
+  }, idA);
+  await expect(moveTab(app, idA, w2Id, 0)).resolves.toBe(false);
+  expect(await tabIds(w1)).toEqual([idA, idB]);
+  expect(await activeId(w1)).toBe(idB);
+  expect(await ownerOf(app, idA)).toBe(w1Id);
+  await a.publish('still/here', '1');
+  await expect.poll(() => countOf(w1, idA, 'still/here')).toBe(1);
+  expect(await tabIds(w2.page)).toEqual([idC]);
+  expect(await mainWindowCount(app)).toBe(2);
+  expect(errors).toEqual([]);
+  expect(w2.errors).toEqual([]);
+});
+
+// Main names the connection a tab joins with; a state of another one is refused.
+test('a window builds a tab only for the connection main names', async ({ env }) => {
+  const { app, page: w1, errors } = await launchThree(env);
+  const { idA, idC, w2 } = await twoWindows(app, w1);
+  const w2Id = await windowIdOf(w2.page);
+  const state = await w1.evaluate((id) => window.__mqttscope.shell.tabs.find((t) => t.connId === id).exportState(), idA);
+  // As main asks it (tabMove.js), with the reply caught before main's own handler sees it.
+  const reply = await app.evaluate(({ BrowserWindow, ipcMain }, [id, s]) => {
+    const win = BrowserWindow.getAllWindows().find((w) => w.webContents.id === id);
+    return new Promise((resolve) => {
+      ipcMain.once('tab:reply', (_e, r) => resolve(r));
+      win.webContents.send('tab:import', { reqId: 999999, connId: 'c999', state: s, index: 0, activate: true });
+    });
+  }, [w2Id, state]);
+  expect(reply).toEqual({ reqId: 999999, error: 'The tab is of another connection' });
+  expect(await tabIds(w2.page)).toEqual([idC]);
   expect(errors).toEqual([]);
   expect(w2.errors).toEqual([]);
 });

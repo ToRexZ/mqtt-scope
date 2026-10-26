@@ -5,9 +5,11 @@
 // delivered, in order, to the window that has the tab afterwards. The tab's
 // state goes from the window it leaves through main to the one it joins:
 //
-//   hold → tab:export to the source (it answers with the tab's state once the
-//   tab is gone from it) → tab:import to the target (it answers once the tab
-//   is built) → the connection and its pop-outs belong to the target → release
+//   hold → tab:export to the source (it answers with the tab's state, and the
+//   tab goes from it once that answer is sent; one that cannot be sent fails
+//   the move, the tab still there) → tab:import to the target (it answers
+//   once the tab is built) → the connection and its pop-outs belong to the
+//   target → release
 //
 // A step that fails, a window that takes longer than timeoutMs or one that
 // starts closing gives the tab back to the window it came from, at its place

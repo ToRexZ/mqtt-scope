@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { requireFromRoot } from './_util.mjs';
 
-const { createProfileStore, sanitize, defaultProfiles } = requireFromRoot('./main/profileStore.js');
+const { createProfileStore, sanitize, defaultProfiles, keepOpen } = requireFromRoot('./main/profileStore.js');
 
 // Reversible fake of Electron safeStorage.
 function fakeCipher({ available = true } = {}) {
@@ -353,5 +353,41 @@ describe('save', () => {
     store.save([full()]);
     assert.equal(readJson().length, 1);
     assert.equal(backups().length, 1);
+  });
+});
+
+describe('ids', () => {
+  test('the ids load() gives, without decrypting or setting a broken file aside', () => {
+    const cipher = fakeCipher();
+    const store = createProfileStore({ file, cipher });
+    assert.deepEqual(store.ids(), ['local'], 'no file: the default profiles');
+    fs.writeFileSync(file, JSON.stringify([null, { id: 'x' }, { id: 'a', name: 'A', passwordEnc: Buffer.from('enc:pw').toString('base64') }, { id: 'b', name: 'B' }]));
+    assert.deepEqual(store.ids(), ['a', 'b']);
+    assert.equal(cipher.calls.decrypt, 0);
+    fs.writeFileSync(file, '[]');
+    assert.deepEqual(store.ids(), []);
+    for (const content of ['not json', '{}']) {
+      fs.writeFileSync(file, content);
+      assert.deepEqual(store.ids(), ['local'], content);
+    }
+    assert.deepEqual(backups(), []);
+  });
+});
+
+describe('keepOpen', () => {
+  const p = (id) => ({ id, name: id.toUpperCase() });
+  test('a profile open in a tab that a save leaves out is put back at its place', () => {
+    const previous = [p('a'), p('b'), p('c'), p('d')];
+    const edited = { ...p('c'), name: 'Renamed' };
+    assert.deepEqual(keepOpen(previous, [p('a'), edited, p('d')], new Set(['b'])), { list: [p('a'), p('b'), edited, p('d')], kept: ['b'] });
+    assert.deepEqual(keepOpen(previous, [p('d')], new Set(['a', 'c'])), { list: [p('a'), p('d'), p('c')], kept: ['a', 'c'] });
+    assert.deepEqual(keepOpen(previous, [], new Set(['d'])), { list: [p('d')], kept: ['d'] }, 'at the end of a shorter list');
+  });
+
+  test('profiles that are not open, or still listed, are left as the save has them', () => {
+    const previous = [p('a'), p('b')];
+    const next = [{ ...p('a'), host: 'changed' }, p('new')];
+    assert.deepEqual(keepOpen(previous, next, new Set(['a', 'gone'])), { list: next, kept: [] });
+    assert.deepEqual(keepOpen(previous, [], new Set()), { list: [], kept: [] });
   });
 });

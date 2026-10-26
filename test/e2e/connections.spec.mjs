@@ -4,7 +4,7 @@
 
 import path from 'node:path';
 import { readFileSync, existsSync } from 'node:fs';
-import { test, expect, makeUserData, profile, connect, closedPort, mockDialogs, dialogCalls, waitForFile, waitForTopic, selectTopic, row, toast, activeTabName, openTabTo, recordDialogStatus } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, closedPort, mockDialogs, dialogCalls, waitForFile, waitForTopic, selectTopic, row, toast, activeTabName, openTabTo, recordDialogStatus, readJson } from './fixtures.mjs';
 
 const PASSWORD = 's3cret-Pa55word';
 const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
@@ -574,6 +574,54 @@ test('reopening a closed profile that is open again activates its tab', async ({
   expect(errors).toEqual([]);
 });
 
+// Two profiles with one client ID on one broker (Duplicate copies it): the
+// second would throw the first off the broker.
+test('a client ID in use on the broker by another tab is refused; the picker stays', async ({ env }) => {
+  const broker = await env.broker();
+  const clients = [];
+  broker.aedes.on('client', (c) => clients.push(c.id));
+  const userData = makeUserData({
+    profiles: [profile(broker.port, { id: 'a', name: 'Broker A', clientId: 'robot-1' }), profile(broker.port, { id: 'b', name: 'Broker B', clientId: 'robot-1' })],
+  });
+  const { app, page, errors } = await env.launch({ userData });
+  await connect(page);
+  const idA = await activeId(page);
+  await page.click('.tab-new');
+  await expect.poll(() => tabCount(page)).toBe(2);
+  const picker = await activeId(page);
+  await pickProfile(page, 'Broker B');
+  await page.locator('.conn-dialog .connect-btn').click();
+  await expect(toast(page, 'error')).toHaveText(['Client ID “robot-1” is already used by “Broker A” on this broker']);
+  expect(await activeId(page)).toBe(picker);
+  expect(await mode(page)).toBe('picker');
+  await expect(page.locator('.conn-dialog')).toBeVisible();
+  expect(await tabCount(page)).toBe(2);
+  expect(await app.evaluate(() => globalThis.__mqttscopeConnections.openProfileIds())).toEqual(['a']);
+  expect(clients).toEqual(['robot-1']);
+
+  // Once Broker A's tab is closed, Broker B connects.
+  await page.evaluate((id) => window.__mqttscope.shell.closeTab(id), idA);
+  await page.locator('.conn-dialog .connect-btn').click();
+  await expect.poll(() => mode(page)).toBe('session');
+  await expect(activeTabName(page)).toHaveText('Broker B');
+  expect(errors).toEqual([]);
+});
+
+// Main keeps plots only for saved profiles (layouts:get/set refuse others):
+// the one the dialog starts with when there are none is saved as it connects.
+test('with no saved connections the one to start with is saved before it connects', async ({ env }) => {
+  const userData = makeUserData({ profiles: [] });
+  const { page, errors } = await env.launch({ userData });
+  await expect(page.locator('.conn-dialog .conn-item .conn-name')).toHaveText(['Local broker']);
+  expect(readJson(path.join(userData, 'profiles.json'))).toEqual([]);
+  await page.locator('.conn-dialog .connect-btn').click();
+  await waitForFile(path.join(userData, 'profiles.json'), (b) => JSON.parse(b).length === 1);
+  await expect(activeTabName(page)).toHaveText('Local broker');
+  await expect.poll(() => page.evaluate(() => window.__mqttscope.shell.active.plots.saveTo)).not.toBeNull();
+  await expect(toast(page, 'error').filter({ hasText: 'Could not load plots' })).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
 test('a fresh picker preselects a profile that is not open', async ({ env }) => {
   const { userData } = await twoProfiles(env);
   const { page, errors } = await env.launch({ userData });
@@ -639,6 +687,46 @@ test('an open profile cannot be deleted', async ({ env }) => {
   await page.evaluate((id) => window.__mqttscope.shell.closeTab(id), idA);
   await expect(del).toBeEnabled();
   await expect(del).toHaveAttribute('title', 'Delete this connection');
+  expect(errors).toEqual([]);
+});
+
+// Delete is disabled for an open profile; a window that did not know yet
+// that it was open (another window opened it meanwhile) cannot delete it
+// either.
+test('a save that leaves out an open profile keeps it, and its layout', async ({ env }) => {
+  const { userData } = await twoProfiles(env);
+  const { page, errors } = await env.launch({ userData });
+  await connect(page); // Broker A
+  const ids = () => readJson(path.join(userData, 'profiles.json')).map((p) => p.id);
+  const layouts = () => readJson(path.join(userData, 'profileLayouts.json'));
+  // The dialog deletes it as if it had not heard that the profile is open.
+  const deleteInDialog = (id) =>
+    page.evaluate(async (gone) => {
+      const dialog = window.__mqttscope.connections;
+      dialog.profiles = dialog.profiles.filter((p) => p.id !== gone);
+      dialog.dirty = true;
+      await dialog.flush();
+      dialog.render();
+    }, id);
+  const listed = page.locator('.conn-dialog .conn-item .conn-name');
+  await page.click('.tab-new');
+  await expect.poll(() => tabCount(page)).toBe(2);
+  const idPicker = await activeId(page);
+  await waitForFile(path.join(userData, 'profileLayouts.json'), (b) => JSON.parse(b).lastUsed === 'a');
+
+  await deleteInDialog('a');
+  expect(ids()).toEqual(['a', 'b']);
+  expect(layouts()).toMatchObject({ lastUsed: 'a', legacyProfiles: ['a', 'b'] });
+  // The window that saved shows it again.
+  await expect(listed).toHaveText(['Broker A', 'Broker B']);
+
+  // Closed, it is deleted, with its layout.
+  await page.evaluate(() => window.__mqttscope.shell.closeTab(window.__mqttscope.shell.tabs[0].connId));
+  expect(await activeId(page)).toBe(idPicker);
+  await deleteInDialog('a');
+  await expect(listed).toHaveText(['Broker B']);
+  expect(ids()).toEqual(['b']);
+  expect(layouts()).toMatchObject({ lastUsed: null, legacyProfiles: ['b'] });
   expect(errors).toEqual([]);
 });
 

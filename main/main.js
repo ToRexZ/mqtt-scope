@@ -4,10 +4,11 @@ const { app, BrowserWindow, Menu, ipcMain, dialog, clipboard, net, safeStorage, 
 const path = require('node:path');
 const fs = require('node:fs');
 const { ConnectionRegistry } = require('./connections');
-const { createProfileStore } = require('./profileStore');
+const { createProfileStore, keepOpen } = require('./profileStore');
 const { createJsonStore } = require('./jsonStore');
 const { createLayoutStore } = require('./layoutStore');
 const { WindowState, placeBounds } = require('./windowState');
+const { menuTemplate } = require('./menu');
 const { Requests, TabMover, TIMEOUT_MS } = require('./tabMove');
 const { TabDrag } = require('./tabDrag');
 const { Updater } = require('./updater');
@@ -117,13 +118,14 @@ function closeConnection(connId) {
   if (tabDrag.active()?.connId === connId) endDrag();
 }
 
-// A window closing, crashing or reloading ends all of its connections and a
-// drag of its tab, and will not answer what main asked of it. A page that
-// starts over is not left empty by tabs that went out of it before (see
+// A window closing, crashing or reloading ends its connections (connIds: all
+// it has, or those it had when its page started over) with their pop-outs
+// and a drag of its tab, and will not answer what main asked of it. A page
+// that starts over is not left empty by tabs that went out of it before (see
 // closeIfEmpty).
-function closeConnectionsOf(ownerId) {
-  registry.closeOwner(ownerId);
-  closeChildren((child) => child.ownerId === ownerId);
+function closeConnectionsOf(ownerId, connIds = registry.ofOwner(ownerId)) {
+  for (const connId of connIds) if (registry.get(connId)?.ownerId === ownerId) closeConnection(connId);
+  closeChildren((child) => child.ownerId === ownerId && !registry.get(child.connId));
   requests.windowGone(ownerId);
   if (tabDrag.active()?.fromWindowId === ownerId) endDrag();
   const entry = windows.get(ownerId);
@@ -303,15 +305,15 @@ function windowsToRestore(doc) {
   return WindowState.restorable(doc, new Set(profiles.load().map((p) => p.id)));
 }
 
-// bounds: where it was in the last run; restore: { tabs, active } to reopen
-// in it; adopt: it opens for a tab that moves in, with no tab of its own. The
-// window asks for these once (tabs:init); without them it opens with a New
-// connection tab.
+// bounds: where it was in the last run; restore: { tabs, active, maximized,
+// fullScreen } to reopen in it, and how; adopt: it opens for a tab that
+// moves in, with no tab of its own. The window asks for these once
+// (tabs:init); without them it opens with a New connection tab.
 function createMainWindow({ bounds = null, restore = null, adopt = false } = {}) {
   const win = new BrowserWindow({
     width: 1600,
     height: 1000,
-    ...placeBounds(bounds, screen.getAllDisplays().map((d) => d.workArea)),
+    ...placeBounds(bounds, screen.getAllDisplays().map((d) => d.workArea), screen.getPrimaryDisplay().workArea),
     minWidth: 900,
     minHeight: 600,
     title: 'MQTT Scope',
@@ -328,20 +330,32 @@ function createMainWindow({ bounds = null, restore = null, adopt = false } = {})
   windows.set(id, entry);
   // Until its page reports its tabs, it holds what it reopens.
   if (restore) windowState.report(id, restore);
-  // The size and place it has when not maximized or full screen.
+  // The size and place it has when not maximized or full screen, and whether
+  // it is.
   const trackBounds = () => {
     if (win.isDestroyed()) return;
-    windowState.setBounds(id, win.getNormalBounds());
+    windowState.setBounds(id, win.getNormalBounds(), { maximized: win.isMaximized(), fullScreen: win.isFullScreen() });
     saveWindowStateSoon();
   };
   trackBounds();
-  win.on('resize', trackBounds);
-  win.on('move', trackBounds);
+  for (const change of ['resize', 'move', 'maximize', 'unmaximize', 'enter-full-screen', 'leave-full-screen']) win.on(change, trackBounds);
+  // As it was in the last run (its normal bounds are those above).
+  if (restore?.maximized) win.maximize();
+  if (restore?.fullScreen) win.setFullScreen(true);
 
   // A reloaded page starts with no connections; the first load has none yet.
-  // Not 'did-start-loading': a navigation blocked below fires that too, and
-  // the page stays.
-  win.webContents.on('did-navigate', () => closeConnectionsOf(id));
+  // Not on 'did-start-loading' or 'did-start-navigation': a navigation
+  // blocked below fires those too, and the page stays. The connections to
+  // end are those the page had when the navigation started: the new page
+  // may open its own before 'did-navigate', and they stay.
+  let leaving = null;
+  win.webContents.on('did-start-navigation', (details) => {
+    if (details.isMainFrame && !details.isSameDocument) leaving = registry.ofOwner(id);
+  });
+  win.webContents.on('did-navigate', () => {
+    closeConnectionsOf(id, leaving ?? undefined);
+    leaving = null;
+  });
   win.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
   win.webContents.on('render-process-gone', async (_e, details) => {
     log.error('renderer gone', details);
@@ -535,9 +549,12 @@ function registerIpc() {
     closeConnection(connId);
   });
   const sessionOf = (e, connId) => connectionOf(e, connId).session;
-  // A profile open in another tab: that tab may be in this very window,
-  // which then shows it itself.
-  const withSameWindow = (e, res) => (res.duplicate ? { ...res, duplicate: { ...res.duplicate, sameWindow: res.duplicate.ownerId === ownerIdOf(e.sender) } } : res);
+  // A profile (or its client ID) open in another tab: that tab may be in this
+  // very window, which then shows it itself.
+  const withSameWindow = (e, res) => {
+    const key = res.duplicate ? 'duplicate' : res.clientIdInUse ? 'clientIdInUse' : null;
+    return key ? { ...res, [key]: { ...res[key], sameWindow: res[key].ownerId === ownerIdOf(e.sender) } } : res;
+  };
   ipcMain.handle('mqtt:connect', (e, connId, profile) => {
     connectionOf(e, connId);
     return withSameWindow(e, registry.connect(connId, profile || {}));
@@ -566,22 +583,40 @@ function registerIpc() {
 
   ipcMain.handle('profiles:list', () => profiles.load());
   ipcMain.handle('profiles:save', (e, list) => {
-    const before = profiles.load().map((p) => p.id);
-    const res = profiles.save(list);
+    if (!Array.isArray(list)) throw new Error('Profiles must be an array');
+    const before = profiles.ids();
+    // A profile open in a tab cannot be deleted (the dialog disables Delete);
+    // a window that had not heard yet that it was opened keeps it too. That
+    // window then reloads the list, as the others do.
+    const open = new Set(registry.openProfileIds());
+    const listed = new Set(list.map((p) => p?.id));
+    let next = list;
+    if (before.some((id) => open.has(id) && !listed.has(id))) {
+      const withOpen = keepOpen(profiles.load(), list, open);
+      log.warn('profiles', `not deleted, open in a tab: ${withOpen.kept.join(', ')}`);
+      next = withOpen.list;
+    }
+    const res = profiles.save(next);
     // A deleted profile's plots go with it; a renamed one keeps its id.
-    const kept = new Set(list.map((p) => p?.id));
+    const kept = new Set(next.map((p) => p?.id));
     try {
       layouts.remove(before.filter((id) => !kept.has(id)));
     } catch (err) {
       log.error('layouts', err); // the profiles themselves are saved
     }
-    broadcastChange(e.sender.id, 'profiles');
+    broadcastChange(next === list ? e.sender.id : null, 'profiles');
     return res;
   });
   ipcMain.handle('profiles:security', () => storageSecurity());
   // A profile is open in one tab app-wide, so its layout needs no broadcast.
-  ipcMain.handle('layouts:get', (_e, profileId) => layouts.get(profileId));
-  ipcMain.handle('layouts:set', (_e, profileId, doc) => layouts.set(profileId, doc));
+  // Main windows read and write layouts (not pop-outs), of profiles there are.
+  const layoutId = (e, profileId) => {
+    if (!windows.has(e.sender.id)) throw new Error('Unknown window');
+    if (!profiles.ids().includes(profileId)) throw new Error('Unknown connection profile');
+    return profileId;
+  };
+  ipcMain.handle('layouts:get', (e, profileId) => layouts.get(layoutId(e, profileId)));
+  ipcMain.handle('layouts:set', (e, profileId, doc) => layouts.set(layoutId(e, profileId), doc));
   ipcMain.handle('store:get', (_e, name) => stores.get(name));
   ipcMain.handle('store:set', (e, name, value) => {
     if (MAIN_STORES.has(name)) throw new Error(`"${name}" is kept by the main process`);
@@ -647,15 +682,11 @@ function registerIpc() {
     windowState.report(e.sender.id, state);
     saveWindowStateSoon();
   });
-  // A window moves its own tabs (see moveTab, tearOff).
+  // A window moves its own tabs (see tearOff, and tabs:drop below).
   const ownTab = (e, connId) => {
     if (!windows.has(e.sender.id)) throw new Error('Unknown window');
     connectionOf(e, connId);
   };
-  ipcMain.handle('tabs:move', (e, { connId, toWindowId, index } = {}) => {
-    ownTab(e, connId);
-    return moveTab(connId, toWindowId, index);
-  });
   ipcMain.handle('tabs:tearOff', (e, { connId } = {}) => {
     ownTab(e, connId);
     return tearOff(connId, null);
@@ -798,80 +829,39 @@ function openChildWindow(ownerId, connId, { page, title, size, topics, init }) {
   win.loadFile(path.join(__dirname, '..', 'renderer', page));
 }
 
+// The menu (see menu.js). On macOS it is in the system menu bar for every
+// window, a pop-out too: Close Tab closes a focused pop-out (not a tab of its
+// window), and its other actions go to the pop-out's main window.
 function buildMenu() {
-  const toRenderer = (action) => () => {
+  const toRenderer = (action) => {
     const w = focusedMain();
     if (w && !w.win.isDestroyed()) w.win.webContents.send('menu', action);
   };
-  // Shortcuts are handled (and rebindable) in the renderer; the menu only
-  // shows them, so it must not register them a second time.
-  const keys = (id) => (menuShortcuts[id] ? { accelerator: menuShortcuts[id], registerAccelerator: false } : {});
-  const isMac = process.platform === 'darwin';
-  const template = [
-    ...(isMac ? [{ role: 'appMenu' }] : []),
-    {
-      label: 'File',
-      submenu: [
-        { label: 'New Window', click: () => createMainWindow(), ...keys('newWindow') },
-        { label: 'New Tab', click: toRenderer('newTab'), ...keys('newTab') },
-        { label: 'Close Tab', click: toRenderer('closeTab'), ...keys('closeTab') },
-        { label: 'Reopen Closed Tab', click: toRenderer('reopenTab'), ...keys('reopenTab') },
-        ...(isMac ? [{ label: 'Close Window', accelerator: 'Cmd+Shift+W', registerAccelerator: false, click: () => BrowserWindow.getFocusedWindow()?.close() }] : []),
-        { type: 'separator' },
-        { label: 'New Connection Tab…', click: toRenderer('connections'), ...keys('connections') },
-        { label: 'Subscriptions…', click: toRenderer('subscriptions'), ...keys('subscriptions') },
-        { label: 'Settings…', click: toRenderer('settings'), ...keys('settings') },
-        // Linux and Windows have no visible menu: these live in Settings.
-        ...(isMac ? [{ type: 'separator' }, { label: 'Open Data Folder', click: () => shell.openPath(app.getPath('userData')) }] : []),
-        // macOS: Close Tab and Close Window above replace the close role (Quit is in the app menu).
-        ...(isMac ? [] : [{ type: 'separator' }, { role: 'quit' }]),
-      ],
+  const focused = (win) => win || BrowserWindow.getFocusedWindow();
+  const template = menuTemplate({
+    isMac: process.platform === 'darwin',
+    shortcuts: menuShortcuts,
+    act: {
+      send: toRenderer,
+      newWindow: () => createMainWindow(),
+      closeTab: (win) => {
+        const w = focused(win);
+        if (w && !w.isDestroyed() && childWindows.has(w.webContents?.id)) w.close();
+        else toRenderer('closeTab');
+      },
+      closeWindow: (win) => focused(win)?.close(),
+      openDataFolder: () => shell.openPath(app.getPath('userData')),
+      checkForUpdates: () => checkForUpdatesNow(),
+      about: () =>
+        dialog.showMessageBox(focusedMain()?.win, {
+          type: 'info',
+          message: `MQTT Scope ${app.getVersion()}`,
+          detail: `Electron ${process.versions.electron} · Chromium ${process.versions.chrome} · Node ${process.versions.node}\nData: ${app.getPath('userData')}`,
+          icon: ICON,
+        }),
+      showLogFile: () => log.file && shell.showItemInFolder(log.file),
     },
-    { role: 'editMenu' },
-    {
-      label: 'View',
-      submenu: [
-        { label: 'Inspector', click: toRenderer('tabInspector'), ...keys('tabInspector') },
-        { label: 'Plots', click: toRenderer('tabPlots'), ...keys('tabPlots') },
-        { label: 'Add Data to New Plot…', click: toRenderer('newPlot'), ...keys('newPlot') },
-        { label: 'Maximize Inspector', click: toRenderer('maximize'), ...keys('maximize') },
-        { type: 'separator' },
-        { label: 'Pause / Resume Updates', click: toRenderer('pause'), ...keys('pause') },
-        { label: 'Hold / Follow (Freeze Plots)', click: toRenderer('hold'), ...keys('hold') },
-        { label: 'Reload: Clear Messages and Restart Plots', click: toRenderer('reset'), ...keys('reset') },
-        { label: 'Clear Topics', click: toRenderer('clear'), ...keys('clear') },
-        { type: 'separator' },
-        { role: 'resetZoom' },
-        { role: 'zoomIn' },
-        { role: 'zoomOut' },
-        { type: 'separator' },
-        { role: 'togglefullscreen', accelerator: isMac ? 'Ctrl+Cmd+F' : 'Shift+F11' },
-        { role: 'toggleDevTools' },
-      ],
-    },
-    ...(isMac
-      ? [
-        {
-          label: 'Help',
-          submenu: [
-            { label: 'Keyboard Shortcuts…', click: toRenderer('keyboardSettings') },
-            { label: 'Check for Updates…', click: () => checkForUpdatesNow() },
-            {
-              label: 'About MQTT Scope',
-              click: () =>
-                dialog.showMessageBox(focusedMain()?.win, {
-                  type: 'info',
-                  message: `MQTT Scope ${app.getVersion()}`,
-                  detail: `Electron ${process.versions.electron} · Chromium ${process.versions.chrome} · Node ${process.versions.node}\nData: ${app.getPath('userData')}`,
-                  icon: ICON,
-                }),
-            },
-            { label: 'Show Log File', click: () => log.file && shell.showItemInFolder(log.file) },
-          ],
-        },
-        ]
-      : []),
-  ];
+  });
   try {
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));
   } catch (err) {
@@ -905,7 +895,7 @@ function start() {
   // Read once: a broken file is set aside as it is read (see jsonStore.js).
   const lastRun = stores.get('windowState');
   windowState = new WindowState(lastRun);
-  layouts = createLayoutStore({ stores, profileIds: () => profiles.load().map((p) => p.id), log });
+  layouts = createLayoutStore({ stores, profileIds: () => profiles.ids(), log });
   try {
     // Every profile there is now starts with the plots of the version before.
     layouts.migrate();

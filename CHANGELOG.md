@@ -25,9 +25,11 @@ All notable changes to MQTT Scope. The format follows
   (not when it is the window's only tab).
 - **One tab per profile.** Opening a profile that is already open switches to
   its tab, also when it is in another window (two clients with one client ID
-  would throw each other off the broker). A profile that is open cannot be
-  deleted (Close its tab first). Editing an open profile applies at the tab's
-  next connect and shows a "reconnect to apply" hint.
+  would throw each other off the broker). For the same reason two profiles
+  with the same client ID cannot both be open on one broker: connecting the
+  second says which tab uses it. A profile that is open cannot be deleted
+  (Close its tab first). Editing an open profile applies at the tab's next
+  connect and shows a "reconnect to apply" hint.
 - **Moving tabs between windows.** Drag a tab onto another window's strip, or
   out of every window to open it in a new one, or use **Move to new window**.
   The connection is not interrupted and messages are not lost; the tab keeps
@@ -36,7 +38,8 @@ All notable changes to MQTT Scope. The format follows
   plots. Existing profiles start with the layout you had before. A profile
   opened for the first time starts with a copy of the most recently used one.
 - **Reopen tabs on launch** (Settings → General, on by default): the app comes
-  back with its windows, tabs and active tab as they were, and connects them.
+  back with its windows (maximized or full screen if they were), tabs and
+  active tab as they were, and connects them.
   With it off, closing a window with several connections asks "Close n
   connections?".
 - Shortcuts, all changeable in Settings → Keyboard: Ctrl+T new tab, Ctrl+W
@@ -54,7 +57,10 @@ All notable changes to MQTT Scope. The format follows
   they move on their own; custom bindings are kept. On macOS next and previous
   tab are Ctrl+Tab and Ctrl+Shift+Tab (Cmd+Tab belongs to the system).
 - Inspector and plot pop-out windows are titled with the profile name, and
-  only show messages of their own connection.
+  only show messages of their own connection. Ctrl+W (the Close tab shortcut)
+  closes a pop-out window.
+- macOS: Cmd+W closes a tab (or the pop-out window in front), no longer the
+  window; Close Window is Cmd+Shift+W (File menu).
 - The restart-to-update confirmation counts connections in all tabs.
 - History limits and the pause queue apply to each tab separately, so several
   busy tabs use that much memory each.

@@ -4,13 +4,17 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 // Main asks a window for something on `channel` ({ reqId, ...request });
 // cb(request) returns a promise, whose result or error goes back to main.
-function answer(channel, cb) {
+// sent(request) runs once the result went, in the same task: a result that
+// cannot be sent (or copied out of the page) goes back as an error instead.
+function answer(channel, cb, sent) {
   ipcRenderer.on(channel, async (_e, { reqId, ...request }) => {
     try {
       ipcRenderer.send('tab:reply', { reqId, result: await cb(request) });
     } catch (err) {
       ipcRenderer.send('tab:reply', { reqId, error: String(err?.message || err) });
+      return;
     }
+    sent?.(request);
   });
 }
 
@@ -51,10 +55,10 @@ contextBridge.exposeInMainWorld('api', {
   initialTabs: () => ipcRenderer.invoke('tabs:init'),
   reportTabs: (state) => ipcRenderer.send('tabs:report', state),
   // Moving a tab with its connection to another main window (main/tabMove.js):
-  // main asks the window it leaves for its state { connId, drop } (the tab
-  // goes; answer { state, index, active }) and has the window it joins build
-  // it { connId, state, index, activate }.
-  moveTab: (connId, toWindowId, index) => ipcRenderer.invoke('tabs:move', { connId, toWindowId, index }),
+  // main asks the window it leaves for its state { connId, drop } (answer
+  // { state, index, active }; exported(request) once that went to main, and
+  // the tab goes) and has the window it joins build it { connId, state,
+  // index, activate }. tearOffTab: into a new window of its own.
   tearOffTab: (connId) => ipcRenderer.invoke('tabs:tearOff', { connId }),
   // Dragging a tab (main/tabDrag.js): the window it starts in reports its
   // start and its end (whether the pointer was over that window then), other
@@ -66,7 +70,7 @@ contextBridge.exposeInMainWorld('api', {
   tabDrop: (drop) => ipcRenderer.invoke('tabs:drop', { index: drop?.index }),
   tabDragEnd: (end) => ipcRenderer.invoke('tabs:dragEnd', { overSource: end?.overSource }),
   onTabDragging: (cb) => ipcRenderer.on('tabs:dragging', (_e, data) => cb(data)),
-  onTabExport: (cb) => answer('tab:export', cb),
+  onTabExport: (cb, exported) => answer('tab:export', cb, exported),
   onTabImport: (cb) => answer('tab:import', cb),
   setMenuShortcuts: (map) => ipcRenderer.send('menu:shortcuts', map),
   flushed: () => ipcRenderer.send('app:flushed'),

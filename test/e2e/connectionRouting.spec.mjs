@@ -147,6 +147,35 @@ test('reloading a window closes its connections', async ({ env }) => {
   expect(errors).toEqual([]);
 });
 
+// A reload ends the connections the page had when it started; one opened
+// after that (as the new page's own could be, before the reload is done)
+// stays.
+test('a reload does not close a connection opened while it loads', async ({ env }) => {
+  const a = await env.broker();
+  const { app, page, errors } = await env.connected(a);
+  const old = await page.evaluate(() => window.__mqttscope.shell.active.connId);
+  const { early, alive } = await app.evaluate(
+    ({ BrowserWindow }) =>
+      new Promise((resolve) => {
+        const conns = globalThis.__mqttscopeConnections;
+        const contents = BrowserWindow.getAllWindows()[0].webContents;
+        let opened = null;
+        // After main's own listener: the reload has started.
+        contents.on('did-start-navigation', (details) => {
+          if (details.isMainFrame && !opened) opened = conns.create(contents.id);
+        });
+        contents.once('did-navigate', () => resolve({ early: opened, alive: !!conns.get(opened) }));
+        contents.reload();
+      }),
+  );
+  expect(early).not.toBeNull();
+  expect(alive).toBe(true);
+  await page.waitForFunction(() => !!window.__mqttscope?.shell.active);
+  expect(await registry(app, 'get', old)).toBeNull();
+  await expect.poll(() => a.aedes.connectedClients).toBe(0);
+  expect(errors).toEqual([]);
+});
+
 // The window blocks every navigation of its own (a link, a file dropped on
 // it); such an attempt still starts loading, but the page stays and so must
 // its connections.

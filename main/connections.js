@@ -2,8 +2,9 @@
 
 // Owns many MqttSessions keyed by an app-wide connection id ('c1', 'c2', ...).
 // Each connection belongs to one window (ownerId = webContents id) and may be
-// bound to a profile id; a profile can be open in one connection at a time.
-// Has no Electron dependency so it can be tested under plain Node.
+// bound to a profile id; a profile can be open in one connection at a time,
+// and so can an explicit client ID on one broker. Has no Electron dependency
+// so it can be tested under plain Node.
 
 const { EventEmitter } = require('node:events');
 const { MqttSession } = require('./mqttSession');
@@ -12,6 +13,23 @@ const EVENTS = ['status', 'warning', 'batch'];
 // Messages held for a tab on its way between windows, at most (as many as a
 // session buffers between two batches).
 const HOLD_MAX = 50000;
+// Keep in sync with mqttSession.js DEFAULT_PORTS.
+const DEFAULT_PORTS = { mqtt: 1883, mqtts: 8883, ws: 9001, wss: 443 };
+
+// The explicit client ID of a profile with the broker it connects to, as one
+// key; null without one (an empty client ID gets a random or a per-profile
+// one, see mqttSession.js). The broker is normalised the way the session
+// connects to it: a missing or empty port is the protocol's default, '1883'
+// is 1883, the host's case and surrounding spaces do not count, and the
+// WebSocket path only counts for ws and wss.
+function clientKey(p) {
+  if (typeof p?.clientId !== 'string' || !p.clientId) return null;
+  const protocol = String(p.protocol || 'mqtt');
+  const rawPort = String(p.port ?? '').trim();
+  const port = rawPort === '' ? DEFAULT_PORTS[protocol] : Number(rawPort);
+  const wsPath = protocol.startsWith('ws') ? p.wsPath || '/mqtt' : '';
+  return JSON.stringify([p.clientId, protocol, String(p.host ?? '').trim().toLowerCase(), port, wsPath]);
+}
 
 class ConnectionRegistry extends EventEmitter {
   constructor({ createSession = () => new MqttSession(), holdMax = HOLD_MAX } = {}) {
@@ -28,7 +46,8 @@ class ConnectionRegistry extends EventEmitter {
 
   create(ownerId) {
     const connId = `c${++this._counter}`;
-    const entry = { session: this._createSession(), ownerId, profileId: null, held: null };
+    // clientKey and name: of the profile bound (see bind).
+    const entry = { session: this._createSession(), ownerId, profileId: null, clientKey: null, name: '', held: null };
     this._entries.set(connId, entry);
     // A closed connection is gone from the map; its session may still emit
     // while tearing down, and that must not reach anyone.
@@ -56,14 +75,29 @@ class ConnectionRegistry extends EventEmitter {
   }
 
   // Takes the profile without connecting (a tab reopened at launch that the
-  // user had disconnected): from then on no other connection may open it.
+  // user had disconnected): from then on no other connection may open it,
+  // nor another profile with the same explicit client ID on the same broker
+  // (the two clients would throw each other off it). Refused, it answers
+  // { duplicate } or { clientIdInUse } naming the connection that has it.
   bind(connId, profile) {
     const entry = this._entries.get(connId);
     if (!entry) return { ok: false, error: 'Unknown connection' };
     const other = profile.id != null ? this.findProfile(profile.id) : null;
     if (other && other.connId !== connId) return { ok: false, duplicate: other };
+    const key = clientKey(profile);
+    const user = key && this._findClientKey(key, connId);
+    if (user) return { ok: false, clientIdInUse: { ...user, clientId: profile.clientId } };
+    entry.clientKey = key;
+    entry.name = String(profile.name ?? '');
     this._bind(entry, profile.id ?? null);
     return { ok: true };
+  }
+
+  _findClientKey(key, exceptConnId) {
+    for (const [connId, e] of this._entries) {
+      if (connId !== exceptConnId && e.clientKey === key) return { connId, ownerId: e.ownerId, profileId: e.profileId, name: e.name };
+    }
+    return null;
   }
 
   disconnect(connId) {
@@ -149,4 +183,4 @@ class ConnectionRegistry extends EventEmitter {
   }
 }
 
-module.exports = { ConnectionRegistry };
+module.exports = { ConnectionRegistry, clientKey };

@@ -146,16 +146,19 @@ window title is "MQTT Scope — " followed by the active tab's name.
   usable. Esc closes it (not when it is the window's only tab).
 - **One tab per profile**: opening a profile that is already open, in this or
   another window, switches to its tab instead of opening a second connection
-  (two clients with one client ID would throw each other off the broker). An
-  open profile cannot be deleted (*Close its tab first*). Editing it applies at
-  that tab's next connect, and the tab says *reconnect to apply*.
+  (two clients with one client ID would throw each other off the broker). Nor
+  can two profiles with the same client ID be open on one broker. An open
+  profile cannot be deleted (*Close its tab first*). Editing it applies at that
+  tab's next connect, and the tab says *reconnect to apply*.
 - **Background recording**: tabs you are not looking at stay connected and keep
   collecting messages, history and plot data. Only drawing is skipped. A tab's
   dot shows when its connection drops.
 - **Closing**: ×, middle-click or Ctrl+W close a tab and forget its data; it
   asks first only when the tab's plots hold recorded data. Closing the last tab
   leaves a *New connection* tab. Ctrl+Shift+T reopens the last closed tab
-  (same profile, connected again, empty data). Right-click a tab for Close,
+  (same profile, connected again, empty data). Ctrl+W in a pop-out window
+  closes that window. On macOS Cmd+W closes a tab and Cmd+Shift+W the window.
+  Right-click a tab for Close,
   Close other tabs, Close tabs to the right, Move to new window (with more than one tab), and Reconnect
   or Disconnect.
 - **Moving and tearing off**: drag a tab along the strip to reorder it, onto
@@ -165,7 +168,8 @@ window title is "MQTT Scope — " followed by the active tab's name.
   and pop-out windows, which follow it. On some Linux compositors (Wayland) the
   new window may not appear where you dropped the tab.
 - **Reopen tabs on launch** (Settings → General, on by default): the app
-  reopens the windows of the last run at their position and size, with their
+  reopens the windows of the last run at their position and size (maximized or
+  full screen if they were), with their
   tabs in order and the same active tab, and connects them. A tab you had
   disconnected comes back disconnected; *New connection* tabs and tabs of
   deleted profiles are not restored. With the setting off the app starts with

@@ -137,7 +137,33 @@ function createProfileStore({ file, cipher }) {
     return { ok: true, count: stored.length, encrypted: encrypt };
   }
 
-  return { load, save, canEncrypt };
+  // The ids of the profiles load() gives, without decrypting their passwords
+  // or setting a broken file aside.
+  function ids() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (Array.isArray(raw)) return raw.map(sanitize).filter(Boolean).map((p) => p.id);
+    } catch {}
+    return defaultProfiles().map((p) => p.id);
+  }
+
+  return { load, ids, save, canEncrypt };
 }
 
-module.exports = { createProfileStore, sanitize, defaultProfiles };
+// A profile open in a tab cannot be deleted. A list to save (`next`) that
+// leaves out one of `openIds` (a window deleted it before it heard that the
+// profile was opened elsewhere) keeps it as it was in `previous`, at its
+// place there. Returns { list, kept: [the ids put back] }.
+function keepOpen(previous, next, openIds) {
+  const listed = new Set(next.map((p) => p?.id));
+  const list = [...next];
+  const kept = [];
+  previous.forEach((p, i) => {
+    if (!openIds.has(p.id) || listed.has(p.id)) return;
+    list.splice(Math.min(i, list.length), 0, p);
+    kept.push(p.id);
+  });
+  return { list, kept };
+}
+
+module.exports = { createProfileStore, sanitize, defaultProfiles, keepOpen };

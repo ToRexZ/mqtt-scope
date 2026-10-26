@@ -113,7 +113,8 @@ function start(init, keys) {
     resetZoom();
   });
 
-  // The user's Hold shortcut (Space by default) freezes; Esc resets the zoom.
+  // The user's Hold shortcut (Space by default) freezes; Esc resets the zoom;
+  // Close the tab (Mod+W) closes this window.
   freeze.title = `Stop the time axis${keys.hold ? ` (${keys.hold})` : ''}`;
   document.addEventListener('keydown', (e) => {
     const combo = comboFromEvent(e);
@@ -121,6 +122,9 @@ function start(init, keys) {
     if (keys.hold && combo === keys.hold && !e.repeat) {
       e.preventDefault();
       toggleFreeze();
+    } else if (keys.closeTab && combo === keys.closeTab) {
+      e.preventDefault();
+      window.close();
     } else if (e.key === 'Escape' && zoom) {
       resetZoom();
     }

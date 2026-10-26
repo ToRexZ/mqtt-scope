@@ -29,7 +29,12 @@ export class ConnectionDialog {
   async load() {
     this.security = await this.api.profileSecurity().catch(() => null);
     this.profiles = await this.api.listProfiles();
-    if (!this.profiles.length) this.profiles = [blankProfile('Local broker')];
+    // One to start with, saved before it connects (main keeps plots only for
+    // saved profiles).
+    if (!this.profiles.length) {
+      this.profiles = [blankProfile('Local broker')];
+      this.dirty = true;
+    }
     // Registered before the set is read, so no change falls between the two.
     this.api.onOpenProfilesChanged((ids) => this.setOpenProfiles(ids));
     this.setOpenProfiles(await this.api.openProfiles());

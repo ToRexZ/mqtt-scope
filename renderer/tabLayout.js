@@ -12,7 +12,7 @@ export function stripLayout({ available, brandFull, brandIcon, plus, tabs }) {
   if (total + brandFull + plus <= available) return { brand: 'full', maxTab: null, scroll: false };
   if (total + brandIcon + plus <= available) return { brand: 'icon', maxTab: null, scroll: false };
   if (!tabs.length) return { brand: 'icon', maxTab: null, scroll: false };
-  let room =available - brandIcon - plus;
+  let room = available - brandIcon - plus;
   const sorted = [...tabs].sort((a, b) => a - b);
   let share = room / sorted.length;
   for (let i = 0; i < sorted.length; i++) {

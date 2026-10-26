@@ -4,7 +4,8 @@
 
 import path from 'node:path';
 import { readdirSync, writeFileSync } from 'node:fs';
-import { test, expect, makeUserData, profile, connect, openTabTo, activeTabName, waitForFile, waitForLayout, readJson } from './fixtures.mjs';
+import { fileURLToPath } from 'node:url';
+import { test, expect, makeUserData, profile, connect, openTabTo, activeTabName, waitForFile, waitForLayout, readJson, toast } from './fixtures.mjs';
 
 const tabNames = (page) => page.locator('.conn-tab .conn-tab-name');
 const tabEl = (page, name) => page.locator('.conn-tab').filter({ has: page.locator('.conn-tab-name').getByText(name, { exact: true }) });
@@ -19,6 +20,7 @@ const saved = (profileId, connected = true) => ({ profileId, connected });
 // The headless display is 1×1 px unless told otherwise, and windows opened on
 // it shrink to fit (then grow to their minimum size).
 const launch = (env, userData) => env.launch({ userData, args: ['--ozone-override-screen-size=2560,1440'] });
+const FULL_SCREEN_PROBE = fileURLToPath(new URL('../helpers/fullScreenProbe.cjs', import.meta.url));
 
 // Brokers A, B and C with a profile each (ids a, b, c).
 async function threeBrokers(env, settings) {
@@ -200,6 +202,113 @@ test('a window closed while another stays open does not come back', async ({ env
   expect(await windowCount(last.app)).toBe(1);
   await expect.poll(() => tabStates(last.page)).toEqual(['Broker A: session connected']);
   expect(last.errors).toEqual([]);
+});
+
+// The headless platform maximizes but has no full screen: the probe stands
+// in for it (see fullScreenProbe.cjs).
+test('a maximized or full-screen window comes back so, at its normal bounds', async ({ env }) => {
+  const { userData } = await threeBrokers(env);
+  const launchProbed = () => env.launch({ userData, args: ['--ozone-override-screen-size=2560,1440'], preload: [FULL_SCREEN_PROBE] });
+  const first = await launchProbed();
+  let { app } = first;
+  await connect(first.page); // Broker A
+  const other = await openWindow(app);
+  await connectTo(other, 'Broker B');
+  const boundsA = { x: 20, y: 30, width: 1100, height: 750 };
+  const boundsB = { x: 200, y: 100, width: 1000, height: 700 };
+  await setBounds(app, 'Broker A', boundsA);
+  await setBounds(app, 'Broker B', boundsB);
+  const shape = (n) => app.evaluate(({ BrowserWindow }, t) => {
+    const w = BrowserWindow.getAllWindows().find((x) => x.getTitle() === `MQTT Scope — ${t}`);
+    return { maximized: w.isMaximized(), fullScreen: w.isFullScreen() };
+  }, n);
+  await app.evaluate(({ BrowserWindow }) => {
+    const byTitle = (t) => BrowserWindow.getAllWindows().find((w) => w.getTitle() === `MQTT Scope — ${t}`);
+    byTitle('Broker A').maximize();
+    byTitle('Broker B').setFullScreen(true);
+  });
+  await expect.poll(() => shape('Broker A')).toEqual({ maximized: true, fullScreen: false });
+  await expect.poll(() => shape('Broker B')).toEqual({ maximized: false, fullScreen: true });
+  await waitForFile(stateFile(userData), (b) => JSON.parse(b).windows.some((w) => w.maximized) && JSON.parse(b).windows.some((w) => w.fullScreen));
+  expect(readJson(stateFile(userData)).windows).toEqual([
+    { bounds: boundsA, maximized: true, tabs: [saved('a')], active: 0 },
+    { bounds: boundsB, fullScreen: true, tabs: [saved('b')], active: 0 },
+  ]);
+  await env.closeApp(first);
+
+  ({ app } = await launchProbed());
+  await mainWindows(app, 2);
+  await expect.poll(() => shape('Broker A')).toEqual({ maximized: true, fullScreen: false });
+  await expect.poll(() => shape('Broker B')).toEqual({ maximized: false, fullScreen: true });
+  expect(await boundsOf(app, 'Broker A')).toEqual(boundsA);
+  expect(await boundsOf(app, 'Broker B')).toEqual(boundsB);
+});
+
+// As restoreTabs does at launch, for a profile that another tab has open by
+// then (another window was quicker): the reopened tab goes, or, as its
+// window's only tab, becomes a New connection tab for that profile.
+test('a reopened tab whose profile is open already does not stay behind', async ({ env }) => {
+  const { userData } = await threeBrokers(env);
+  const { app, page, errors } = await launch(env, userData);
+  await connectTo(page, 'Broker A');
+  const idA = await page.evaluate(() => window.__mqttscope.shell.active.connId);
+  await openTabTo(page, 'Broker B');
+  const reopen = (p, profileId, how, { only = false } = {}) =>
+    p.evaluate(
+      async ([id, h, alone]) => {
+        const shell = window.__mqttscope.shell;
+        const stored = window.__mqttscope.connections.profiles.find((x) => x.id === id);
+        const others = shell.tabs.map((t) => t.connId);
+        const tab = await shell.openTab({ profile: stored, restored: true, activate: alone });
+        if (alone) for (const other of others) await shell.closeTab(other);
+        await (h === 'connect' ? tab.connect(stored) : tab.bind());
+      },
+      [profileId, how, only],
+    );
+  for (const how of ['connect', 'bind']) {
+    await reopen(page, 'a', how);
+    expect(await tabStates(page)).toEqual(['Broker A: session connected', 'Broker B: session connected']);
+    await expect(activeTabName(page)).toHaveText('Broker A');
+    expect(await page.evaluate(() => window.__mqttscope.shell.active.connId)).toBe(idA);
+  }
+  // It is not one to reopen.
+  expect(await page.evaluate(() => window.__mqttscope.shell.reopenClosed())).toBeNull();
+
+  const other = await openWindow(app);
+  await reopen(other, 'b', 'connect', { only: true });
+  expect(await tabStates(other)).toEqual(['Broker B: picker disconnected']);
+  await expect(other.locator('.conn-dialog')).toBeVisible();
+  await expect(other.locator('.conn-dialog .conn-item.active .conn-name')).toHaveText('Broker B');
+  expect(await openProfiles(app)).toEqual(['a', 'b']);
+  // Its dialog connects another profile in it.
+  await connectTo(other, 'Broker C');
+  expect(await tabStates(other)).toEqual(['Broker C: session connected']);
+  expect(errors).toEqual([]);
+});
+
+// Two profiles with one client ID on one broker, each reopened in a window
+// of its own: one connects; the other says why not and offers its profile in
+// the connection dialog.
+test('of two reopened tabs with one client ID on a broker, one connects', async ({ env }) => {
+  const broker = await env.broker();
+  const profiles = ['a', 'b'].map((id) => profile(broker.port, { id, name: `Robot ${id.toUpperCase()}`, clientId: 'robot-1' }));
+  const userData = makeUserData({ profiles });
+  writeState(userData, [
+    { bounds: null, tabs: [saved('a')], active: 0 },
+    { bounds: null, tabs: [saved('b')], active: 0 },
+  ]);
+  const { app } = await launch(env, userData);
+  const pages = await mainWindows(app, 2);
+  const states = async () => (await Promise.all(pages.map((p) => tabStates(p)))).flat().sort();
+  await expect.poll(async () => (await states()).filter((s) => s.endsWith('session connected')).length).toBe(1);
+  const all = await states();
+  const winner = all.find((s) => s.endsWith('session connected')).split(':')[0];
+  const loser = winner === 'Robot A' ? 'Robot B' : 'Robot A';
+  expect(all).toEqual([`${loser}: picker disconnected`, `${winner}: session connected`].sort());
+  const page = pages[(await Promise.all(pages.map((p) => p.evaluate(() => window.__mqttscope.shell.active.mode)))).indexOf('picker')];
+  await expect(toast(page, 'error')).toHaveText([`Client ID “robot-1” is already used by “${winner}” on this broker`]);
+  await expect(page.locator('.conn-dialog .conn-item.active .conn-name')).toHaveText(loser);
+  expect(broker.aedes.connectedClients).toBe(1);
 });
 
 test('restore skips deleted profiles and survives a corrupt state file', async ({ env }) => {

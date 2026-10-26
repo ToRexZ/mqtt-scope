@@ -189,6 +189,10 @@ describe('fixedShortcuts', () => {
     assert.equal(combos('Win32')['Zoom in'], 'Ctrl+Plus');
     assert.equal(combos('MacIntel').Quit, '⌘Q');
     assert.equal(combos('MacIntel')['Full screen'], '⌃⌘F');
+    // macOS closes a window (a pop-out too) with the File menu's key; Mod+W
+    // is Close the tab there as elsewhere.
+    assert.equal(combos('MacIntel')['Close window'], '⌘⇧W');
+    assert.equal(combos('Win32')['Close window'], undefined);
   });
 
   test('none of them is also a rebindable action key', () => {
