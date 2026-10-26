@@ -2,7 +2,7 @@
 
 pkgname=mqtt-scope-bin
 _pkgname=mqtt-scope
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=1
 pkgdesc='Desktop MQTT client: live topic tree, large-message inspector, live plots and a publisher with saved messages'
 arch=('x86_64')
@@ -21,7 +21,7 @@ source=("${_pkgname}-${pkgver}.tar.gz::${url}/releases/download/v${pkgver}/MQTT-
         "${_pkgname}-${pkgver}-LICENSE::https://raw.githubusercontent.com/ToRexZ/${_pkgname}/v${pkgver}/LICENSE"
         "${_pkgname}-${pkgver}.svg::https://raw.githubusercontent.com/ToRexZ/${_pkgname}/v${pkgver}/build/icon.svg"
         "${_pkgname}.desktop")
-sha256sums=('6ee85fdba3579fc3ee8a3f717f52322f166b2f873ab67a05d59847b79dbf48ba'
+sha256sums=('2f895f9f8ae10e2d7aa4f2844ea18f472d873a134cf877e8a779dcdd9b712681'
             '8a9981afb4c8c93a6b584b40b91da32122f3a65580d966e9524b872df6496e46'
             '2c7dd412db9a70e1d4cc91a463e5bc8f0dd34f87717d301514ad806943129cb2'
             '083d88fc07076f171f19a98d2bd584f083aed1229b7a8ab2e96b2609d11c309f')

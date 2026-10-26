@@ -40,6 +40,23 @@ export const ACTIONS = [
   { id: 'clear', label: 'Clear all topics', default: '' },
 ];
 
+// Shortcuts the app fixes (they were menu accelerators): shown read-only in
+// Settings → Keyboard. Quit is Alt+F4 on Windows (Electron gives it no key there).
+export function fixedShortcuts(platform = typeof navigator !== 'undefined' ? navigator.platform || '' : '') {
+  const mac = /Mac/i.test(platform);
+  const win = /Win/i.test(platform);
+  const mod = mac ? '⌘' : 'Ctrl';
+  const join = (...p) => p.join(mac ? '' : '+');
+  return [
+    { label: 'Zoom in', combo: join(mod, 'Plus') },
+    { label: 'Zoom out', combo: join(mod, 'Minus') },
+    { label: 'Reset zoom', combo: join(mod, '0') },
+    { label: 'Full screen', combo: mac ? '⌃⌘F' : 'Shift+F11' },
+    { label: 'Developer tools', combo: mac ? '⌥⌘I' : 'Ctrl+Shift+I' },
+    { label: 'Quit', combo: win ? 'Alt+F4' : join(mod, 'Q') },
+  ];
+}
+
 const MODIFIER_KEYS = new Set(['Control', 'Shift', 'Alt', 'Meta', 'AltGraph', 'CapsLock', 'OS']);
 
 // The combo for a keydown event, or '' for a lone modifier key.

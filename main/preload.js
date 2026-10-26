@@ -90,6 +90,10 @@ contextBridge.exposeInMainWorld('api', {
   updateRestart: (force) => ipcRenderer.invoke('update:restart', force === true),
   updateSkip: () => ipcRenderer.invoke('update:skip'),
   updateOpenRelease: () => ipcRenderer.invoke('update:openRelease'),
+  // The Settings footer: main builds every path itself.
+  checkForUpdates: () => ipcRenderer.invoke('app:checkForUpdates'),
+  showLogFile: () => ipcRenderer.invoke('app:showLogFile'),
+  openDataFolder: () => ipcRenderer.invoke('app:openDataFolder'),
 
   copyText: (text) => ipcRenderer.invoke('clipboard:write', text),
   pickFile: (title) => ipcRenderer.invoke('dialog:pickFile', title),

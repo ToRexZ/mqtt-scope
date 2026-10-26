@@ -3,7 +3,8 @@
 
 import { el, button, toast, overlayHost } from './ui.js';
 import { iconButton } from './icons.js';
-import { ACTIONS, comboFromEvent, conflicts, displayCombo, normalizeOverrides, resolveBindings } from './keys.js';
+import { checkedView } from './updateView.js';
+import { ACTIONS, comboFromEvent, conflicts, displayCombo, fixedShortcuts, normalizeOverrides, resolveBindings } from './keys.js';
 
 export const DEFAULT_SETTINGS = {
   historyLimit: 100, // messages kept per topic
@@ -35,7 +36,7 @@ export function normalizeSettings(raw) {
 }
 
 // Resolves to the saved settings, or null when cancelled.
-export function openSettings(api, current, { tab = 'general' } = {}) {
+export function openSettings(api, current, { tab = 'general', openUpdatePanel = () => {} } = {}) {
   return new Promise((resolve) => {
     const overlay = el('div', 'modal-overlay');
     const form = el('form', 'modal prompt settings');
@@ -105,7 +106,16 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
       recording = null;
       renderKeys();
     });
-    keyboard.append(el('div', 'field-hint', 'Click a shortcut, then press the keys you want.'), table, conflictNote, resetAll);
+    // What the menu bar used to show: fixed by the app, not part of the table above.
+    const fixed = el('div', 'keys-fixed');
+    fixed.append(el('div', 'field-hint', 'Fixed shortcuts (not rebindable)'));
+    for (const { label, combo } of fixedShortcuts()) {
+      const row = el('div', 'keys-row');
+      row.append(el('span', 'keys-label', label), el('span', 'keys-fixed-combo', combo));
+      row.title = 'Fixed: this shortcut cannot be changed';
+      fixed.append(row);
+    }
+    keyboard.append(el('div', 'field-hint', 'Click a shortcut, then press the keys you want.'), table, conflictNote, resetAll, fixed);
 
     // Records the next key press for the selected action.
     const onRecord = (e) => {
@@ -144,24 +154,78 @@ export function openSettings(api, current, { tab = 'general' } = {}) {
     const saveBtn = Object.assign(el('button', 'btn primary', 'Save'), { type: 'submit' });
     const actions = el('div', 'modal-actions');
     actions.append(button('Cancel', '', () => done(null)), saveBtn);
-    form.append(el('h3', '', 'Settings'), tabs, general, keyboard, actions);
+
+    // Footer: the version and what the native menu bar used to hold (there is
+    // no menu bar on Linux and Windows). Main knows every path and URL.
+    const version = el('span', 'settings-version');
+    api.updateState().then((u) => u?.current && (version.textContent = `MQTT Scope ${u.current}`), () => {});
+    const link = (label, title, run) => button(label, title, run, 'btn small');
+    // Runs a footer action that answers '' or why it failed.
+    const opens = (what, ask) => async () => {
+      let why;
+      try {
+        why = await ask();
+      } catch (err) {
+        why = err.message;
+      }
+      if (why) toast(`Couldn't open the ${what}: ${why}`, 'error');
+    };
+    // Toasts show above this dialog, so it stays open with its edits. A newer
+    // version opens the update panel, which this modal would cover: only when
+    // nothing here is unsaved (then the dialog closes first).
+    const checkNow = async () => {
+      checkBtn.disabled = true;
+      checkBtn.textContent = 'Checking…';
+      let result;
+      try {
+        result = await api.checkForUpdates();
+      } catch (err) {
+        return toast(`Couldn't check for updates: ${err.message}`, 'error');
+      } finally {
+        checkBtn.disabled = false;
+        checkBtn.textContent = 'Check for updates';
+      }
+      const state = await api.updateState().catch(() => null);
+      const reaction = checkedView(result, state);
+      if (reaction?.toast) toast(reaction.toast, reaction.kind);
+      else if (reaction?.open) {
+        if (!overlay.isConnected || !unsaved()) {
+          done(null);
+          openUpdatePanel(state);
+        } else toast(`${state?.latest ? `MQTT Scope ${state.latest.version}` : 'A newer MQTT Scope'} is available — the Update button is in the top bar`);
+      }
+    };
+    const footerLinks = el('div', 'settings-links');
+    const checkBtn = link('Check for updates', 'Ask GitHub for the latest version now', checkNow);
+    footerLinks.append(
+      checkBtn,
+      link('Show log file', 'Show main.log in the file manager', opens('log file', () => api.showLogFile())),
+      link('Open data folder', 'Open the folder with profiles, settings and logs', opens('data folder', () => api.openDataFolder())),
+    );
+    const footer = el('div', 'settings-footer');
+    footer.append(version, footerLinks);
+    form.append(el('h3', '', 'Settings'), tabs, general, keyboard, actions, footer);
 
     const done = (v) => {
       document.removeEventListener('keydown', onRecord, true);
       overlay.remove();
       resolve(v);
     };
-    form.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      if (conflicts(bindings).size) return showTab('keyboard');
+    const formValues = () => {
       const raw = Object.fromEntries(Object.entries(fields).map(([k, i]) => [k, i.value]));
-      const next = normalizeSettings({
+      return normalizeSettings({
         ...raw,
         autoExpand: autoExpand.input.checked,
         checkForUpdates: checkUpdates.input.checked,
         restoreTabs: restoreTabs.input.checked,
         keys: bindings,
       });
+    };
+    const unsaved = () => JSON.stringify(formValues()) !== JSON.stringify(normalizeSettings(current));
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (conflicts(bindings).size) return showTab('keyboard');
+      const next = formValues();
       try {
         await api.storeSet('settings', next);
       } catch (err) {

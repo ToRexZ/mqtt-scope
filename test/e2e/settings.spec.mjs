@@ -1,6 +1,7 @@
 // Settings dialog (history limit) and keyboard handling of modal dialogs.
 
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { test, expect, makeUserData, profile, connect, reconnected, rowByPath, waitForTopic, waitForFile, historyItems } from './fixtures.mjs';
 
 const settingsDialog = (page) => page.locator('.modal.settings');
@@ -118,4 +119,16 @@ test('modal dialogs: Enter confirms, Escape cancels (settings and text prompts)'
   // The global Escape (restore maximized inspector) does not fire through a modal.
   await expect(page.locator('#layout')).not.toHaveClass(/max-viewer/);
   expect(errors).toEqual([]);
+});
+
+test('settings: footer shows the running app version', async ({ env }) => {
+  const { version } = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8'));
+  const broker = await env.broker();
+  const { page } = await env.connected(broker);
+  await page.locator('#btn-settings').click();
+  const footer = settingsDialog(page).locator('.settings-version');
+  await expect(footer).toHaveText(`MQTT Scope ${version}`);
+  // Visible on every tab, below the tab content.
+  await settingsDialog(page).locator('.tab[data-tab="keyboard"]').click();
+  await expect(footer).toBeVisible();
 });

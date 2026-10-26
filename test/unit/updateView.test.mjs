@@ -217,7 +217,7 @@ describe('installingView (the dialog every main window shows while a restart ins
   });
 });
 
-describe('checkedView (Help → Check for Updates…)', () => {
+describe('checkedView (Settings → Check for updates)', () => {
   test('latest, error and disabled are toasts', () => {
     assert.deepEqual(checkedView({ result: 'latest' }, state({ status: 'none', latest: null })), { toast: "You're on the latest version (0.3.0)", kind: 'info' });
     assert.deepEqual(checkedView({ result: 'error', error: 'HTTP 503' }, state()), { toast: "Couldn't check for updates: HTTP 503", kind: 'error' });
