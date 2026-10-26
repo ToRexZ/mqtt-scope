@@ -110,10 +110,11 @@ function closeChildren(pred) {
   for (const child of childWindows.values()) if (pred(child) && !child.win.isDestroyed()) child.win.close();
 }
 
-// Ends a connection; its pop-outs close with it.
+// Ends a connection; its pop-outs close with it, and a drag of its tab ends.
 function closeConnection(connId) {
   registry.close(connId);
   closeChildren((child) => child.connId === connId);
+  if (tabDrag.active()?.connId === connId) endDrag();
 }
 
 // A window closing, crashing or reloading ends all of its connections and a
@@ -237,7 +238,7 @@ function closeIfEmpty(id) {
 // Dragging a tab (see tabDrag.js). Every main window hears when a drag starts
 // and ends: its strip takes a drop of it meanwhile, also where the drag's own
 // data cannot be read.
-const tabDrag = new TabDrag();
+const tabDrag = new TabDrag({ onExpire: () => broadcastDragging(null) });
 
 function broadcastDragging(data) {
   for (const { win } of windows.values()) if (!win.isDestroyed()) win.webContents.send('tabs:dragging', data);
@@ -246,6 +247,20 @@ function broadcastDragging(data) {
 function endDrag() {
   tabDrag.cancel();
   broadcastDragging(null);
+}
+
+// Where the pointer is on the screen, for a window torn off there; null where
+// that is not known (Electron does not support it on Wayland: it may throw or
+// make one up), and the window is cascaded instead.
+function cursorPoint() {
+  try {
+    const p = screen.getCursorScreenPoint();
+    if (!Number.isFinite(p?.x) || !Number.isFinite(p?.y) || (p.x === 0 && p.y === 0)) return null;
+    const on = (b) => p.x >= b.x && p.x < b.x + b.width && p.y >= b.y && p.y < b.y + b.height;
+    return screen.getAllDisplays().some((d) => on(d.bounds)) ? p : null;
+  } catch {
+    return null;
+  }
 }
 
 function focusedMain() {
@@ -608,16 +623,20 @@ function registerIpc() {
     return tearOff(connId, null);
   });
   // A tab dragged from a window's strip (see tabDrag.js): its window reports
-  // the start and the end, the window it is dropped on the drop. A drop on
-  // another window moves it there and answers whether it moved; one on its
-  // own window (which reorders it itself) answers { reorder }. Let go
-  // outside its window with no drop, it gets a window of its own under the
-  // pointer, and the end answers whether it moved; else null.
+  // the start and the end, other windows the drag over their top bar, the
+  // window it is dropped on the drop. A drop on another window moves it there
+  // and answers whether it moved; one on its own window (which reorders it
+  // itself) answers { reorder }. Let go outside its window with no drop, it
+  // gets a window of its own under the pointer, and the end answers whether
+  // it moved; else null. Esc pressed outside its window cannot be told from
+  // that (both end with no drop, the pointer long gone from it): it tears off
+  // too. A window's only tab stays, as with the menu's Move to new window.
   ipcMain.handle('tabs:dragStart', (e, connId) => {
     ownTab(e, connId);
     tabDrag.start(connId, e.sender.id);
     broadcastDragging({ connId });
   });
+  ipcMain.on('tabs:dragHover', (e) => windows.has(e.sender.id) && tabDrag.hover(e.sender.id));
   ipcMain.handle('tabs:drop', (e, { index } = {}) => {
     if (!windows.has(e.sender.id)) throw new Error('Unknown window');
     const drop = tabDrag.drop(e.sender.id, index);
@@ -631,7 +650,8 @@ function registerIpc() {
     if (drag?.fromWindowId !== e.sender.id) return null;
     const outcome = await tabDrag.end({ overSource: overSource !== false });
     if (!tabDrag.active()) broadcastDragging(null); // unless another drag started meanwhile
-    return outcome === 'tearOff' ? tearOff(drag.connId, screen.getCursorScreenPoint()) : null;
+    if (outcome !== 'tearOff' || registry.ofOwner(drag.fromWindowId).length < 2) return null;
+    return tearOff(drag.connId, cursorPoint());
   });
   ipcMain.on('tab:reply', (e, reply) => requests.answer(e.sender.id, reply));
   ipcMain.on('menu:shortcuts', (_e, map) => {
@@ -856,6 +876,7 @@ function start() {
   if (!app.isPackaged) {
     globalThis.__mqttscopeConnections = registry;
     globalThis.__mqttscopeMoveTab = moveTab;
+    globalThis.__mqttscopeTabDrag = tabDrag;
   }
   registerIpc();
   // The windows of the last run, each where it was with its tabs; else one

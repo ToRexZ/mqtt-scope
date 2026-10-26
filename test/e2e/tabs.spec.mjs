@@ -404,6 +404,21 @@ test('middle-click closes a tab', async ({ env }) => {
 test('dragging a tab reorders the strip', async ({ env }) => {
   const { app, idA, idB, page, errors } = await twoTabs(env);
   const idC = await newTab(page);
+  // A drag within the window never asks main to move anything (main counts drops).
+  await app.evaluate(() => {
+    const drag = globalThis.__mqttscopeTabDrag;
+    const drop = drag.drop.bind(drag);
+    globalThis.__drops = 0;
+    drag.drop = (...args) => {
+      globalThis.__drops++;
+      return drop(...args);
+    };
+  });
+  // Let go in the gap between two tabs: it stays.
+  const [boxA, list] = await Promise.all([tabEl(page, idA).boundingBox(), page.locator('.conn-tabs').boundingBox()]);
+  await tabEl(page, idC).dragTo(page.locator('.conn-tabs'), { targetPosition: { x: boxA.x + boxA.width + 2 - list.x, y: 10 } });
+  await page.waitForTimeout(100);
+  expect(await tabIds(page)).toEqual([idA, idB, idC]);
   await tabEl(page, idC).dragTo(tabEl(page, idA), { targetPosition: { x: 5, y: 10 } });
   await expect.poll(() => tabIds(page)).toEqual([idC, idA, idB]);
   await expect(page.locator('.conn-tab')).toHaveCount(3);
@@ -432,6 +447,7 @@ test('dragging a tab reorders the strip', async ({ env }) => {
     return ev.defaultPrevented;
   });
   expect(takesDrag).toBe(false);
+  expect(await app.evaluate(() => globalThis.__drops)).toBe(0);
   expect(errors).toEqual([]);
 });
 

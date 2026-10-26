@@ -27,19 +27,21 @@ const dragStart = (page, connId) => page.evaluate((id) => window.api.tabDragStar
 const dragEnd = (page, overSource) => page.evaluate((over) => window.api.tabDragEnd({ overSource: over }), overSource);
 const dropAt = (page, index) => page.evaluate((i) => window.api.tabDrop({ index: i }), index);
 
-// Dispatches a drag event of `type` at the page's tab `id`, the pointer at
-// `fx` of its width; resolves with whether the page took it (cancelled it).
-const dragEvent = (page, type, id, fx = 0.5) =>
+// Dispatches a drag event of `type` at the page's element `selector`, the
+// pointer at `fx` of its width; resolves with whether the page took it
+// (cancelled it). dragEvent: at the tab `id`.
+const dragEventAt = (page, type, selector, fx = 0.5) =>
   page.evaluate(
-    ([t, i, f]) => {
-      const item = document.querySelector(`.conn-tab[data-id="${i}"]`);
-      const r = item.getBoundingClientRect();
+    ([t, sel, f]) => {
+      const el = document.querySelector(sel);
+      const r = el.getBoundingClientRect();
       const ev = new DragEvent(t, { bubbles: true, cancelable: true, clientX: r.left + r.width * f, clientY: r.top + r.height / 2, dataTransfer: new DataTransfer() });
-      item.dispatchEvent(ev);
+      el.dispatchEvent(ev);
       return ev.defaultPrevented;
     },
-    [type, id, fx],
+    [type, selector, fx],
   );
+const dragEvent = (page, type, id, fx) => dragEventAt(page, type, `.conn-tab[data-id="${id}"]`, fx);
 
 // Whether the page's strip takes a drag whose data it cannot read (a tab of
 // another window, which main reports).
@@ -506,6 +508,7 @@ test('a tab let go outside every window opens a window of its own; over its own 
   await connectTo(w1, 'Broker A');
   const idA = await activeId(w1);
   const idB = await openTabTo(w1, 'Broker B');
+  const idC = await openTabTo(w1, 'Broker C');
   const w1Id = await windowIdOf(w1);
   const bounds = { x: 100, y: 80, width: 1300, height: 850 };
   await app.evaluate(({ BrowserWindow }, [id, b]) => BrowserWindow.getAllWindows().find((w) => w.webContents.id === id).setBounds(b), [w1Id, bounds]);
@@ -518,7 +521,7 @@ test('a tab let go outside every window opens a window of its own; over its own 
   await dragStart(w1, idA);
   expect(await dragEnd(w1, true)).toBe(null);
   expect(await mainWindowCount(app)).toBe(1);
-  expect(await tabIds(w1)).toEqual([idA, idB]);
+  expect(await tabIds(w1)).toEqual([idA, idB, idC]);
 
   // Outside every window: a window with just that tab, under the pointer,
   // the size of the one it came from.
@@ -529,7 +532,7 @@ test('a tab let go outside every window opens a window of its own; over its own 
   await w3.waitForFunction(() => window.__mqttscope?.shell.tabs.length === 1);
   expect(await tabIds(w3)).toEqual([idA]);
   expect(await w3.evaluate(() => window.__mqttscope.status.state)).toBe('connected');
-  expect(await tabIds(w1)).toEqual([idB]);
+  expect(await tabIds(w1)).toEqual([idB, idC]);
   const w3Id = await windowIdOf(w3);
   expect(await ownerOf(app, idA)).toBe(w3Id);
   expect(await boundsOf(app, w3Id)).toEqual({ x: 900 - 60, y: 500 - 15, width: bounds.width, height: bounds.height });
@@ -540,23 +543,61 @@ test('a tab let go outside every window opens a window of its own; over its own 
   expect(await dragEnd(w3, false)).toBe(null);
   expect(await dragEnd(w1, true)).toBe(null);
   expect(await mainWindowCount(app)).toBe(2);
+
+  // Where the pointer is not known (Wayland): cascaded from its window.
+  await app.evaluate(({ screen }) => {
+    screen.getCursorScreenPoint = () => {
+      throw new Error('Not supported on Wayland');
+    };
+  });
+  await dragStart(w1, idB);
+  const next = app.waitForEvent('window');
+  expect(await dragEnd(w1, false)).toBe(true);
+  const w4 = await next;
+  await w4.waitForFunction(() => window.__mqttscope?.shell.tabs.length === 1);
+  expect(await tabIds(w4)).toEqual([idB]);
+  expect(await boundsOf(app, await windowIdOf(w4))).toEqual({ ...bounds, x: bounds.x + 30, y: bounds.y + 30 });
+
+  // A window's only tab stays (as with Move to new window).
+  await dragStart(w1, idC);
+  expect(await dragEnd(w1, false)).toBe(null);
+  expect(await tabIds(w1)).toEqual([idC]);
+  expect(await mainWindowCount(app)).toBe(3);
   expect(errors).toEqual([]);
 });
 
 test('the strip reports a drag of its tab and takes a drop of one from another window', async ({ env }) => {
   const { app, page: w1, errors } = await launchThree(env);
   const { idA, idB, idC, w2 } = await twoWindows(app, w1);
+  const w2Id = await windowIdOf(w2.page);
+  const idX = await w1.evaluate(() => window.__mqttscope.shell.openTab({ activate: false }).then((t) => t.connId));
+  // Main notes which windows report the drag over their top bar.
+  await app.evaluate(() => {
+    const drag = globalThis.__mqttscopeTabDrag;
+    const hover = drag.hover.bind(drag);
+    globalThis.__hovers = [];
+    drag.hover = (id) => {
+      globalThis.__hovers.push(id);
+      return hover(id);
+    };
+  });
 
   // Tab A's drag carries its id in a type of its own, not as text.
   expect(await startDragging(w1, idA)).toEqual({ 'application/x-mqttscope-tab': idA });
   await atDragged(w1, 'dragleave'); // out of window 1
-  // Window 2's strip takes it, marks where it would go, and it goes there.
-  await expect.poll(() => dragEvent(w2.page, 'dragover', idC, 0.75)).toBe(true);
+  // Window 2's top bar takes it and marks where it would go, also off its
+  // tabs (over +: after the last one); window 2 reports it there.
+  await expect.poll(() => dragEventAt(w2.page, 'dragover', '.tab-new')).toBe(true);
   await expect(tabEl(w2.page, idC)).toHaveClass(/drop-after/);
+  expect(await app.evaluate(() => globalThis.__hovers)).toContain(w2Id);
+  await dragEvent(w2.page, 'dragover', idC, 0.25);
+  await expect(tabEl(w2.page, idC)).toHaveClass(/drop-before/);
+  // Let go on the right half of tab C: it goes after it.
+  await dragEvent(w2.page, 'dragover', idC, 0.75);
   await dragEvent(w2.page, 'drop', idC, 0.75);
   await expect.poll(() => tabIds(w2.page)).toEqual([idC, idA]);
   await expect(w2.page.locator('.conn-tab.drop-before, .conn-tab.drop-after')).toHaveCount(0);
-  expect(await tabIds(w1)).toEqual([idB]);
+  expect(await tabIds(w1)).toEqual([idB, idX]);
   // The drag ends in window 1, at the tab that has left it: nothing more.
   await sleep(300);
   await atDragged(w1, 'dragend');
@@ -570,12 +611,11 @@ test('the strip reports a drag of its tab and takes a drop of one from another w
   await atDragged(w1, 'dragleave', 'dragend');
   await sleep(500);
   expect(await mainWindowCount(app)).toBe(2);
-  expect(await tabIds(w1)).toEqual([idB]);
+  expect(await tabIds(w1)).toEqual([idB, idX]);
 
   // Across window 1, over an element re-rendered meanwhile (it gets its leave
   // once out of the document), out of the window and let go a while later
-  // where no window takes it: a window of its own. Window 1, left without
-  // tabs, closes.
+  // where no window takes it: a window of its own.
   await startDragging(w1, idB);
   await w1.evaluate(() => {
     const at = (el, type, relatedTarget) => el.dispatchEvent(new DragEvent(type, { bubbles: true, relatedTarget }));
@@ -591,13 +631,20 @@ test('the strip reports a drag of its tab and takes a drop of one from another w
   });
   await sleep(300);
   const opened = app.waitForEvent('window');
-  const w1Closed = w1.waitForEvent('close');
   await atDragged(w1, 'dragend');
   const w3 = await opened;
   await w3.waitForFunction(() => window.__mqttscope?.shell.tabs.length === 1);
   expect(await tabIds(w3)).toEqual([idB]);
-  await w1Closed;
-  expect(await mainWindowCount(app)).toBe(2);
+  expect(await tabIds(w1)).toEqual([idX]);
+
+  // A window's only tab stays where it is.
+  await startDragging(w1, idX);
+  await atDragged(w1, 'dragleave');
+  await sleep(300);
+  await atDragged(w1, 'dragend');
+  await sleep(500);
+  expect(await tabIds(w1)).toEqual([idX]);
+  expect(await mainWindowCount(app)).toBe(3);
   expect(errors).toEqual([]);
   expect(w2.errors).toEqual([]);
 });
@@ -714,12 +761,24 @@ test('a tab that cannot move says so in its window', async ({ env }) => {
   await expect.poll(() => mainWindowCount(app)).toBe(2);
   expect(await tabIds(w1)).toEqual([idA, idB]);
 
-  // A drop of a tab that went away meanwhile: the window it is dropped on
-  // says why.
+  // A drop of a tab already on its way elsewhere (tab B, held up leaving):
+  // the window it is dropped on says why.
+  const w2Id = await windowIdOf(w2.page);
+  await w1.evaluate((id) => {
+    window.__mqttscope.shell.tabs.find((t) => t.connId === id).settle = () => new Promise(() => {});
+  }, idB);
   await dragStart(w1, idB);
-  await w1.evaluate((id) => window.__mqttscope.shell.closeTab(id, { confirmed: true }), idB);
+  await app.evaluate((_electron, [c, w]) => {
+    globalThis.__mqttscopeMoveTab(c, w, 1).catch(() => {});
+  }, [idB, w2Id]);
   await expect.poll(() => dragEvent(w2.page, 'dragover', idC)).toBe(true);
   await dragEvent(w2.page, 'drop', idC);
   await expect(toast(w2.page, 'error')).toHaveText(['Could not move the tab: Unknown connection']);
   expect(await tabIds(w2.page)).toEqual([idC]);
+
+  // A tab whose connection closes ends its drag: no top bar takes it any more.
+  await dragStart(w1, idA);
+  await expect.poll(() => takesDrag(w2.page)).toBe(true);
+  await w1.evaluate((id) => window.__mqttscope.shell.closeTab(id, { confirmed: true }), idA);
+  await expect.poll(() => takesDrag(w2.page)).toBe(false);
 });

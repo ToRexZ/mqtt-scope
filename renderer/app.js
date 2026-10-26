@@ -79,6 +79,7 @@ const strip = new TabStrip($('.topbar'), {
   // main/tabDrag.js): main moves it, and the end answers for a new window.
   onDragStart: (id) => api.tabDragStart(id).catch(() => {}),
   onDragEnd: (_id, end) => settleMove(api.tabDragEnd(end)),
+  onDragHover: () => api.tabDragHover(),
   onDrop: (index) => dropTab(index),
 });
 let opening = false;

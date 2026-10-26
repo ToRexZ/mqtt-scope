@@ -57,10 +57,12 @@ contextBridge.exposeInMainWorld('api', {
   moveTab: (connId, toWindowId, index) => ipcRenderer.invoke('tabs:move', { connId, toWindowId, index }),
   tearOffTab: (connId) => ipcRenderer.invoke('tabs:tearOff', { connId }),
   // Dragging a tab (main/tabDrag.js): the window it starts in reports its
-  // start and its end (whether the pointer was over that window then), the
-  // window it is dropped on the drop at { index } of its strip. Every window
-  // hears onTabDragging({ connId }) at the start and (null) at the end.
+  // start and its end (whether the pointer was over that window then), other
+  // windows the drag over their top bar (now and then), the window it is
+  // dropped on the drop at { index } of its strip. Every window hears
+  // onTabDragging({ connId }) at the start and (null) at the end.
   tabDragStart: (connId) => ipcRenderer.invoke('tabs:dragStart', connId),
+  tabDragHover: () => ipcRenderer.send('tabs:dragHover'),
   tabDrop: (drop) => ipcRenderer.invoke('tabs:drop', { index: drop?.index }),
   tabDragEnd: (end) => ipcRenderer.invoke('tabs:dragEnd', { overSource: end?.overSource }),
   onTabDragging: (cb) => ipcRenderer.on('tabs:dragging', (_e, data) => cb(data)),
