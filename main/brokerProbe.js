@@ -20,25 +20,26 @@ const ERRORS = {
   EADDRNOTAVAIL: 'Address not available',
 };
 
-// Runs at most `n` of the functions given to it at once.
+// Runs at most `n` of the functions given to it at once, in turn; one given
+// with { first: true } goes before those waiting.
 function createLimiter(n) {
   let running = 0;
   const waiting = [];
   const next = () => {
     if (running >= n || !waiting.length) return;
     running++;
-    const { fn, resolve } = waiting.shift();
+    const { fn, resolve, reject } = waiting.shift();
     Promise.resolve()
       .then(fn)
-      .then(resolve, resolve)
+      .then(resolve, reject)
       .finally(() => {
         running--;
         next();
       });
   };
-  return (fn) =>
-    new Promise((resolve) => {
-      waiting.push({ fn, resolve });
+  return (fn, { first = false } = {}) =>
+    new Promise((resolve, reject) => {
+      waiting[first ? 'unshift' : 'push']({ fn, resolve, reject });
       next();
     });
 }
@@ -109,8 +110,9 @@ async function probe({ host, port }, { timeout = TIMEOUT_MS, connect = net.conne
 
 // targets: [{ id, host, port }]. Resolves to { [id]: probe result }; targets
 // with the same host and port share one probe. opts.parallel gives the call
-// a limit of its own instead of the shared one.
-async function probeAll(targets, { parallel, ...opts } = {}) {
+// a limit of its own instead of the shared one; opts.first puts its probes
+// before those waiting (a check right after an edit).
+async function probeAll(targets, { parallel, first = false, ...opts } = {}) {
   const limit = parallel ? createLimiter(parallel) : shared;
   const byKey = new Map();
   for (const t of targets) {
@@ -121,7 +123,7 @@ async function probeAll(targets, { parallel, ...opts } = {}) {
   const out = Object.create(null);
   await Promise.all(
     [...byKey.values()].map(async (job) => {
-      const result = await limit(() => probe(job, opts));
+      const result = await limit(() => probe(job, opts), { first }).catch((err) => ({ online: false, error: err?.message || 'No answer' }));
       for (const id of job.ids) out[id] = result;
     }),
   );

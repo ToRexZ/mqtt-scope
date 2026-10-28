@@ -59,10 +59,12 @@ export class ConnectionDialog {
     window.addEventListener('focus', wake);
   }
 
-  // The profiles in the order the list shows them.
+  // The profiles in the order the list shows them. Open there means open in
+  // another tab, as the Open mark (see fillListItem).
   get ordered() {
     const online = new Map(this.profiles.map((p) => [p.id, this.reachOf(p).online]));
-    return sortProfiles(this.profiles, this.sortMode, { openIds: this.openIds, online: (id) => online.get(id) });
+    const openIds = new Set([...this.openIds].filter((id) => id !== this.tabProfileId));
+    return sortProfiles(this.profiles, this.sortMode, { openIds, online: (id) => online.get(id) });
   }
 
   // Whether the broker of profile `p` answered: { online: true | false |
@@ -116,7 +118,7 @@ export class ConnectionDialog {
     for (const targets of byKey.values()) {
       const { id, host, port } = targets[0];
       this.api
-        .probeBrokers([{ id, host, port }])
+        .probeBrokers([{ id, host, port }], !!p) // a check after an edit goes first
         .then((res) => res?.[id] && this.applyReach(targets, res[id]))
         .catch(() => {})
         .finally(() => {
@@ -197,7 +199,8 @@ export class ConnectionDialog {
     this.profiles = await this.api.listProfiles();
     if (!this.profiles.some((p) => p.id === this.selectedId)) this.selectedId = this.profiles[0]?.id ?? null;
     if (this.host) this.render(this.box.contains(document.activeElement) ? 'list' : null);
-    if (this.probeTimer) this.probe(); // profiles added there
+    // Profiles added there, checked on their own (a round may be running).
+    for (const p of this.profiles) if (!this.reach.has(p.id)) this.probeSoon(p);
     this.opts.onProfilesChanged?.();
   }
 
@@ -254,6 +257,7 @@ export class ConnectionDialog {
     }
     this.mounted = opts;
     const select = profileId !== this.tabProfileId && profileId !== this.selectedId && this.profiles.some((p) => p.id === profileId);
+    const tabProfileChanged = profileId !== this.tabProfileId;
     this.tabProfileId = profileId;
     if (select) this.selectedId = profileId;
     // A fresh picker starts on a profile it could connect, not one that is open.
@@ -262,7 +266,7 @@ export class ConnectionDialog {
     if (moved) this.render(focus ? 'list' : null);
     else if (select) this.render(this.box.contains(document.activeElement) ? 'list' : null);
     else {
-      this.refreshList();
+      if (tabProfileChanged) this.refreshList(); // its Open mark
       this.renderClose();
       this.renderConnectLabel();
     }

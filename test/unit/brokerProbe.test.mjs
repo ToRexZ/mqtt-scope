@@ -179,8 +179,22 @@ test('createLimiter runs the next function when one settles, also when it throws
     throw new Error('x');
   });
   const b = limit(async () => order.push('b'));
-  await Promise.all([a, b]);
+  const [ra] = await Promise.allSettled([a, b]);
+  assert.equal(ra.status, 'rejected');
   assert.deepEqual(order, ['a', 'b']);
+});
+
+test('createLimiter runs one given first before those waiting', async () => {
+  const limit = createLimiter(1);
+  const order = [];
+  let release;
+  const blocker = limit(() => new Promise((r) => (release = r)));
+  const queued = ['q1', 'q2'].map((n) => limit(async () => order.push(n)));
+  const urgent = limit(async () => order.push('urgent'), { first: true });
+  await new Promise((r) => setImmediate(r)); // the blocker has started
+  release();
+  await Promise.all([blocker, ...queued, urgent]);
+  assert.deepEqual(order, ['urgent', 'q1', 'q2']);
 });
 
 test('an id named __proto__ is kept', async () => {

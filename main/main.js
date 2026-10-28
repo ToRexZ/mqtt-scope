@@ -610,11 +610,11 @@ function registerIpc() {
   });
   ipcMain.handle('profiles:security', () => storageSecurity());
   // Which brokers of the connection list answer (main windows only).
-  ipcMain.handle('profiles:probe', (e, targets) => {
+  ipcMain.handle('profiles:probe', (e, targets, first) => {
     if (!windows.has(e.sender.id)) throw new Error('Unknown window');
     const ses = e.sender.session; // not readable once the window is gone
     const resolve = async (host) => (await ses.resolveHost(host)).endpoints.map((ep) => ep.address);
-    return probeAll(validTargets(targets), { resolve });
+    return probeAll(validTargets(targets), { resolve, first: first === true });
   });
   // A profile is open in one tab app-wide, so its layout needs no broadcast.
   // Main windows read and write layouts (not pop-outs), of profiles there are.
