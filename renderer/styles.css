@@ -122,8 +122,7 @@ body.resizing-y {
 /* ------------------------------------------------------------ controls */
 
 .btn,
-.tab,
-.conn-pill {
+.tab {
   font: inherit;
   color: var(--text);
   background: var(--panel-2);
@@ -134,8 +133,7 @@ body.resizing-y {
   white-space: nowrap;
 }
 .btn:hover,
-.tab:hover,
-.conn-pill:hover {
+.tab:hover {
   background: var(--panel-3);
 }
 .btn:focus-visible,
@@ -223,15 +221,26 @@ span.icon {
   border-bottom: 1px solid var(--border);
 }
 .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   font-weight: 650;
   letter-spacing: 0.2px;
   margin-right: 6px;
+  flex: none;
+  white-space: nowrap;
 }
-.conn-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 180px;
+/* Narrow strip: the logo alone (tabStrip.js, tabLayout.js). */
+.brand.icon-only .brand-text {
+  display: none;
+}
+/* A background, not an <img>: the window has no img elements at all (see
+   security.spec.mjs). */
+.brand-logo {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  background: url('logo.svg') center / contain no-repeat;
 }
 .dot {
   width: 9px;
@@ -239,16 +248,161 @@ span.icon {
   border-radius: 50%;
   background: var(--faint);
 }
-.conn-pill[data-state='connected'] .dot {
+
+/* ------------------------------------------------------------ tab strip */
+
+/* One tab per connection (tabStrip.js); data-state is its dot (dotState). */
+.conn-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+/* Out of room: the strip scrolls sideways; + is outside it, so it stays at
+   the strip's right edge. */
+.conn-tabs.scrolling {
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.conn-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: none; /* tabStrip.js sets max-width */
+  font: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 4px 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.conn-tab:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+.conn-tab.active {
+  color: var(--text);
+  background: var(--panel-3);
+  border-color: var(--border);
+}
+.conn-tab:focus-visible,
+.tab-new:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+.conn-tab {
+  position: relative;
+}
+/* The insertion marker while a tab is dragged over this one. */
+.conn-tab.drop-before::before,
+.conn-tab.drop-after::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  width: 2px;
+  background: var(--accent);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.conn-tab.drop-before::before {
+  left: -3px;
+}
+.conn-tab.drop-after::after {
+  right: -3px;
+}
+.conn-tab .dot {
+  flex: none;
+}
+.conn-tab[data-state='new'] .dot {
+  display: none;
+}
+.conn-tab[data-state='connected'] .dot {
   background: var(--ok);
 }
-.conn-pill[data-state='connecting'] .dot,
-.conn-pill[data-state='reconnecting'] .dot,
-.conn-pill[data-state='offline'] .dot {
+.conn-tab[data-state='connecting'] .dot {
   background: var(--warn);
 }
-.conn-pill[data-state='error'] .dot {
+.conn-tab[data-state='error'] .dot {
   background: var(--err);
+}
+.conn-tab[data-state='disconnected'] .dot {
+  background: var(--faint);
+}
+.conn-tab-name {
+  min-width: 0;
+  overflow: hidden;
+}
+/* A cut-off name slides back and forth (tabStrip.js sets --shift, --dur and
+   the keyframes in --anim); with reduced motion it stays put and ends in an
+   ellipsis. */
+.conn-tab-name.scrolling .conn-tab-label {
+  display: inline-block;
+  animation: var(--anim) var(--dur) linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .conn-tab-name.scrolling {
+    text-overflow: ellipsis;
+  }
+  .conn-tab-name.scrolling .conn-tab-label {
+    display: inline;
+    animation: none;
+  }
+}
+.conn-tab-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  color: var(--faint);
+  font-size: 15px;
+  line-height: 1;
+}
+.conn-tab-close:hover {
+  color: var(--text);
+  background: var(--border);
+}
+.tab-new {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  font: inherit;
+  font-size: 17px;
+  line-height: 1;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.tab-new:hover {
+  color: var(--text);
+  background: var(--panel-3);
+}
+
+/* ------------------------------------------------------------ connection tab */
+
+/* The active tab's content (connectionTab.js): its toolbar, the layout and
+   its status bar, below the top bar. */
+.tab-host,
+.tab-root {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.tab-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
 }
 .stats {
   display: flex;
@@ -256,6 +410,7 @@ span.icon {
   color: var(--muted);
   font-variant-numeric: tabular-nums;
   margin-right: 6px;
+  flex: none;
 }
 
 /* ------------------------------------------------------------ update notice */
@@ -447,7 +602,7 @@ span.icon {
 /* Narrower than the window's minimum width, which tiling window managers
    ignore: the tree goes above the inspector instead of beside it. */
 @media (max-width: 899px) {
-  .topbar {
+  .tab-toolbar {
     flex-wrap: wrap;
   }
   .layout {
@@ -1840,13 +1995,27 @@ body.moving-plot * {
   font-size: 11.5px;
 }
 
-/* connection dialog */
+/* connection dialog: the content of a New connection tab, centred in it */
+.tab-picker {
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
 .conn-dialog {
-  width: min(980px, 94vw);
-  height: min(680px, 90vh);
+  position: relative;
+  width: min(980px, 100%);
+  height: 680px;
+  max-height: 100%;
   display: grid;
   grid-template-columns: 250px 1fr;
   overflow: hidden;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.conn-dialog h3 {
+  margin: 0 0 12px;
+  font-size: 15px;
 }
 .conn-list {
   border-right: 1px solid var(--border);
@@ -2291,4 +2460,18 @@ body.plot-window {
 }
 .plot-window .plot-head {
   cursor: default;
+}
+
+/* The tab was connected with settings that have since been edited. */
+.reconnect-hint {
+  border: 0;
+  background: none;
+  padding: 2px 4px;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.reconnect-hint[hidden] {
+  display: none;
 }

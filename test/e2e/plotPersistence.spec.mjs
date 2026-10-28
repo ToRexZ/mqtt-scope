@@ -1,9 +1,11 @@
 // What the Plots tab looks like is restored after a restart: tabs and the
 // one on screen, each tab's arrangement and sizes, plot settings, and the
-// settings panel (hidden or not, and its width).
+// settings panel (hidden or not, and its width). Each profile has its own
+// (see main/layoutStore.js); the plot files of earlier versions are only read.
 
 import path from 'node:path';
-import { test, expect, makeUserData, profile, connect, waitForTopic, waitForFile } from './fixtures.mjs';
+import { readFileSync, statSync } from 'node:fs';
+import { test, expect, makeUserData, profile, connect, reconnected, openTabTo, mockDialogs, waitForTopic, waitForFile, waitForLayout, readJson, selectTopic, popupFrom } from './fixtures.mjs';
 
 const box = (l) => l.boundingBox();
 
@@ -60,12 +62,12 @@ test('tabs, arrangement, sizes and the settings panel survive a restart', async 
     layout: await page.evaluate(() => JSON.stringify(window.__mqttscope.plots.tab.layout)),
     heights: await Promise.all(['Battery', 'Speed', 'OK'].map(async (n) => Math.round((await box(card(n))).height))),
   };
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => JSON.stringify(JSON.parse(b).tabs[0].layout) === before.layout && JSON.parse(b).tabs.length === 2);
+  await waitForLayout(userData, `p${broker.port}`, (d) => JSON.stringify(d.tabs[0].layout) === before.layout && d.tabs.length === 2);
   await env.closeApp(first);
 
   ({ page } = await env.launch({ userData }));
   await page.setViewportSize({ width: 1600, height: 1300 });
-  await page.locator('.conn-dialog .modal-close').click();
+  await reconnected(page); // its tab comes back
   await page.locator('.right-tabs .tab[data-tab="plots"]').click();
   await expect(page.locator('.plot-tabs .plot-tab-name')).toHaveText(['Plots', 'Second']);
   await expect(page.locator('.plot-tab.active')).toContainText('Plots');
@@ -97,10 +99,159 @@ test('plots saved by the released 0.1.0 after an upgrade are kept as an extra ta
   const { writeFileSync } = await import('node:fs');
   writeFileSync(path.join(userData, 'plotTabs.json'), JSON.stringify({ version: 2, tabs, activeTabId: 't1', legacyMirror: tabs[0].plots }));
   const { page, errors } = await env.launch({ userData });
-  await page.locator('.conn-dialog .modal-close').click();
+  await connect(page); // the plots show in a connected tab
   await page.locator('.right-tabs .tab[data-tab="plots"]').click();
   await expect(page.locator('.plot-tab-name')).toHaveText(['Safety', 'Motion', 'Plots (older version)']);
   await page.locator('.plot-tab', { hasText: 'older version' }).click();
   await expect(page.locator('.plot-card .plot-title')).toHaveText(['Edited in 0.1.0']);
+  expect(errors).toEqual([]);
+});
+
+const plotsTab = (page) => page.locator('.right-tabs .tab[data-tab="plots"]');
+const titles = (page) => page.locator('.plot-card .plot-title');
+const plot = (id, title, topic = 'a/b') => ({ id, title, windowSec: 300, series: [{ id: `${id}s`, topic, segs: null, slot: 0 }] });
+// The plots of every profile before 0.4.0.
+const globalTabs = { version: 2, tabs: [{ id: 'g', name: 'Shared', plots: [plot('p1', 'Seeded')] }], activeTabId: 'g' };
+
+test('plot layouts are kept per profile', async ({ env }) => {
+  const broker = await env.broker();
+  await broker.publish('robot/state', JSON.stringify({ battery: 80, speed: 1 }), { retain: true });
+  const profiles = [profile(broker.port, { id: 'A', name: 'Profile A' }), profile(broker.port, { id: 'B', name: 'Profile B' })];
+  // Each restart starts with a New connection tab, to open a profile in.
+  const userData = makeUserData({ profiles, plotTabs: globalTabs, settings: { restoreTabs: false } });
+  const first = await env.launch({ userData });
+  let { page } = first;
+  await connect(page); // Profile A
+  await waitForTopic(page, 'robot/state');
+  await plotsTab(page).click();
+  await expect(titles(page)).toHaveText(['Seeded']);
+  await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/state', ['battery'], { alias: 'Battery' }));
+  await expect(titles(page)).toHaveText(['Seeded', 'Battery']);
+  await waitForLayout(userData, 'A', (d) => d.tabs[0].plots.length === 2);
+
+  // B also starts with the plots of before the upgrade, without A's.
+  await openTabTo(page, 'Profile B');
+  await plotsTab(page).click();
+  await expect(titles(page)).toHaveText(['Seeded']);
+  await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/state', ['speed'], { alias: 'Speed' }));
+  await expect(titles(page)).toHaveText(['Seeded', 'Speed']);
+  await waitForLayout(userData, 'B', (d) => d.tabs[0].plots.length === 2);
+  expect((await waitForLayout(userData, 'A')).tabs[0].plots.map((p) => p.title)).toEqual(['Seeded', 'Battery']);
+  await env.closeApp(first);
+
+  // After a restart A opens with its own plots.
+  ({ page } = await env.launch({ userData }));
+  await connect(page);
+  await plotsTab(page).click();
+  await expect(titles(page)).toHaveText(['Seeded', 'Battery']);
+
+  // A profile made since starts with a copy of the plots last opened (A's);
+  // changing them leaves A's as they are.
+  await page.click('.tab-new');
+  const dlg = page.locator('.conn-dialog');
+  await dlg.locator('.conn-item', { hasText: 'Profile A' }).click();
+  await dlg.getByRole('button', { name: 'Duplicate' }).click();
+  await expect(dlg.locator('.conn-item.active .conn-name')).toHaveText('Profile A (copy)');
+  await dlg.locator('.connect-btn').click();
+  await page.waitForFunction(() => window.__mqttscope.status.state === 'connected');
+  await plotsTab(page).click();
+  await expect(titles(page)).toHaveText(['Seeded', 'Battery']);
+  // Kept as its own at once, so opening it again shows the same.
+  const copyId = readJson(path.join(userData, 'profiles.json')).find((p) => p.name === 'Profile A (copy)').id;
+  await waitForLayout(userData, copyId, (d) => d.tabs[0].plots.length === 2);
+  await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/state', ['speed'], { alias: 'Copy only' }));
+  await waitForLayout(userData, copyId, (d) => d.tabs[0].plots.length === 3);
+  expect((await waitForLayout(userData, 'A')).tabs[0].plots.map((p) => p.title)).toEqual(['Seeded', 'Battery']);
+});
+
+test('renaming a profile keeps its layout; deleting removes it', async ({ env }) => {
+  const broker = await env.broker();
+  await broker.publish('robot/state', JSON.stringify({ battery: 80, speed: 1 }), { retain: true });
+  const profiles = [profile(broker.port, { id: 'A', name: 'Profile A' }), profile(broker.port, { id: 'B', name: 'Profile B' })];
+  const userData = makeUserData({ profiles, settings: { restoreTabs: false } }); // restarts with a New connection tab
+  const first = await env.launch({ userData });
+  let { page } = first;
+  await connect(page); // Profile A
+  await waitForTopic(page, 'robot/state');
+  await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/state', ['battery'], { alias: 'Battery' }));
+  const idB = await openTabTo(page, 'Profile B');
+  await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/state', ['speed'], { alias: 'Speed' }));
+  await waitForLayout(userData, 'A', (d) => d.tabs[0].plots.length === 1);
+  await waitForLayout(userData, 'B', (d) => d.tabs[0].plots.length === 1);
+
+  // Renamed in the dialog of a new tab (while A's tab is open).
+  await page.click('.tab-new');
+  const dlg = page.locator('.conn-dialog');
+  await dlg.locator('.conn-item', { hasText: 'Profile A' }).click();
+  await dlg.locator('[name="name"]').fill('Renamed A');
+  await waitForFile(path.join(userData, 'profiles.json'), (b) => JSON.parse(b)[0].name === 'Renamed A');
+  expect((await waitForLayout(userData, 'A')).tabs[0].plots.map((p) => p.title)).toEqual(['Battery']);
+
+  // Deleted once its tab is closed: its layout goes too.
+  await page.evaluate((id) => window.__mqttscope.shell.closeTab(id, { confirmed: true }), idB);
+  await mockDialogs(first.app, { confirm: true });
+  await dlg.locator('.conn-item', { hasText: 'Profile B' }).click();
+  await expect(dlg.getByRole('button', { name: 'Delete' })).toBeEnabled();
+  await dlg.getByRole('button', { name: 'Delete' }).click();
+  await expect(dlg.locator('.conn-item .conn-name')).toHaveText(['Renamed A']);
+  const file = path.join(userData, 'profileLayouts.json');
+  await waitForFile(file, (b) => !Object.hasOwn(JSON.parse(b).byProfile, 'B'));
+  const saved = readJson(file);
+  expect(Object.keys(saved.byProfile)).toEqual(['A']);
+  expect(saved.legacyProfiles).toEqual(['A']);
+  expect(saved.lastUsed).toBeNull(); // B was opened last
+  await env.closeApp(first);
+
+  // After a restart the renamed profile opens with its plots.
+  ({ page } = await env.launch({ userData }));
+  await connect(page);
+  await plotsTab(page).click();
+  await expect(titles(page)).toHaveText(['Battery']);
+});
+
+test('plotTabs.json and plots.json are never rewritten', async ({ env }) => {
+  const broker = await env.broker();
+  await broker.publish('robot/state', JSON.stringify({ battery: 80 }), { retain: true });
+  const userData = makeUserData({ profiles: [profile(broker.port)], plotTabs: globalTabs, plots: { plots: [plot('old', 'Edited in 0.1.0')] } });
+  const files = ['plotTabs.json', 'plots.json'].map((n) => path.join(userData, n));
+  const snapshot = () => files.map((f) => ({ text: readFileSync(f, 'utf8'), mtime: statSync(f).mtimeMs }));
+  const before = snapshot();
+  const first = await env.launch({ userData });
+  const { page } = first;
+  await connect(page);
+  await waitForTopic(page, 'robot/state');
+  await plotsTab(page).click();
+  // Both are read: the tabs, and the plots an older version changed.
+  await expect(page.locator('.plot-tab-name')).toHaveText(['Shared', 'Plots (older version)']);
+  await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/state', ['battery'], { alias: 'Battery' }));
+  await page.locator('.plot-card .window-select').first().selectOption('60');
+  await waitForLayout(userData, `p${broker.port}`, (d) => d.tabs.length === 2 && d.tabs[0].plots.length === 2 && d.tabs[0].plots[0].windowSec === 60);
+  // The window cannot write them either.
+  for (const name of ['plotTabs', 'plots', 'profileLayouts']) {
+    await expect(page.evaluate((n) => window.api.storeSet(n, {}), name)).rejects.toThrow(/kept by the main process/);
+  }
+  await env.closeApp(first);
+  expect(snapshot()).toEqual(before);
+});
+
+// Only main windows read and write layouts (main/main.js layouts:get/set),
+// and only of profiles there are.
+test('a pop-out cannot reach the layouts, nor can anything reach one of no profile', async ({ env }) => {
+  const broker = await env.broker();
+  await broker.publish('po/a', '1', { retain: true });
+  const userData = makeUserData({ profiles: [profile(broker.port, { id: 'a' })] });
+  const { app, page, errors } = await env.launch({ userData });
+  await connect(page);
+  await selectTopic(page, 'po/a');
+  const { popup } = await popupFrom(app, () => page.locator('#viewer-host').getByRole('button', { name: '⤢ Pop out' }).click());
+  await expect(popup.locator('.viewer-topic')).toHaveText('po/a');
+  await expect(popup.evaluate(() => window.api.layoutGet('a'))).rejects.toThrow('Unknown window');
+  await expect(popup.evaluate(() => window.api.layoutSet('a', { version: 3, tabs: [] }))).rejects.toThrow('Unknown window');
+  await expect(page.evaluate(() => window.api.layoutGet('nope'))).rejects.toThrow('Unknown connection profile');
+  await expect(page.evaluate(() => window.api.layoutSet('nope', { version: 3, tabs: [] }))).rejects.toThrow('Unknown connection profile');
+  expect(await page.evaluate(() => window.api.layoutGet('a').then((r) => typeof r))).toBe('object');
+  const doc = readJson(path.join(userData, 'profileLayouts.json'));
+  expect(Object.keys(doc.byProfile)).not.toContain('nope');
+  expect(doc.lastUsed).toBe('a');
   expect(errors).toEqual([]);
 });

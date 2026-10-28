@@ -3,7 +3,8 @@
 // open as tabs.
 
 import path from 'node:path';
-import { test, expect, makeUserData, profile, connect, waitForTopic, waitForFile, readJson, until } from './fixtures.mjs';
+import { existsSync } from 'node:fs';
+import { test, expect, makeUserData, profile, connect, waitForTopic, waitForLayout, readJson, until } from './fixtures.mjs';
 
 const plotsTab = (page) => page.locator('.right-tabs .tab[data-tab="plots"]');
 const cards = (page) => page.locator('.plot-card');
@@ -31,7 +32,7 @@ async function setup(env, { height = 1000, scale = 1 } = {}) {
     plots.persist();
   });
   await plotsTab(ctx.page).click();
-  return { broker, userData, ...ctx };
+  return { broker, userData, profileId: `p${broker.port}`, ...ctx };
 }
 
 const box = (locator) => locator.boundingBox();
@@ -54,7 +55,7 @@ async function arrange(page, label) {
 }
 
 test('plots fill the tab; the gaps between them resize them; Arrange; the area scrolls only below the minimum sizes', async ({ env }) => {
-  const { page, userData, errors } = await setup(env, { height: 1400 });
+  const { page, userData, profileId, errors } = await setup(env, { height: 1400 });
   const grid = page.locator('.plots-grid');
   await expect(cards(page)).toHaveCount(2);
 
@@ -74,8 +75,8 @@ test('plots fill the tab; the gaps between them resize them; Arrange; the area s
   const [a2, b2] = [await box(cards(page).nth(0)), await box(cards(page).nth(1))];
   expect(Math.abs(a2.height - a.height - 100)).toBeLessThan(4);
   expect(Math.abs(b.height - b2.height - 100)).toBeLessThan(4);
-  await waitForFile(path.join(userData, 'plotTabs.json'), (buf) => {
-    const l = JSON.parse(buf).tabs[0].layout;
+  await waitForLayout(userData, profileId, (d) => {
+    const l = d.tabs[0].layout;
     return l?.dir === 'col' && l.sizes[0] / l.sizes[1] > 1.5;
   });
   // A plot cannot be made smaller than its minimum.
@@ -95,7 +96,7 @@ test('plots fill the tab; the gaps between them resize them; Arrange; the area s
   expect(Math.abs((await box(cards(page).nth(0))).width - (c1.width - 40))).toBeLessThan(4);
   await dragBy(page, page.locator('.mosaic-handle.row'), -2000, 0);
   expect(Math.abs((await box(cards(page).nth(0))).width - 220)).toBeLessThan(3);
-  await waitForFile(path.join(userData, 'plotTabs.json'), (buf) => JSON.parse(buf).tabs[0].layout?.dir === 'row');
+  await waitForLayout(userData, profileId, (d) => d.tabs[0].layout?.dir === 'row');
 
   // A small window: plots keep their minimum size and the area scrolls.
   await arrange(page, 'Stack: one per row');
@@ -128,7 +129,7 @@ test('on a HiDPI screen (2×) plots keep their size and can be resized', async (
 });
 
 test('drag a plot by its title onto another plot: an edge splits, the middle swaps, a tab moves it; Esc cancels', async ({ env }) => {
-  const { page, userData, errors } = await setup(env, { height: 1300 });
+  const { page, userData, profileId, errors } = await setup(env, { height: 1300 });
   await page.evaluate(() => {
     const { plots } = window.__mqttscope;
     plots.addSeries(null, 'robot/state', ['speed'], { alias: 'Speed', quiet: true });
@@ -169,7 +170,7 @@ test('drag a plot by its title onto another plot: an edge splits, the middle swa
   await page.mouse.up();
   await expect(page.locator('.drop-marker')).toHaveCount(0);
   expect(await layoutOf(page)).toEqual(before);
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => JSON.stringify(JSON.parse(b).tabs[0].layout) === JSON.stringify(before));
+  await waitForLayout(userData, profileId, (d) => JSON.stringify(d.tabs[0].layout) === JSON.stringify(before));
 
   // Onto another tab: the plot moves there.
   await page.evaluate(() => {
@@ -190,7 +191,7 @@ test('drag a plot by its title onto another plot: an edge splits, the middle swa
   expect(await titlesInOrder(page)).toEqual(['hall/temp', 'Battery']);
   await page.locator('.plot-tab', { hasText: 'Other' }).click();
   expect(await titlesInOrder(page)).toEqual(['Speed']);
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => JSON.parse(b).tabs.find((x) => x.name === 'Other')?.plots.length === 1);
+  await waitForLayout(userData, profileId, (d) => d.tabs.find((x) => x.name === 'Other')?.plots.length === 1);
   expect(errors).toEqual([]);
 });
 
@@ -385,7 +386,7 @@ test('dragging zooms: time for every plot, values for the plot dragged in; doubl
 });
 
 test('State transitions plot: every series is a labelled lane, no legend or y axis; saved', async ({ env }) => {
-  const { page, userData, errors, broker } = await setup(env);
+  const { page, userData, profileId, errors, broker } = await setup(env);
   const card = cards(page).first();
   const panel = page.locator('.plot-settings');
   await card.locator('.plot-head').click();
@@ -409,7 +410,7 @@ test('State transitions plot: every series is a labelled lane, no legend or y ax
   // The lane label shows the value at the latest point.
   await broker.publish('robot/state', JSON.stringify({ battery: 80, speed: 1, driving: false, docked: false }));
   await expect.poll(async () => (await charts(page))[0].geom?.laneLabels.map((l) => l.value)).toEqual(['80', 'false']);
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => JSON.parse(b).tabs[0].plots[0].kind === 'states');
+  await waitForLayout(userData, profileId, (d) => d.tabs[0].plots[0].kind === 'states');
 
   // Long labels are not cut short when there is room.
   const long = 'robot/state › $.docked (rear docking contact, left side)';
@@ -444,34 +445,33 @@ test('icons are monochrome SVG (no colour emoji) in the plots', async ({ env }) 
 test('plots and layouts saved by an older version open as tabs', async ({ env }) => {
   const broker = await env.broker();
   const plot = (title, topic) => ({ id: title, title, windowSec: 300, series: [{ id: `${title}-s`, topic, segs: null, slot: 0 }] });
-  const userData = makeUserData({
-    profiles: [profile(broker.port)],
-    plots: {
-      plots: [plot('Working', 'a/b')],
-      layouts: [
-        { id: 'l1', name: 'Robot view', plots: [plot('Saved robot', 'a/b')] },
-        { id: 'l2', name: 'Climate', plots: [plot('Temperatures', 'hall/temp')] },
-      ],
-      activeLayoutId: 'l1',
-    },
-  });
+  const older = {
+    plots: [plot('Working', 'a/b')],
+    layouts: [
+      { id: 'l1', name: 'Robot view', plots: [plot('Saved robot', 'a/b')] },
+      { id: 'l2', name: 'Climate', plots: [plot('Temperatures', 'hall/temp')] },
+    ],
+    activeLayoutId: 'l1',
+  };
+  const userData = makeUserData({ profiles: [profile(broker.port)], plots: older });
   const { page, errors } = await env.launch({ userData });
-  await page.locator('.conn-dialog .modal-close').click();
+  await connect(page); // the plots show in a connected tab
   await plotsTab(page).click();
   await expect(page.locator('.plot-tabs .plot-tab .plot-tab-name')).toHaveText(['Robot view', 'Robot view (saved)', 'Climate']);
   await expect(page.locator('.plot-card .plot-title')).toHaveText(['Working']);
   await page.locator('.plot-tabs .plot-tab', { hasText: 'Climate' }).click();
   await expect(page.locator('.plot-card .plot-title')).toHaveText(['Temperatures']);
-  // Saving writes the tabs to their own file and the tab on screen in the old format.
+  // Saving writes the tabs as the profile's; the older version's file stays as it was.
   await page.locator('.plot-card .window-select').selectOption('60');
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => Array.isArray(JSON.parse(b).tabs));
-  expect(readJson(path.join(userData, 'plotTabs.json')).tabs.map((t) => t.name)).toEqual(['Robot view', 'Robot view (saved)', 'Climate']);
-  await waitForFile(path.join(userData, 'plots.json'), (b) => JSON.parse(b).plots?.[0]?.title === 'Temperatures');
+  const saved = await waitForLayout(userData, `p${broker.port}`, (d) => d.tabs[2]?.plots[0]?.windowSec === 60);
+  expect(saved.tabs.map((t) => t.name)).toEqual(['Robot view', 'Robot view (saved)', 'Climate']);
+  expect(readJson(path.join(userData, 'plots.json'))).toEqual(older);
+  expect(existsSync(path.join(userData, 'plotTabs.json'))).toBe(false);
   expect(errors).toEqual([]);
 });
 
 test('vertical lines at the timestamps: on by default, turned off per plot in its settings, also in its window', async ({ env }) => {
-  const { app, page, userData, errors } = await setup(env);
+  const { app, page, userData, profileId, errors } = await setup(env);
   const grid = (i) => page.evaluate((n) => [...window.__mqttscope.plots.charts.values()][n].geom?.timeGrid?.length ?? 0, i);
   await expect.poll(() => grid(0)).toBeGreaterThan(0);
   await expect.poll(() => grid(1)).toBeGreaterThan(0);
@@ -482,7 +482,7 @@ test('vertical lines at the timestamps: on by default, turned off per plot in it
   await toggle.uncheck();
   await expect.poll(() => grid(0)).toBe(0);
   expect(await grid(1)).toBeGreaterThan(0);
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => JSON.parse(b).tabs[0].plots[0].timeGrid === false);
+  await waitForLayout(userData, profileId, (d) => d.tabs[0].plots[0].timeGrid === false);
   // State lanes get them too (the second plot as state transitions).
   await cards(page).nth(1).locator('.kind-toggle .seg-btn[data-kind="states"]').click();
   await expect.poll(() => grid(1)).toBeGreaterThan(0);

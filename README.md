@@ -21,11 +21,15 @@ saved messages. Runs on Linux, Windows and macOS.
 - Each connection has its own subscription list (default `#` and `$SYS/#`), so
   the tree fills automatically. **Subscriptions…** adds or removes filters on the
   live connection, optionally saving the change to the connection.
-- **Several brokers at once**: Ctrl+Shift+N (or start the app again) opens
-  another window with its own connection. Saved connections, messages and plots
-  are shared between windows.
+- **Several brokers at once**, as tabs (see [Tabs](#tabs)). Ctrl+Shift+N (or
+  starting the app again) opens another window. Saved connections and messages
+  are shared by all tabs and windows.
 - Passwords are encrypted with the operating system keychain when one is
   available; the connection dialog says when it is not.
+
+**Tabs**
+- One connection per tab, each with its own tree, inspector, plots and
+  publisher. Background tabs keep recording. Details [below](#tabs).
 
 **Topic tree**
 - Every topic level is a node with live message and topic counts. Topics flash
@@ -125,6 +129,61 @@ saved messages. Runs on Linux, Windows and macOS.
 
 ![Publisher with saved messages](docs/screenshots/publisher-saved.png)
 
+## Tabs
+
+A tab is one connection, with its own topic tree, inspector, plots and
+publisher. The tab strip is the first row below the title bar: a status dot
+(green connected, amber connecting or reconnecting, red failed or dropped, grey
+disconnected), the profile name and ×. Names that do not fit scroll slowly
+(with the system's reduced-motion setting they end in an ellipsis instead), and
+the full name is in the tooltip. The strip scrolls sideways when the tabs reach
+their minimum width. Disconnect (Reconnect once disconnected), Subscriptions,
+the message counts, Pause and Clear are in the active tab's toolbar, and the
+window title is "MQTT Scope — " followed by the active tab's name.
+
+- **New connection tab**: **+**, Ctrl+T or Ctrl+K opens a tab named *New
+  connection* with the connection dialog inside it, so the other tabs stay
+  usable. Esc closes it (not when it is the window's only tab).
+- **One tab per profile**: opening a profile that is already open, in this or
+  another window, switches to its tab instead of opening a second connection
+  (two clients with one client ID would throw each other off the broker). Nor
+  can two profiles with the same client ID be open on one broker. An open
+  profile cannot be deleted (*Close its tab first*). Editing it applies at that
+  tab's next connect, and the tab says *reconnect to apply*.
+- **Background recording**: tabs you are not looking at stay connected and keep
+  collecting messages, history and plot data. Only drawing is skipped. A tab's
+  dot shows when its connection drops.
+- **Closing**: ×, middle-click or Ctrl+W close a tab and forget its data; it
+  asks first only when the tab's plots hold recorded data. Closing the last tab
+  leaves a *New connection* tab. Ctrl+Shift+T reopens the last closed tab
+  (same profile, connected again, empty data). Ctrl+W in a pop-out window
+  closes that window. On macOS Cmd+W closes a tab and Cmd+Shift+W the window.
+  Right-click a tab for Close,
+  Close other tabs, Close tabs to the right, Move to new window (with more than one tab), and Reconnect
+  or Disconnect.
+- **Moving and tearing off**: drag a tab along the strip to reorder it, onto
+  another window's strip to move it there, or outside every window to open it
+  in a new window (or right-click → *Move to new window*). The connection stays
+  up and no message is lost; the tab keeps its tree, history, selection, plots
+  and pop-out windows, which follow it. On some Linux compositors (Wayland) the
+  new window may not appear where you dropped the tab.
+- **Reopen tabs on launch** (Settings → General, on by default): the app
+  reopens the windows of the last run at their position and size (maximized or
+  full screen if they were), with their
+  tabs in order and the same active tab, and connects them. A tab you had
+  disconnected comes back disconnected; *New connection* tabs and tabs of
+  deleted profiles are not restored. With the setting off the app starts with
+  one *New connection* tab, and closing a window with several connected tabs
+  asks *Close n connections?*.
+- **Plot layouts per profile**: each profile remembers its own plot tabs, plots
+  and series. A profile opened for the first time starts with a copy of the most
+  recently used layout; profiles that existed before 0.4 start with the layout
+  you had then. Renaming a profile keeps its layout, deleting it deletes its
+  layout.
+- Shared by all tabs: settings, saved and recent messages, shortcuts and panel
+  sizes. History limits apply to each tab separately, so several busy tabs use
+  that much memory each.
+
 ## Install
 
 Download the file for your platform from the
@@ -223,14 +282,19 @@ new keys; clashes are flagged). Defaults (Ctrl is Cmd on macOS):
 | Keys | Action |
 |---|---|
 | Enter | Connect to the selected connection (↑ ↓ choose it) |
-| Ctrl+K | Connections |
+| Ctrl+K | New connection tab |
+| Ctrl+T / Ctrl+W | New tab / close tab |
+| Ctrl+Shift+T | Reopen the last closed tab |
+| Ctrl+Tab / Ctrl+Shift+Tab | Next / previous tab (on macOS Ctrl+Tab; Cmd+Tab belongs to the system) |
+| Ctrl+PageDown / Ctrl+PageUp | Next / previous tab (alternative) |
+| Ctrl+1 … Ctrl+8 / Ctrl+9 | Go to tab 1–8 / the last tab |
 | Ctrl+Shift+S | Subscriptions |
-| Ctrl+Shift+N | New window (another broker) |
+| Ctrl+Shift+N | New window |
 | Ctrl+, | Settings |
 | Ctrl+F | Filter topics (or search the message when the inspector has focus) |
 | Ctrl+Enter | Publish (in the publisher) |
 | F11 | Maximize inspector (Esc restores) |
-| Ctrl+1 / Ctrl+2 | Inspector / Plots |
+| Alt+1 / Alt+2 | Inspector / Plots (moved from Ctrl+1 / Ctrl+2 in 0.4.0) |
 | Ctrl+Shift+A | Add data to a new plot |
 | Ctrl+Shift+P | Pause / resume |
 | Space | Hold / follow the inspector's message (on the Plots tab: freeze / resume) |
@@ -245,8 +309,9 @@ new keys; clashes are flagged). Defaults (Ctrl is Cmd on macOS):
 
 Settings → General: messages kept per topic (default 100), history size per
 topic (default 64 MB; the latest message is always kept), whether clicking a
-topic in the tree also expands it one level (default on), and whether to check
-for updates (default on). The bottom of the dialog shows the MQTT Scope
+topic in the tree also expands it one level (default on), whether to reopen the
+tabs of the last run on launch (default on), and whether to check for updates
+(default on). The bottom of the dialog shows the MQTT Scope
 version and has **Check for updates**, **Show log file** and **Open data
 folder**. There is no menu bar on Linux and Windows; the shortcuts that used to
 live only in it still work (Ctrl+Plus / Ctrl+Minus / Ctrl+0 zoom, Shift+F11 full
@@ -255,10 +320,11 @@ window or press Alt+F4). Settings → Keyboard lists them under the changeable
 ones.
 
 Data lives in the app data folder (Settings → Open data folder):
-`profiles.json` (connections), `savedMessages.json`, `plotTabs.json` (plot
-tabs; `plots.json` keeps the tab on screen in the 0.1 format for older
-versions),
-`settings.json`, `updates.json` (the version you skipped), `logs/main.log`. Set
+`profiles.json` (connections), `savedMessages.json`, `profileLayouts.json`
+(each profile's plot tabs and plots), `windowState.json` (windows and tabs to
+reopen at launch), `settings.json`, `updates.json` (the version you skipped), `logs/main.log`. `plotTabs.json` and `plots.json` (the plot layout before 0.4.0)
+are only read once to give existing profiles their starting layout; 0.4.0 never
+changes them, so going back to 0.3 shows the layout you had before upgrading. Set
 `MQTTSCOPE_USER_DATA=/some/dir` to use a different folder (e.g. a portable
 install).
 
@@ -350,8 +416,11 @@ order: test, package, pkgbuild, release, aur (see the comment in
 
 ```
 main/          Electron main process (CommonJS)
-  main.js        windows (one MQTT session each; child windows for pop-outs), menu, IPC
+  main.js        windows (several MQTT sessions each, one per tab; child windows for pop-outs), menu, IPC
   mqttSession.js an MQTT connection; batches messages every 50 ms for the UI
+  connections.js the registry of connections (ids `c<n>`), which profiles are open, moves between windows
+  windowState.js the windows and tabs to reopen at launch
+  tabMove.js, tabDrag.js  moving a tab to another window, tearing it off
   profileStore.js, jsonStore.js   persisted data (atomic writes)
   updateCheck.js version compare, release parsing, install type, pacman command (pure)
   updater.js     update state: periodic checks, skip, download, restart
@@ -361,7 +430,8 @@ main/          Electron main process (CommonJS)
   desktopIntegration.js  the AppImage's menu entry and icons, so GNOME shows its logo
   preload.js     the only API the UI can call (contextIsolation + sandbox)
 renderer/      UI (plain ES modules, no framework or build step)
-  app.js         wiring; topicTree.js data model; treeView.js virtual list
+  app.js         the window shell: tab strip, settings, shortcuts; topicTree.js data model; treeView.js virtual list
+  connectionTab.js  one tab: its tree, inspector, plots and publisher; tabSet.js, tabStrip.js, tabLayout.js  tab order and the strip
   viewer.js      inspector; jsonTree.js, jsonDiff.js, payload.js
   plots.js       Plots tab: wires the modules below and draws tabs and plot cards
     plotModel.js   tabs, plots and their arrangement: every rule, and the saved document (no DOM)

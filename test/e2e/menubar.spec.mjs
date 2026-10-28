@@ -36,7 +36,8 @@ test('no menu bar, also after Alt, F10 and Alt+F; popped-out windows too', async
   expect(await app.evaluate(({ Menu }) => Menu.getApplicationMenu().items.map((i) => i.label))).toContain('View');
 
   const popped = app.waitForEvent('window');
-  await page.evaluate(() => window.api.openPopout('menu/t', []));
+  // A pop-out belongs to a connection: the active tab's.
+  await page.evaluate(() => window.api.openPopout({ connId: window.__mqttscope.shell.active.connId, topic: 'menu/t', title: 'menu/t', history: [] }));
   await popped;
   await expect.poll(async () => (await barVisible(app)).length).toBe(2);
   for (const bar of await barVisible(app)) expect(bar).toBe(false);
@@ -103,6 +104,8 @@ test('developer tools and full screen keys work with the bar hidden', async ({ e
   await focusWindow(app);
   await press(app, 'I', ['control', 'shift']);
   await expect.poll(() => win(app, (w) => w.webContents.isDevToolsOpened())).toBe(true);
+  // Press again once the dev tools have loaded: a toggle while they still load is lost.
+  await expect.poll(() => win(app, (w) => w.webContents.devToolsWebContents?.isLoading() === false)).toBe(true);
   await press(app, 'I', ['control', 'shift']);
   await expect.poll(() => win(app, (w) => w.webContents.isDevToolsOpened())).toBe(false);
   // Headless windows never really go full screen: watch the request instead.
@@ -214,7 +217,6 @@ test('Check for updates is busy while it runs, so a double click asks once', asy
   const server = await env.releaseServer({ tag_name: `v${VERSION}`, body: '' });
   const { app, page } = await env.launch({ env: { MQTTSCOPE_UPDATE_URL: server.url } });
   await expect.poll(() => server.requests()).toBe(1); // the startup check
-  await page.locator('.conn-dialog .modal-close').click();
   // Hold the answer to see the busy state.
   await app.evaluate(() => {
     const u = globalThis.__mqttscopeUpdater;

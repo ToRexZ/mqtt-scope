@@ -9,11 +9,13 @@ import { fileURLToPath } from 'node:url';
 
 const appDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
-export function makeUserData({ profiles, savedMessages, plots, settings } = {}) {
+// plotTabs and plots: the plot files of versions before 0.4.0.
+export function makeUserData({ profiles, savedMessages, plots, plotTabs, settings } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'mqttscope-e2e-'));
   if (profiles) writeFileSync(path.join(dir, 'profiles.json'), JSON.stringify(profiles));
   if (savedMessages) writeFileSync(path.join(dir, 'savedMessages.json'), JSON.stringify(savedMessages));
   if (plots) writeFileSync(path.join(dir, 'plots.json'), JSON.stringify(plots));
+  if (plotTabs) writeFileSync(path.join(dir, 'plotTabs.json'), JSON.stringify(plotTabs));
   if (settings) writeFileSync(path.join(dir, 'settings.json'), JSON.stringify(settings));
   return dir;
 }
@@ -70,6 +72,30 @@ export async function connect(page) {
   await page.click('.connect-btn');
   await page.waitForFunction(() => window.__mqttscope.status.state === 'connected', null, { timeout: 10000 });
 }
+
+// After a relaunch: waits for the active tab, reopened (Settings → General →
+// Reopen tabs on launch, on by default), to connect again.
+export async function reconnected(page) {
+  await page.waitForFunction(() => window.__mqttscope.status?.state === 'connected', null, { timeout: 10000 });
+}
+
+// Opens a new tab with + and connects it to the profile named `profileName`
+// in the connection dialog. Returns the new tab's id once it is connected.
+export async function openTabTo(page, profileName) {
+  const before = await page.evaluate(() => window.__mqttscope.shell.tabs.length);
+  await page.click('.tab-new');
+  await page.waitForFunction((n) => window.__mqttscope.shell.tabs.length === n + 1, before);
+  const dialog = page.locator('.conn-dialog');
+  await dialog.waitFor();
+  const id = await page.evaluate(() => window.__mqttscope.shell.active.connId);
+  await dialog.locator('.conn-item').filter({ has: page.locator('.conn-name').getByText(profileName, { exact: true }) }).click();
+  await dialog.locator('.connect-btn').click();
+  await page.waitForFunction((i) => window.__mqttscope.shell.tabs.find((t) => t.connId === i)?.status.state === 'connected', id, { timeout: 10000 });
+  return id;
+}
+
+// The name shown on the active tab in the tab strip (a locator).
+export const activeTabName = (page) => page.locator('.conn-tab.active .conn-tab-name');
 
 // Selects a topic in the tree by path (expanding its parents).
 export async function selectTopic(page, topic) {

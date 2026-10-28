@@ -1,7 +1,7 @@
 // Saved messages library and recent publishes, persisted across restarts.
 
 import path from 'node:path';
-import { test, expect, makeUserData, profile, connect, mockDialogs, dialogCalls, answerPrompt, toast, waitForFile } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, reconnected, mockDialogs, dialogCalls, answerPrompt, toast, waitForFile } from './fixtures.mjs';
 
 function publisher(page) {
   const root = page.locator('#publisher-host .publisher');
@@ -142,7 +142,7 @@ test('saved messages: save, send, order, filter, rename, delete, recent, persist
   await env.closeApp(first);
 
   const second = await env.launch({ userData });
-  await second.page.locator('.conn-dialog .modal-close').click();
+  await reconnected(second.page); // its tab comes back
   const pub2 = publisher(second.page);
   await expect(pub2.names).toHaveText(['Alpha msg', 'From recent', 'Beta msg']);
   await expect(pub2.item('Beta msg').locator('.lib-preview')).toHaveText('{"b": 2}');

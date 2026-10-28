@@ -185,15 +185,17 @@ function uniquePlotIds(tabs) {
   });
 }
 
-// The plots to show, from the two saved documents:
-//   tabsDoc    the tabs ("plotTabs"), written by this version
-//   legacyDoc  the 0.1 document ("plots"), which this version keeps as a
-//              copy of the tab on screen so older versions still find it
-// When an older version has changed the 0.1 document since this version last
-// wrote it, its plots are kept as an extra tab instead of being lost. This
-// version marks the 0.1 document it writes (writtenBy); older versions drop
-// the mark when they save, so a marked document is never taken for theirs,
-// even when it and the tabs were saved at different moments.
+// The plots to show, from the saved documents:
+//   tabsDoc    the tabs: a profile's own, or for a profile from before 0.4.0
+//              the plotTabs file that 0.2 and 0.3 wrote
+//   legacyDoc  for such a profile, the 0.1 document ("plots"), which 0.2 and
+//              0.3 kept as a copy of the tab on screen for older versions
+// From 0.4.0 on both files are only read (see main/layoutStore.js). When an
+// older version has changed the 0.1 document since 0.2 or 0.3 last wrote it,
+// its plots are kept as an extra tab instead of being lost. Those versions
+// marked the 0.1 document they wrote (writtenBy); older versions drop the mark
+// when they save, so a marked document is never taken for theirs, even when
+// it and the tabs were saved at different moments.
 export function plotsDocFrom(tabsDoc, legacyDoc) {
   if (!tabsDoc) return migratePlotsDoc(legacyDoc);
   const doc = migratePlotsDoc(tabsDoc);

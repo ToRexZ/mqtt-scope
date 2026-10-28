@@ -1,6 +1,17 @@
 // Pop-out inspector windows.
 
-import { test, expect, rowByPath, waitForTopic, menu, popupFrom } from './fixtures.mjs';
+import { test, expect, rowByPath, waitForTopic, menu, popupFrom, selectTopic } from './fixtures.mjs';
+
+const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
+// Clicks File → Close Tab as macOS does with `title`'s window in front
+// (Electron passes the focused window to the item).
+const menuCloseTab = (app, title) =>
+  app.evaluate(({ BrowserWindow, Menu }, t) => {
+    const item = Menu.getApplicationMenu()
+      .items.find((i) => i.label === 'File')
+      .submenu.items.find((i) => i.label === 'Close Tab');
+    item.click(undefined, BrowserWindow.getAllWindows().find((w) => w.getTitle() === t));
+  }, title);
 
 test('pop-out window shows one topic, follows it live and closes with the main window', async ({ env }) => {
   const broker = await env.broker();
@@ -15,7 +26,7 @@ test('pop-out window shows one topic, follows it live and closes with the main w
 
   const { popup, errors: popupErrors } = await popupFrom(app, () => page.locator('#viewer-host').getByRole('button', { name: '⤢ Pop out' }).click());
   await expect(popup.locator('.viewer-topic')).toHaveText('po/a');
-  await expect(popup).toHaveTitle(/^po\/a\b/); // product name deliberately not asserted
+  await expect(popup).toHaveTitle(`Test broker ${broker.port} — po/a`);
   // It starts with the history collected so far.
   await expect(popup.locator('.history-item .history-preview')).toHaveText(['second', 'first']);
   // A standalone viewer: no pop-out / maximize of its own.
@@ -57,4 +68,38 @@ test('pop-out window shows one topic, follows it live and closes with the main w
       .close();
   });
   await closed;
+});
+
+test('the Close tab key (Ctrl+W) and File → Close Tab close a pop-out in front, not a tab', async ({ env }) => {
+  const broker = await env.broker();
+  await broker.publish('po/a', 'first', { retain: true });
+  const { app, page, errors } = await env.connected(broker);
+  await selectTopic(page, 'po/a');
+  const popOut = () => popupFrom(app, () => page.locator('#viewer-host').getByRole('button', { name: '⤢ Pop out' }).click());
+  const windowCount = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
+  const tabStates = () => page.evaluate(() => window.__mqttscope.shell.tabs.map((t) => t.status.state));
+  const title = `Test broker ${broker.port} — po/a`;
+
+  const { popup, errors: popupErrors } = await popOut();
+  await expect(popup.locator('.viewer-topic')).toHaveText('po/a');
+  let closed = popup.waitForEvent('close');
+  await popup.locator('.viewer-topic').click();
+  await popup.keyboard.press(`${MOD}+w`).catch(() => {}); // the window is gone before the key comes up
+  await closed;
+  expect(await windowCount()).toBe(1);
+  expect(await tabStates()).toEqual(['connected']);
+
+  // macOS: the menu bar belongs to the pop-out in front.
+  const { popup: second } = await popOut();
+  await expect(second).toHaveTitle(title);
+  closed = second.waitForEvent('close');
+  await menuCloseTab(app, title);
+  await closed;
+  expect(await windowCount()).toBe(1);
+  expect(await tabStates()).toEqual(['connected']);
+  // With the main window in front it closes the tab (a New connection tab takes its place).
+  await menuCloseTab(app, `MQTT Scope — Test broker ${broker.port}`);
+  await expect.poll(() => page.evaluate(() => window.__mqttscope.shell.tabs.map((t) => t.mode))).toEqual(['picker']);
+  expect(errors).toEqual([]);
+  expect(popupErrors).toEqual([]);
 });

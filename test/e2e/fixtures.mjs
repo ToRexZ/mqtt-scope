@@ -14,7 +14,7 @@ import { launchApp, makeUserData, profile, connect } from '../helpers/app.mjs';
 
 export { expect };
 export { makeUserData, profile, connect };
-export { selectTopic } from '../helpers/app.mjs';
+export { selectTopic, openTabTo, activeTabName, reconnected } from '../helpers/app.mjs';
 export { makeCerts, until } from '../helpers/broker.mjs';
 
 export const test = base.extend({
@@ -251,6 +251,14 @@ export async function waitForFile(file, pred = () => true, message = file) {
   return readFileSync(file);
 }
 
+// The plot layout saved for a profile (see main/layoutStore.js), once
+// `pred(layout)` holds.
+export async function waitForLayout(userData, profileId, pred = () => true) {
+  const layoutOf = (b) => JSON.parse(b).byProfile?.[profileId];
+  const buf = await waitForFile(path.join(userData, 'profileLayouts.json'), (b) => !!layoutOf(b) && pred(layoutOf(b)), `the plot layout of ${profileId}`);
+  return layoutOf(buf);
+}
+
 // A port nothing listens on.
 export async function closedPort() {
   const { createServer } = await import('node:net');
@@ -269,4 +277,20 @@ export async function recordStatus(page) {
     new MutationObserver(() => window.__statusLog.push(el.textContent)).observe(el, { childList: true, characterData: true, subtree: true });
   });
   return () => page.evaluate(() => window.__statusLog.slice());
+}
+
+// Records every text the connection dialog's status line shows (null while no
+// dialog shows), including short-lived ones.
+export async function recordDialogStatus(page) {
+  await page.evaluate(() => {
+    window.__dialogStatus = [];
+    let last;
+    const read = () => {
+      const t = document.querySelector('.conn-dialog .conn-status-line')?.textContent ?? null;
+      if (t !== last) window.__dialogStatus.push((last = t));
+    };
+    read();
+    new MutationObserver(read).observe(document.body, { subtree: true, childList: true, characterData: true });
+  });
+  return () => page.evaluate(() => window.__dialogStatus.slice());
 }

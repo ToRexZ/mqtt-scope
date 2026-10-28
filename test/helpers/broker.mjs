@@ -111,6 +111,18 @@ export async function startBroker(options = {}) {
     dropClients() {
       for (const s of sockets) s.destroy();
     },
+    // The broker goes down: drops every client and refuses new ones (plain
+    // TCP) until start() listens on the same port again.
+    async stop() {
+      for (const s of sockets) s.destroy();
+      await new Promise((r) => tcp.close(() => r()));
+    },
+    start() {
+      return new Promise((resolve, reject) => {
+        tcp.once('error', reject);
+        tcp.listen(port, '127.0.0.1', () => resolve());
+      });
+    },
     async close() {
       for (const s of sockets) s.destroy();
       await Promise.all(servers.map((s) => new Promise((r) => s.close(() => r()))));

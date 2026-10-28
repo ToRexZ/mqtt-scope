@@ -25,7 +25,8 @@ export class TreeView {
     scrollEl.tabIndex = 0;
 
     scrollEl.addEventListener('scroll', () => this.renderViewport());
-    new ResizeObserver(() => this.renderViewport()).observe(scrollEl);
+    this.resizeObserver = new ResizeObserver(() => this.renderViewport());
+    this.resizeObserver.observe(scrollEl);
     this.inner.addEventListener('click', (e) => this.handleClick(e));
     // A double-click toggles relative to the state before its first click,
     // which may already have expanded the node (auto-expand on select).
@@ -47,6 +48,12 @@ export class TreeView {
       this.onContextMenu(row.node, e.clientX, e.clientY);
     });
     scrollEl.addEventListener('keydown', (e) => this.handleKey(e));
+  }
+
+  // Stops watching the element's size (the tab closed); null afterwards.
+  dispose() {
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
   }
 
   // text: substring match on the topic path, or an MQTT filter when it

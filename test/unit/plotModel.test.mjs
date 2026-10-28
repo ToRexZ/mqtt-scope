@@ -19,6 +19,8 @@ function withPlots(...titles) {
 }
 const titles = (m) => m.plots.map((p) => p.title);
 const byTitle = (m, t) => m.allPlots().find((p) => p.title === t);
+// The 0.1 document 0.2 and 0.3 wrote next to the tabs: the tab on screen, marked.
+const copyFor = (m) => JSON.parse(JSON.stringify({ plots: m.plots, writtenBy: 2 }));
 
 test('kindFor: a plot of only state lanes shows state transitions', () => {
   assert.equal(kindFor({ series: [{ display: 'state' }, { display: 'state' }] }), 'states');
@@ -36,19 +38,30 @@ describe('starting and saving', () => {
     assert.equal(changes, 0);
   });
 
-  test('the saved documents round-trip: the tabs, and the tab on screen in the 0.1 format', () => {
+  test('the saved document round-trips, with the 0.2 and 0.3 copy of the tab on screen too', () => {
     const m = withPlots('A', 'B');
     m.addTab('Second');
     m.addSeries(null, { topic: 'x', alias: 'C' });
     m.movePlot(byTitle(m, 'A').id, byTitle(m, 'B').id, 'right'); // on another tab: ignored
     const doc = JSON.parse(JSON.stringify(m.toDoc()));
-    const legacy = JSON.parse(JSON.stringify(m.legacyDoc()));
     assert.equal(doc.version, PLOTS_DOC_VERSION);
-    assert.deepEqual(legacy, { plots: doc.tabs[1].plots, writtenBy: PLOTS_DOC_VERSION });
-    assert.deepEqual(doc.legacyMirror, legacy.plots);
-    const back = new PlotModel(doc, { legacy });
-    assert.deepEqual(back.tabs, m.tabs);
-    assert.equal(back.activeTabId, m.activeTabId);
+    assert.deepEqual(doc.legacyMirror, doc.tabs[1].plots);
+    for (const legacy of [null, copyFor(m)]) {
+      const back = new PlotModel(doc, { legacy });
+      assert.deepEqual(back.tabs, m.tabs);
+      assert.equal(back.activeTabId, m.activeTabId);
+    }
+  });
+
+  test('loading shows the tab that was on screen when saved', () => {
+    const m = withPlots('A');
+    m.addTab('Second');
+    const doc = JSON.parse(JSON.stringify(m.toDoc()));
+    m.switchTab(m.tabs[0].id);
+    m.load(doc);
+    assert.equal(m.tab.name, 'Second');
+    m.load({ tabs: [{ id: 'z', name: 'Only', plots: [] }], activeTabId: 'gone' });
+    assert.equal(m.tab.name, 'Only', 'falls back when the tab is gone');
   });
 
   test('plots changed by an older version (0.1 format) since are kept as an extra tab', () => {
@@ -60,7 +73,7 @@ describe('starting and saving', () => {
     assert.deepEqual(back.tabs[1].plots.map((p) => p.title), ['Edited in 0.1']);
     assert.notEqual(back.tabs[1].plots[0].id, 'old1', 'with its own ids');
     // Unchanged, or emptied by the older version: nothing is added or lost.
-    assert.equal(new PlotModel(doc, { legacy: m.legacyDoc() }).tabs.length, 1);
+    assert.equal(new PlotModel(doc, { legacy: copyFor(m) }).tabs.length, 1);
     assert.equal(new PlotModel(doc, { legacy: { plots: [] } }).tabs.length, 1);
   });
 
@@ -68,20 +81,6 @@ describe('starting and saving', () => {
     assert.equal(model({ version: PLOTS_DOC_VERSION + 1, tabs: [] }).newer, true);
     assert.equal(model({ version: PLOTS_DOC_VERSION, tabs: [] }).newer, false);
     assert.equal(model(null).newer, false);
-  });
-
-  test('reloading can keep the tab on screen (another window saved)', () => {
-    const m = withPlots('A');
-    const first = m.tab;
-    m.addTab('Second');
-    const doc = JSON.parse(JSON.stringify(m.toDoc()));
-    m.switchTab(first.id);
-    m.load(doc, { keepActive: true });
-    assert.equal(m.tab.name, 'Plots', 'this window stays on its tab');
-    m.load(doc);
-    assert.equal(m.tab.name, 'Second', 'at startup the saved tab is shown');
-    m.load({ tabs: [{ id: 'z', name: 'Only', plots: [] }] }, { keepActive: true });
-    assert.equal(m.tab.name, 'Only', 'falls back when the tab is gone');
   });
 
   test('older documents are migrated; loading does not count as a change', () => {
@@ -388,10 +387,10 @@ describe('tabs', () => {
   });
 });
 
-describe('the 0.1 copy written by this version is never taken for an older version’s', () => {
-  test('a stale copy written by this version (e.g. saved a moment before the tabs) adds no tab', () => {
+describe('the 0.1 copy written by 0.2 and 0.3 is never taken for an older version’s', () => {
+  test('a stale copy written by them (e.g. saved a moment before the tabs) adds no tab', () => {
     const m = withPlots('A');
-    const stale = m.legacyDoc();
+    const stale = copyFor(m);
     m.addSeries(null, { topic: 'b', alias: 'B' });
     const doc = JSON.parse(JSON.stringify(m.toDoc()));
     assert.equal(stale.writtenBy, 2);

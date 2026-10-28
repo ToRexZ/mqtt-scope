@@ -1,348 +1,445 @@
-// Main window: wires the topic tree, inspector, plots, publisher and the
-// connection manager to the MQTT session in the main process.
+// Main window: the shell around its connection tabs. It holds what the window
+// shares (settings, shortcuts, the connection dialog, the update button, the
+// tab strip), routes each broker event to the tab of its connection and draws
+// the active tab. Each tab (connectionTab.js) is one connection with its own
+// tree, inspector, plots and publisher; until it connects, the connection
+// dialog is drawn in it.
 
-import { TopicTree } from './topicTree.js';
-import { TreeView } from './treeView.js';
-import { MessageViewer } from './viewer.js';
-import { PlotsPanel } from './plots.js';
-import { Publisher } from './publisher.js';
+import { ConnectionTab } from './connectionTab.js';
 import { ConnectionDialog } from './connectionDialog.js';
-import { showMenu, splitter, toast } from './ui.js';
-import { decode, extractNumber, hexDump } from './payload.js';
+import { closeMenu, menuOpen, showMenu, toast } from './ui.js';
 import { DEFAULT_SETTINGS, normalizeSettings, openSettings } from './settings.js';
-import { hasNumbers } from './fields.js';
-import { openSubscriptions } from './subscriptionsDialog.js';
+import { TabSet } from './tabSet.js';
+import { TabStrip, dotState } from './tabStrip.js';
 import { initUpdateButton } from './updateButton.js';
 import { ACTIONS, bindingIndex, comboFromEvent, keyBelongsToTarget, pointerFocus, resolveBindings, toAccelerator } from './keys.js';
 
 const api = window.api;
 const $ = (sel) => document.querySelector(sel);
 
-const PAUSE_QUEUE_LIMIT = 200000;
-const PAUSE_QUEUE_BYTES = 256 * 1024 * 1024;
 const RENDER_INTERVAL_MS = 120;
-const DELETE_ECHO_MS = 5000;
+const RATE_INTERVAL_MS = 1000;
+const REPORT_DELAY_MS = 300;
 
 let settings = { ...DEFAULT_SETTINGS };
 let bindings = resolveBindings({});
 let keyIndex = bindingIndex(bindings);
-const tree = new TopicTree();
-applySettings(settings);
+const tabs = new Map(); // id → ConnectionTab
+const order = new TabSet(); // the ids in strip order, and the active one
+const stripTabs = () => order.ids().map((id) => tabs.get(id));
+const activeTab = () => tabs.get(order.activeId) || null;
+let dialogStatus = null; // the active tab's status the connection dialog last saw
+let windowId = null; // main's id of this window
+// Settled once the window has its settings (see start), which a tab moving
+// in is built with.
+let markStarted;
+const started = new Promise((resolve) => (markStarted = resolve));
 
 function applySettings(next) {
   settings = next;
-  tree.historyLimit = settings.historyLimit;
-  tree.historyBytes = settings.historyMB * 1024 * 1024;
-  tree.trimHistories();
+  for (const tab of tabs.values()) tab.applySettings(settings); // history limits apply to each tab
   bindings = resolveBindings(settings.keys);
   keyIndex = bindingIndex(bindings);
   // The menu shows the current shortcuts (the keys themselves are handled here).
   api.setMenuShortcuts?.(Object.fromEntries(ACTIONS.map((a) => [a.id, toAccelerator(bindings[a.id])])));
 }
-let selected = null;
-let selectedDirty = false;
-let treeDirty = false;
-let paused = false;
-let pauseQueue = [];
-let pauseBytes = 0;
-let rateCount = 0;
-let lastMessageAt = 0;
-let droppedTotal = 0;
-let status = { state: 'disconnected' };
-let activeProfile = null;
-let lastErrorToast = null;
-const pendingDeletes = new Map(); // topic -> expiry; swallows the broker echo of our own delete
 
-// ------------------------------------------------------------------ views
-
-const treeView = new TreeView($('#tree-scroll'), tree, {
-  onSelect: selectNode,
-  onContextMenu: treeMenu,
-});
-treeView.setEmptyText('Not connected. Click the connection button above.');
-
-const viewer = new MessageViewer($('#viewer-host'), {
-  api,
-  onMaximize: toggleMaximize,
-  onPopout: (node) => api.openPopout(node.path, node.history.map(stripMessage)),
-  onUseInPublisher: (topic, msg) => publisher.loadMessage(topic, msg),
-  onSelectTopic: (node) => {
-    treeView.reveal(node);
-    treeView.select(node);
-  },
-  plotMenuItems: (topic, segs) => plots.menuItems(topic, segs),
-});
-
-const plots = new PlotsPanel($('#plots-host'), {
-  api,
-  getHistory: (topic) => tree.find(topic)?.history || [],
-  getTopicNodes: () => tree.root.topics(),
-  onCountChange: (n) => ($('#plot-count').textContent = n ? String(n) : ''),
-  onAdded: () => showTab('plots'),
-});
-
-const publisher = new Publisher($('#publisher-host'), {
-  api,
-  getTopics: topicSuggestions,
-  getSelectedTopic: () => selected?.path ?? null,
-  onToggle: (collapsed) => $('#right').classList.toggle('pub-collapsed', collapsed),
-});
-
+// The connection dialog, drawn in the active tab while that tab is a picker
+// (see placeDialog).
 const connections = new ConnectionDialog({
   api,
   getBinding: (id) => bindings[id],
-  onConnect: async (profile) => {
-    // A different broker means a different topic space; reconnecting to the same one keeps the tree.
-    const brokerKey = (p) => p && `${p.id}|${p.protocol}|${p.host}|${p.port}|${p.wsPath || ''}`;
-    if (brokerKey(activeProfile) !== brokerKey(profile)) clearTree();
-    activeProfile = { ...profile };
-    const res = await api.connect(profile);
-    if (!res.ok) toast(res.error, 'error');
-  },
+  onProfilesChanged: () => checkTabs(),
 });
 
-function stripMessage(m) {
-  return { topic: m.topic, payload: m.payload, qos: m.qos, retain: m.retain, ts: m.ts, props: m.props };
-}
+// ------------------------------------------------------------------ tabs
 
-function topicSuggestions(prefix) {
-  const q = (prefix || '').toLowerCase();
-  const out = [];
-  for (const node of tree.root.topics()) {
-    if (!q || node.path.toLowerCase().includes(q)) out.push(node.path);
-    if (out.length >= 200) break;
-  }
-  return out;
-}
-
-// ------------------------------------------------------------------ messages
-
-api.onMessages(({ messages, dropped }) => {
-  if (dropped) droppedTotal += dropped;
-  if (paused) {
-    for (const m of messages) {
-      pauseQueue.push(m);
-      pauseBytes += m.payload.length;
-    }
-    // Keep the newest messages within the caps; older ones are dropped and counted.
-    let drop = 0;
-    while (pauseQueue.length - drop > PAUSE_QUEUE_LIMIT || (pauseBytes > PAUSE_QUEUE_BYTES && pauseQueue.length - drop > 1)) {
-      pauseBytes -= pauseQueue[drop++].payload.length;
-    }
-    if (drop) {
-      droppedTotal += drop;
-      pauseQueue = pauseQueue.slice(drop);
-    }
-    return;
-  }
-  ingest(messages);
-});
-
-function ingest(messages) {
-  const now = Date.now();
-  for (const m of messages) {
-    if (m.payload.length === 0 && pendingDeletes.has(m.topic)) {
-      pendingDeletes.delete(m.topic);
-      continue;
-    }
-    const node = tree.addMessage(m);
-    plots.ingest(m);
-    // A selected branch (no message of its own) shows its children's values.
-    if (node === selected || (selected && !selected.messageCount && m.topic.startsWith(`${selected.path}/`))) selectedDirty = true;
-  }
-  for (const [topic, expiry] of pendingDeletes) if (expiry < now) pendingDeletes.delete(topic);
-  rateCount += messages.length;
-  lastMessageAt = now;
-  treeDirty = true;
-}
-
-setInterval(() => {
-  if (treeDirty) {
-    treeDirty = false;
-    treeView.refresh();
-  } else if (Date.now() - lastMessageAt < 1500) {
-    treeView.renderViewport(); // fade out update highlights
-  }
-  if (selectedDirty) {
-    selectedDirty = false;
-    viewer.update();
-  }
-  updateStats();
-}, RENDER_INTERVAL_MS);
-
-let rate = 0;
-setInterval(() => {
-  rate = rateCount;
-  rateCount = 0;
-}, 1000);
-
-function updateStats() {
-  $('#stat-topics').textContent = `${tree.topicCount.toLocaleString()} topics`;
-  $('#stat-msgs').textContent = `${tree.messageCount.toLocaleString()} messages`;
-  $('#stat-rate').textContent = paused ? `paused · ${pauseQueue.length.toLocaleString()} queued` : `${rate.toLocaleString()} msg/s`;
-  const dropEl = $('#status-dropped');
-  dropEl.hidden = !droppedTotal;
-  dropEl.textContent = `${droppedTotal.toLocaleString()} messages dropped (too fast)`;
-}
-
-// Ctrl+R: start over without reconnecting — forget received messages and
-// restart every plot's timeline.
-function reloadSession() {
-  clearTree();
-  plots.reset();
-  api.resetChildWindows?.(); // pop-out windows start over too
-  droppedTotal = 0;
-  rateCount = 0;
-  rate = 0;
-  updateStats();
-  toast('Cleared received messages and restarted the plots');
-}
-
-function clearTree() {
-  tree.clear();
-  selected = null;
-  pauseQueue = [];
-  pauseBytes = 0;
-  treeView.selected = null;
-  viewer.source = null;
-  viewer.render(true);
-  treeView.refresh();
-  $('#status-selected').textContent = '';
-}
-
-// ------------------------------------------------------------------ selection
-
-function selectNode(node, source) {
-  // Clicking a topic opens it one level so its sub-topics show (Settings → General).
-  if (source === 'click' && settings.autoExpand && node.children.size && !node.expanded) {
-    node.expanded = true;
-    treeView.refresh();
-  }
-  selected = node;
-  viewer.show(node);
-  publisher.setTopic(node.path);
-  $('#status-selected').textContent = node.path;
-}
-
-// Only topics that were received as retained are offered: deleting publishes
-// an empty message, which every current subscriber of the topic receives.
-async function deleteRetained(nodes, what) {
-  const topics = nodes.map((n) => n.path);
-  const shown = topics.slice(0, 15).join('\n');
-  const more = topics.length > 15 ? `\n…and ${topics.length - 15} more` : '';
-  const ok = await api.confirm({
-    message: `Delete retained ${what}?`,
-    detail: `An empty retained message is published to ${topics.length === 1 ? 'this topic' : `these ${topics.length} topics`}, which removes the retained message from the broker. Current subscribers receive the empty message.\n\n${shown}${more}`,
-    okLabel: 'Delete',
-  });
-  if (!ok) return;
-  let failed = 0;
-  for (const n of nodes) {
-    pendingDeletes.set(n.path, Date.now() + DELETE_ECHO_MS);
-    const res = await api.publish({ topic: n.path, payload: '', qos: 1, retain: true });
-    if (res.ok) {
-      tree.removeTopic(n);
-    } else {
-      failed++;
-      pendingDeletes.delete(n.path);
-    }
-  }
-  if (selected && !tree.isAttached(selected)) selected = null;
-  treeDirty = true;
-  selectedDirty = true;
-  toast(failed ? `${failed} deletes failed` : `Deleted ${topics.length} retained message${topics.length === 1 ? '' : 's'}`, failed ? 'error' : 'info');
-}
-
-function treeMenu(node, x, y) {
-  const msg = node.message;
-  const numeric = msg && extractNumber(msg, null) !== undefined;
-  const below = [...node.topics()].filter((n) => n !== node && n.retained);
-  const items = [
-    { label: 'Copy topic', action: () => api.copyText(node.path).then(() => toast('Topic copied')) },
-    {
-      label: 'Copy value',
-      disabled: !msg,
-      action: () => {
-        const d = decode(msg);
-        api.copyText(d.kind === 'binary' ? hexDump(msg.payload, Infinity) : d.text).then(() => toast('Value copied'));
-      },
-    },
-    { label: 'Publish to this topic…', action: () => (msg ? publisher.loadMessage(node.path, msg) : publisher.useTopic(node.path)) },
-    { label: 'Open in new window', disabled: !msg, action: () => api.openPopout(node.path, node.history.map(stripMessage)) },
-    'separator',
-    ...(numeric
-      ? plots.menuItems(node.path, null)
-      : msg && hasNumbers(msg)
-        ? [{ label: 'Choose values to plot…', action: () => plots.openPicker(null, node.path) }]
-        : [{ label: 'Add to plot (needs a numeric value)', disabled: true, action() {} }]),
-    'separator',
-    { label: 'Expand all below', disabled: !node.children.size, action: () => (tree.setExpandedRecursive(node, true), treeView.refresh()) },
-    { label: 'Collapse all below', disabled: !node.children.size, action: () => (tree.setExpandedRecursive(node, false), treeView.refresh()) },
-    { label: 'Hide from tree (until next message)', action: () => (tree.remove(node), (treeDirty = true)) },
-    'separator',
-    {
-      label: node.retained ? 'Delete retained message' : 'Delete retained message (none received)',
-      disabled: !node.retained,
-      action: () => deleteRetained([node], 'message'),
-    },
-    {
-      label: `Delete retained messages below (${below.length})`,
-      disabled: !below.length,
-      action: () => deleteRetained(below, `messages under ${node.path}`),
-    },
-  ];
-  showMenu(x, y, items);
-}
-
-// ------------------------------------------------------------------ status
-
-const STATE_LABELS = {
-  connecting: 'Connecting…',
-  connected: 'Connected',
-  reconnecting: 'Reconnecting…',
-  offline: 'Offline',
-  disconnected: 'Disconnected',
-  error: 'Error',
+// What a tab may ask of the window.
+const shell = {
+  getBinding: (id) => bindings[id],
+  setSubscriptions: (profileId, subs) => connections.setSubscriptions(profileId, subs),
+  savedProfile: (profile) => connections.profiles.find((p) => p.id === profile.id) || profile,
+  showDuplicate: (tab, duplicate) => showDuplicate(tab, duplicate),
+  savedMessagesChanged: (tab) => savedMessagesChanged(tab),
+  onChange: () => refresh(),
 };
 
-api.onStatus((s) => {
-  status = s;
-  connections.onStatus(s);
-  const name = activeProfile?.name || '';
-  const label = s.state === 'connected' ? name : `${name ? `${name} · ` : ''}${STATE_LABELS[s.state] || s.state}`;
-  $('#conn-label').textContent = label || 'Not connected';
-  $('#btn-connections').dataset.state = s.state;
-  $('#btn-disconnect').hidden = s.state === 'disconnected' && !s.unexpected;
-  $('#btn-subscriptions').hidden = s.state !== 'connected';
-  $('#status-text').textContent =
-    s.state === 'error' ? `Error: ${s.error}` : `${STATE_LABELS[s.state] || s.state}${s.url ? ` — ${s.url}` : ''}`;
-  if (s.state === 'connected') treeView.setEmptyText('Connected. Waiting for messages…');
-  else if (s.state === 'disconnected') treeView.setEmptyText('Not connected. Click the connection button above.');
-  // Retries repeat the same error every few seconds; show each distinct one once.
-  if (s.state === 'error' && !connections.isOpen() && s.error !== lastErrorToast) toast(s.error, 'error');
-  lastErrorToast = s.state === 'error' ? s.error : s.state === 'connected' ? null : lastErrorToast;
-  treeView.refresh();
-});
+const tabOf = (id) => tabs.get(id) || null;
 
-api.onWarning((message) => toast(message, 'error'));
+const strip = new TabStrip($('.topbar'), {
+  onActivate: (id) => activate(id),
+  onClose: (id) => closeTab(id),
+  onNew: () => newTab(),
+  onContextMenu: (id, x, y) => tabMenu(id, x, y),
+  onMove: (id, to) => {
+    order.move(id, to);
+    refresh();
+  },
+  // Dragged to another window's strip or out of every window (see
+  // main/tabDrag.js): main moves it, and the end answers for a new window.
+  onDragStart: (id) => api.tabDragStart(id).catch(() => {}),
+  onDragEnd: (_id, end) => settleMove(api.tabDragEnd(end)),
+  onDragHover: () => api.tabDragHover(),
+  onDrop: (index) => dropTab(index),
+});
+let opening = false;
+
+// +, Mod+T and Mod+K: a New connection tab, whose content is the dialog.
+async function newTab() {
+  if (opening) return; // a double-click would make two tabs
+  opening = true;
+  try {
+    await openTab();
+  } finally {
+    opening = false;
+  }
+}
+
+// A tab gets its own connection in main; its id is the tab's id. A tab to
+// connect takes its profile when connect() does; one open in another tab
+// closes it again (see showDuplicate). A restored tab (see restoreTabs) is a
+// session from the start, and connects or binds to its profile after.
+async function openTab({ profile = null, connect = false, restored = false, activate: show = true } = {}) {
+  const connId = await api.openConnection();
+  const tab = new ConnectionTab({ api, connId, settings, shell });
+  if (restored) tab.restoreAs(profile);
+  else if (profile && !connect) tab.profile = { ...profile };
+  tabs.set(connId, tab);
+  savedSeen.set(connId, savedGen); // tab.load() reads them
+  order.add(connId, { activate: false });
+  if (show || !activeTab()?.active) activate(connId);
+  refresh();
+  await tab.load();
+  if (profile && connect && tabOf(connId) === tab) await tab.connect(profile);
+  return tab;
+}
+
+// A profile is open in one tab app-wide: connecting to it shows the tab that
+// has it (in another window, that window comes forward). The tab that tried
+// goes, unless it is its window's only one: a New connection tab, or one
+// reopened at launch that had not taken its profile yet, which then becomes
+// a New connection tab.
+async function showDuplicate(tab, duplicate) {
+  if (duplicate.sameWindow) activate(duplicate.connId);
+  else api.focusConnection(duplicate.connId);
+  if (tab.mode !== 'picker' && !tab.restored) return;
+  if (tabs.size > 1) await closeTab(tab.connId);
+  else if (tab.restored) tab.becomePicker();
+}
+
+// Each session tab compares its profile with the saved one (see checkSaved).
+function checkTabs() {
+  for (const tab of tabs.values()) tab.checkSaved();
+}
+
+// Closes the tab and its connection, after asking when its plots hold
+// recorded data (a picker never has any). The window always keeps a tab:
+// closing the last one opens a fresh one.
+async function closeTab(id, { confirmed = false } = {}) {
+  const tab = tabOf(id);
+  if (!tab) return;
+  if (tab.hasPlotData && !confirmed) {
+    const ok = await api.confirm({
+      message: `Close “${tab.label}”?`,
+      detail: 'Its plots hold recorded data, which is lost when the tab closes. The plots themselves are kept.',
+      okLabel: 'Close',
+    });
+    if (!ok || tabOf(id) !== tab) return;
+  }
+  const saved = removeTab(tab);
+  // Reopen brings back what had worked: not a tab that never connected (nor
+  // a reopened one that never took its profile).
+  if (tab.mode === 'session' && tab.profile && !tab.restored) order.pushClosed({ profileId: tab.profile.id });
+  await Promise.allSettled([saved, api.closeConnection(id)]);
+  if (!tabs.size) await openTab();
+}
+
+// Takes a tab out of the window, its connection left as it is, and shows
+// the next one. Returns the save of its plot changes not saved yet.
+function removeTab(tab) {
+  tabs.delete(tab.connId);
+  savedSeen.delete(tab.connId);
+  order.remove(tab.connId); // an active tab's right neighbour becomes active, else its left one
+  const saved = tab.flush(); // before dispose stops its save timer
+  tab.dispose();
+  if (order.activeId) activate(order.activeId); // draws it, unless it already is
+  refresh();
+  return saved;
+}
+
+// Rebuilds a tab in place from its exported state, as a window that a tab
+// moves into does (for tests): the state goes through structuredClone, as
+// between windows. The connection stays open; its events reach the new tab.
+function reimport(id) {
+  const old = tabOf(id);
+  if (!old) return;
+  const shown = old.active;
+  const state = structuredClone(old.exportState());
+  old.flush(); // before dispose stops its save timer
+  old.dispose();
+  tabs.set(id, ConnectionTab.fromState({ api, settings, shell, connId: id }, state));
+  savedSeen.delete(id); // its publisher reads the saved messages when shown
+  if (shown) activate(id);
+  refresh();
+}
+
+// Main moves a tab with its connection to another window (main/tabMove.js),
+// holding the connection's events until the tab is there. Leaving, the tab's
+// calls in flight (connecting, loading its plots) finish first and a plot
+// change not saved yet is saved; then it answers with its state and its
+// place here, for the window it joins (or this one again, should that fail).
+// It goes once main has that answer (tabExported): an answer that cannot be
+// sent (a value that cannot be copied to main) fails the move, and the tab
+// stays. drop: it just goes (a copy main gave up waiting for).
+async function exportTab({ connId, drop = false }) {
+  const tab = tabOf(connId);
+  if (!tab) throw new Error('Unknown tab');
+  await tab.settle();
+  if (tabOf(connId) !== tab) throw new Error('Unknown tab'); // closed meanwhile
+  return { index: order.ids().indexOf(connId), active: tab.active, state: drop ? null : tab.exportState() };
+}
+
+// The answer went to main, in the same task as exportTab's: nothing reached
+// the tab in between.
+function tabExported({ connId }) {
+  const tab = tabOf(connId);
+  if (!tab) return;
+  removeTab(tab);
+  sendReport();
+}
+
+// A tab joining, built from its state at `index`; it is shown unless it
+// comes back to a window where it was not. Main then brings the window
+// forward and delivers the connection's events here.
+async function importTab({ connId, state, index, activate: show = true }) {
+  await started;
+  if (tabs.has(connId)) throw new Error('The tab is here already');
+  if (state?.connId !== connId) throw new Error('The tab is of another connection');
+  tabs.set(connId, ConnectionTab.fromState({ api, settings, shell, connId }, state));
+  order.add(connId, { index, activate: false });
+  if (show || !activeTab()?.active) activate(connId);
+  refresh();
+  sendReport();
+  return true;
+}
+
+// A tab of another window let go on this window's strip comes in at `index`
+// (main moves it); one of this window, should main say so, moves within it.
+function dropTab(index) {
+  const dropped = api.tabDrop({ index }).then((res) => {
+    if (!res?.reorder) return res;
+    const from = order.ids().indexOf(res.reorder);
+    if (from >= 0) order.move(res.reorder, from < index ? index - 1 : index);
+    refresh();
+    return null;
+  });
+  return settleMove(dropped);
+}
+
+// A tab that could not move stays, or is back, where it was, and the window
+// that asked says so. moving: main's answer, whether it moved (null: there
+// was nothing to move).
+async function settleMove(moving) {
+  try {
+    if ((await moving) === false) toast('Could not move the tab', 'error');
+  } catch (err) {
+    // Main's error arrives as "Error invoking remote method '…': Error: <reason>".
+    const reason = String(err?.message || err).replace(/^Error invoking remote method '[^']*': (?:\w*Error: )?/, '');
+    toast(`Could not move the tab: ${reason}`, 'error');
+  }
+}
+
+// Closes several tabs with one question when any of their plots holds data
+// (one tab: the question of closeTab).
+async function closeTabs(ids) {
+  const list = ids.map(tabOf).filter(Boolean);
+  if (list.length === 1) return closeTab(list[0].connId);
+  if (list.some((t) => t.hasPlotData)) {
+    const ok = await api.confirm({
+      message: `Close ${list.length} tabs?`,
+      detail: 'Some plots hold recorded data, which is lost when their tabs close. The plots themselves are kept.',
+      okLabel: 'Close',
+    });
+    if (!ok) return;
+  }
+  for (const tab of list) if (tabOf(tab.connId) === tab) await closeTab(tab.connId, { confirmed: true });
+}
+
+// The tabs the window had when the app last ran (main/windowState.js), in
+// their order and with the same one active: one that was connected connects,
+// one the user had disconnected comes back disconnected, with Reconnect.
+async function restoreTabs({ tabs: list, active }) {
+  for (const [i, { profileId, connected }] of list.entries()) {
+    const profile = connections.profiles.find((p) => p.id === profileId);
+    if (!profile) continue;
+    const tab = await openTab({ profile, restored: true, activate: i === active });
+    if (tabOf(tab.connId) === tab) await (connected ? tab.connect(profile) : tab.bind());
+  }
+}
+
+// What main reopens at the next launch: the tabs that connected, each
+// connected unless the user disconnected it, and the active one (for a New
+// connection tab, which is not reopened, the one next to it). Sent once the
+// tabs have settled; a closing window sends it at once (see onFlush).
+let reportedTabs = null; // the last state reported or about to be, as JSON
+let pendingReport = null;
+let reportTimer = null;
+
+function reportTabs() {
+  const all = stripTabs();
+  const kept = all.filter((t) => t.mode === 'session' && t.profile);
+  const before = all.slice(0, Math.max(0, all.indexOf(activeTab()))).filter((t) => kept.includes(t)).length;
+  const state = { tabs: kept.map((t) => ({ profileId: t.profile.id, connected: !t.canReconnect })), active: Math.min(before, Math.max(0, kept.length - 1)) };
+  const json = JSON.stringify(state);
+  if (json === reportedTabs) return;
+  reportedTabs = json;
+  pendingReport = state;
+  clearTimeout(reportTimer);
+  reportTimer = setTimeout(sendReport, REPORT_DELAY_MS);
+}
+
+function sendReport() {
+  clearTimeout(reportTimer);
+  if (pendingReport) api.reportTabs(pendingReport);
+  pendingReport = null;
+}
+
+// Opens the newest closed tab whose profile still exists, connected; its
+// data starts empty.
+async function reopenClosed() {
+  for (let entry = order.popClosed(); entry; entry = order.popClosed()) {
+    const profile = connections.profiles.find((p) => p.id === entry.profileId);
+    if (!profile) continue;
+    const open = stripTabs().find((t) => t.mode === 'session' && t.profile?.id === profile.id);
+    if (open) {
+      activate(open.connId);
+      return open;
+    }
+    return openTab({ profile, connect: true });
+  }
+  return null;
+}
+
+function tabMenu(id, x, y) {
+  const tab = tabOf(id);
+  if (!tab) return;
+  const others = order.othersOf(id);
+  const right = order.rightOf(id);
+  showMenu(x, y, [
+    { label: 'Close', action: () => closeTab(id) },
+    { label: 'Close other tabs', disabled: !others.length, action: () => closeTabs(others) },
+    { label: 'Close tabs to the right', disabled: !right.length, action: () => closeTabs(right) },
+    { label: 'Move to new window', disabled: tabs.size < 2, action: () => settleMove(api.tearOffTab(id)) },
+    'separator',
+    // A tab that never connected has nothing to disconnect or resume.
+    tab.canReconnect
+      ? { label: 'Reconnect', action: () => tab.toggleConnection() }
+      : { label: 'Disconnect', disabled: tab.status.state === 'disconnected', action: () => tab.toggleConnection() },
+  ]);
+}
+
+// Draws the tab in the window. The tab shown is always the TabSet's active one.
+function activate(id) {
+  const tab = tabOf(id);
+  if (!tab || tab.active) return;
+  closeMenu(); // a menu of the tab being left would act on it
+  const shown = activeTab();
+  if (shown?.active) shown.deactivate();
+  order.activate(id);
+  tab.activate($('#tab-host'));
+  refreshSaved(tab);
+  refresh();
+}
+
+// The strip shows every tab; the window title and the connection dialog
+// follow the active one.
+function refresh() {
+  const current = activeTab();
+  strip.render(stripTabs().map((t) => ({ id: t.connId, label: t.label, state: dotState(t.status, t.everConnected), active: t === current })));
+  if (current) {
+    document.title = `MQTT Scope — ${current.label}`;
+    if (current.status !== dialogStatus) {
+      dialogStatus = current.status;
+      connections.onStatus(current.status);
+    }
+  }
+  placeDialog(current);
+  reportTabs();
+}
+
+// The dialog is drawn in the active tab while it is a picker; Connect
+// connects that tab, Cancel closes it, except the window's only tab. It takes
+// the focus unless a dialog shows over the window (the Installing dialog).
+function placeDialog(tab) {
+  if (tab?.mode !== 'picker' || !tab.active) return connections.unmount();
+  connections.mount(tab.pickerRoot, {
+    closable: tabs.size > 1,
+    failed: tab.failed,
+    profileId: tab.profile?.id,
+    focus: !document.querySelector('.modal-overlay'),
+    onConnect: (profile) => tab.connect(profile),
+    onCancel: () => closeTab(tab.connId),
+  });
+}
+
+// Saved and recent messages are shared by all tabs (and windows). Each change
+// bumps a generation; a tab reloads its copy when it is shown with an older
+// one (reloading on every switch would reset its list's scroll).
+let savedGen = 0;
+const savedSeen = new Map(); // tab id → the generation its publisher shows
+
+function savedMessagesChanged(byTab = null) {
+  savedGen++;
+  if (byTab) savedSeen.set(byTab.connId, savedGen); // its copy is what is saved
+  const current = activeTab();
+  if (current) refreshSaved(current);
+}
+
+function refreshSaved(tab) {
+  if (savedSeen.get(tab.connId) === savedGen) return;
+  savedSeen.set(tab.connId, savedGen);
+  return tab.publisher.load();
+}
+
+// ------------------------------------------------------------------ events
+
+api.onMessages((batch) => tabOf(batch.connId)?.ingestBatch(batch));
+api.onStatus((event) => tabOf(event.connId)?.onStatus(event.status));
+api.onWarning((event) => tabOf(event.connId)?.onWarning(event.message));
+api.onActivateTab(({ connId }) => activate(connId)); // another window opened a profile this one has
+api.onTabExport(
+  (request) => exportTab(request),
+  (request) => tabExported(request),
+);
+api.onTabDragging((drag) => strip.setDragging(drag));
+api.onTabImport((request) => importTab(request));
+
+// Hidden tabs record but are not drawn; message rates count for every tab.
+setInterval(() => activeTab()?.render(), RENDER_INTERVAL_MS);
+setInterval(() => {
+  for (const tab of tabs.values()) tab.tickRate();
+}, RATE_INTERVAL_MS);
 
 // The main process asks for this before closing the window.
 api.onFlush(async () => {
-  await Promise.allSettled([connections.flush(), plots.flushSave()]);
+  sendReport();
+  await Promise.allSettled([connections.flush(), ...stripTabs().map((t) => t.flush())]);
   api.flushed();
 });
 
 api.onMenu((action) => {
   if (updates.installing()) return; // nothing opens over the Installing dialog
-  if (document.querySelector('.modal-overlay') && action !== 'connections') return;
-  ACTION_HANDLERS[action]?.();
+  if (document.querySelector('.modal-overlay')) return;
+  handlerFor(action)?.();
 });
 
 // Another window saved shared data: pick up its changes.
 api.onStoreChanged(async (name) => {
-  if (name === 'profiles') await connections.reload();
-  else if (name === 'savedMessages') await publisher.load();
-  else if (name === 'plotTabs') await plots.reload();
+  if (name === 'profiles') {
+    await connections.reload();
+    checkTabs();
+  }
+  else if (name === 'savedMessages') savedMessagesChanged();
   else if (name === 'settings') applySettings(normalizeSettings(await api.storeGet('settings')));
 });
 
@@ -351,174 +448,123 @@ window.addEventListener('unhandledrejection', (e) => toast(`Unexpected error: ${
 
 // ------------------------------------------------------------------ chrome
 
-$('#btn-connections').addEventListener('click', () => connections.open());
-$('#btn-disconnect').addEventListener('click', () => api.disconnect());
-$('#btn-subscriptions').addEventListener('click', showSubscriptions);
-
-function showSubscriptions() {
-  if (status.state !== 'connected') return toast('Connect first to change subscriptions', 'error');
-  openSubscriptions({
-    api,
-    profileName: activeProfile?.name,
-    onSaved: (subs) => activeProfile && connections.setSubscriptions(activeProfile.id, subs),
-  });
-}
-$('#btn-pause').addEventListener('click', () => {
-  paused = !paused;
-  $('#btn-pause').textContent = paused ? 'Resume' : 'Pause';
-  $('#btn-pause').classList.toggle('on', paused);
-  if (!paused && pauseQueue.length) {
-    const q = pauseQueue;
-    pauseQueue = [];
-    pauseBytes = 0;
-    ingest(q);
-  }
-});
-$('#btn-clear').addEventListener('click', clearTree);
 $('#btn-settings').addEventListener('click', () => showSettings());
 const updates = initUpdateButton(api, $('#btn-update'));
 
-async function showSettings(tab) {
-  const next = await openSettings(api, settings, { tab, openUpdatePanel: (state) => updates.openPanel(state) });
+async function showSettings(page) {
+  const next = await openSettings(api, settings, { tab: page, openUpdatePanel: (state) => updates.openPanel(state) });
   if (next) applySettings(next);
-}
-$('#btn-collapse-all').addEventListener('click', () => {
-  tree.setExpandedRecursive(tree.root, false);
-  treeView.refresh();
-});
-
-let filterTimer;
-const applyFilter = () => treeView.setFilter($('#tree-filter').value, $('#filter-values').checked);
-$('#tree-filter').addEventListener('input', () => {
-  clearTimeout(filterTimer);
-  filterTimer = setTimeout(applyFilter, 150);
-});
-$('#tree-filter').addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    $('#tree-filter').value = '';
-    applyFilter();
-  }
-  if (e.key === 'ArrowDown') $('#tree-scroll').focus();
-});
-$('#filter-values').addEventListener('change', applyFilter);
-
-for (const tab of document.querySelectorAll('.right-tabs .tab')) {
-  tab.addEventListener('click', () => showTab(tab.dataset.tab));
-}
-let currentTab = 'inspector';
-function showTab(name) {
-  currentTab = name;
-  for (const t of document.querySelectorAll('.right-tabs .tab')) t.classList.toggle('active', t.dataset.tab === name);
-  $('#viewer-host').hidden = name !== 'inspector';
-  $('#plots-host').hidden = name !== 'plots';
-  plots.setVisible(name === 'plots');
-}
-
-function toggleMaximize(force) {
-  const on = $('#layout').classList.toggle('max-viewer', force);
-  viewer.setMaximized(on);
-  if (on) showTab('inspector');
 }
 
 // ------------------------------------------------------------------ keyboard
 
-// What each shortcut does (see keys.js; rebindable in Settings → Keyboard).
-const ACTION_HANDLERS = {
-  connections: () => connections.open(),
-  subscriptions: () => showSubscriptions(),
+// Shortcuts of the window (see keys.js; rebindable in Settings → Keyboard).
+// The others act on the active tab (ConnectionTab.handlerFor).
+const goTo = (id) => id && activate(id);
+const WINDOW_ACTIONS = {
+  // A tab that connected belongs to its profile: another broker gets a new
+  // tab. A picker already shows the dialog.
+  connections: () => (activeTab()?.mode === 'picker' ? connections.focus() : newTab()),
+  newTab: () => newTab(),
+  closeTab: () => closeTab(order.activeId),
+  reopenTab: () => reopenClosed(),
+  nextTab: () => goTo(order.next(1)),
+  prevTab: () => goTo(order.next(-1)),
+  nextTabAlt: () => goTo(order.next(1)),
+  prevTabAlt: () => goTo(order.next(-1)),
+  goToLastTab: () => goTo(order.last()),
+  ...Object.fromEntries([1, 2, 3, 4, 5, 6, 7, 8].map((n) => [`goToTab${n}`, () => goTo(order.nth(n))])),
   newWindow: () => api.newWindow(),
   settings: () => showSettings(),
-  find: (e) => {
-    if (e?.target?.closest?.('.viewer')) return viewer.focusSearch();
-    $('#tree-filter').focus();
-    $('#tree-filter').select();
-  },
-  publish: (e) => !e?.repeat && publisher.publish(),
-  maximize: () => toggleMaximize(),
-  tabInspector: () => showTab('inspector'),
-  tabPlots: () => showTab('plots'),
-  newPlot: () => {
-    showTab('plots');
-    plots.openPicker();
-  },
-  pause: () => $('#btn-pause').click(),
-  // Space: the Plots tab freezes its time axis, the inspector holds its message.
-  hold: (e) => {
-    if (e?.repeat) return;
-    if (currentTab === 'plots') plots.toggleFreeze();
-    else viewer.toggleLive();
-  },
-  reset: (e) => !e?.repeat && reloadSession(),
-  clear: () => $('#btn-clear').click(),
   keyboardSettings: () => showSettings('keyboard'),
 };
+const handlerFor = (action) => WINDOW_ACTIONS[action] || activeTab()?.handlerFor(action);
 
+// Esc closes a New connection tab (not the window's only one) wherever the
+// focus is, unless a menu, the update panel or a dialog is open: Esc closes
+// that. Caught before anything else sees it, while those are still open.
+document.addEventListener(
+  'keydown',
+  (e) => {
+    if (e.key !== 'Escape' || e.isComposing || menuOpen() || updates.panelOpen() || document.querySelector('.modal-overlay')) return;
+    if (!connections.cancel()) return;
+    e.preventDefault();
+    e.stopPropagation();
+  },
+  true,
+);
+
+// The connection dialog is part of its tab, not a dialog over the window, so
+// shortcuts work in it (its fields keep their plain keys).
 const isPointerFocused = pointerFocus(document);
 document.addEventListener('keydown', (e) => {
   if (document.querySelector('.modal-overlay')) return; // dialogs handle their own keys
-  if (e.key === 'Escape' && $('#layout').classList.contains('max-viewer')) return toggleMaximize(false);
-  if (e.key === 'Escape' && currentTab === 'plots' && plots.handleEscape()) return;
+  if (e.key === 'Escape' && activeTab()?.handleEscape()) return;
   const combo = comboFromEvent(e);
   const action = combo && keyIndex.get(combo);
-  if (!action || !ACTION_HANDLERS[action]) return;
+  const handler = action && handlerFor(action);
+  if (!handler) return;
   if (keyBelongsToTarget(combo, e.target, isPointerFocused(e.target))) return; // e.g. typing, or Space pressing a focused button
   if (action === 'publish' && !e.target.closest?.('.publisher')) return;
   e.preventDefault();
-  ACTION_HANDLERS[action](e);
-});
-
-// A narrow window puts the tree above the inspector (styles.css), so the same
-// handle then resizes the tree's height, which is remembered separately.
-const stacked = matchMedia('(max-width: 899px)');
-splitter($('#split-main'), {
-  axis: 'x',
-  storageKey: 'mqttscope.treeWidth',
-  initial: 460,
-  min: 220,
-  max: () => window.innerWidth - 420,
-  active: () => !stacked.matches,
-  apply: (px) => $('#layout').style.setProperty('--tree-w', `${px}px`),
-});
-splitter($('#split-main'), {
-  axis: 'y',
-  storageKey: 'mqttscope.treeHeight',
-  initial: Math.round(window.innerHeight * 0.35),
-  min: 80,
-  max: () => $('#layout').clientHeight - 260,
-  active: () => stacked.matches,
-  apply: (px) => $('#layout').style.setProperty('--tree-h', `${px}px`),
-});
-splitter($('#split-right'), {
-  axis: 'y',
-  storageKey: 'mqttscope.publisherHeight',
-  initial: 300,
-  min: 140,
-  max: () => window.innerHeight - 260,
-  invert: true,
-  apply: (px) => $('#right').style.setProperty('--pub-h', `${px}px`),
+  handler(e);
 });
 
 // ------------------------------------------------------------------ start
 
-(async () => {
-  const [saved] = await Promise.all([api.storeGet('settings').catch(() => null), connections.load(), publisher.load(), plots.load()]);
-  applySettings(normalizeSettings(saved));
-  const s = await api.status();
-  if (s.state === 'disconnected' && !updates.installing()) connections.open();
-})();
+const [saved, init] = await Promise.all([api.storeGet('settings').catch(() => null), api.initialTabs().catch(() => null), connections.load()]);
+windowId = init?.windowId ?? null;
+applySettings(normalizeSettings(saved));
+markStarted();
+// The tabs of the last run, else a New connection tab; a window that a tab
+// moves into gets none of its own.
+try {
+  if (init?.tabs?.length) await restoreTabs(init);
+} catch (err) {
+  toast(`Could not reopen the tabs: ${err.message}`, 'error');
+}
+if (!tabs.size && !init?.adopt) await openTab();
 
-// Exposed for end-to-end tests and debugging from DevTools.
+// Exposed for end-to-end tests and debugging from DevTools. The views are
+// the active tab's.
 window.__mqttscope = {
-  tree,
-  treeView,
-  viewer,
-  plots,
-  publisher,
-  connections,
-  get status() {
-    return status;
+  get tree() {
+    return activeTab()?.tree;
   },
+  get treeView() {
+    return activeTab()?.treeView;
+  },
+  get viewer() {
+    return activeTab()?.viewer;
+  },
+  get plots() {
+    return activeTab()?.plots;
+  },
+  get publisher() {
+    return activeTab()?.publisher;
+  },
+  get status() {
+    return activeTab()?.status;
+  },
+  connections,
   get settings() {
     return settings;
+  },
+  shell: {
+    get windowId() {
+      return windowId;
+    },
+    get tabs() {
+      return stripTabs();
+    },
+    get active() {
+      return activeTab();
+    },
+    openTab,
+    closeTab,
+    closeTabs,
+    reopenClosed,
+    activate,
+    reimport,
   },
 };

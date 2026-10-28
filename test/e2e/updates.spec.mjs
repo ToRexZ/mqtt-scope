@@ -55,10 +55,9 @@ async function clickMenu(app, menuLabel, itemLabel) {
     [menuLabel, itemLabel],
   );
 }
-// Settings → Check for updates, as a user does it. (The connection dialog is
-// modal and starts open in a window without a connection.)
+// Settings → Check for updates, as a user does it. (A New connection tab's
+// dialog is part of the tab, not modal: Settings opens over it.)
 async function checkForUpdates(page) {
-  if (await page.locator('.conn-dialog .modal-close').count()) await closeConnectionDialog(page);
   if (!(await page.locator('.modal.settings').count())) await page.locator('#btn-settings').click();
   await page.locator('.modal.settings .settings-footer').getByRole('button', { name: 'Check for updates' }).click();
 }
@@ -353,12 +352,6 @@ const panelButton = (page, name) => panel(page).getByRole('button', { name, exac
 const panelButtons = (page) => panel(page).getByRole('button');
 const notes = (page) => panel(page).locator('.update-notes');
 
-// A window without a connection starts with the (modal) connection dialog.
-async function closeConnectionDialog(page) {
-  await page.locator('.conn-dialog .modal-close').click();
-  await expect(page.locator('.modal-overlay')).toHaveCount(0);
-}
-
 async function openPanel(page) {
   await updateButton(page).click();
   await expect(panel(page)).toBeVisible();
@@ -439,15 +432,16 @@ async function recordButton(page) {
 test('notice: button, panel, Later keeps it, Skip hides it until a newer release', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9', 'Fixed things'));
   const { app, page, errors } = await env.launch({ env: overrides(server) });
-  await closeConnectionDialog(page);
   const button = updateButton(page);
 
   // A quiet button beside Settings; the arrow is decoration, not part of its name.
   await expect(button).toHaveText('↑ Update 9.9.9');
   await expect(page.getByRole('button', { name: 'Update 9.9.9', exact: true })).toBeVisible();
   const box = async (sel) => page.locator(sel).boundingBox();
-  const [clear, update, settings] = [await box('#btn-clear'), await button.boundingBox(), await box('#btn-settings')];
-  expect(clear.x + clear.width).toBeLessThanOrEqual(update.x);
+  // After the tab strip and its +. (Clear and the other connection buttons
+  // are in the tab's toolbar, below.)
+  const [plus, update, settings] = [await box('.tab-new'), await button.boundingBox(), await box('#btn-settings')];
+  expect(plus.x + plus.width).toBeLessThanOrEqual(update.x);
   expect(update.x + update.width).toBeLessThanOrEqual(settings.x);
   expect(update.y).toBe(settings.y);
   await expect(button).toHaveAttribute('aria-expanded', 'false');
@@ -474,11 +468,12 @@ test('notice: button, panel, Later keeps it, Skip hides it until a newer release
   await expect(button).toBeFocused();
 
   // So does a click anywhere else, which keeps its own focus.
+  const field = page.locator('.conn-dialog [name="name"]');
   await button.click();
   await expect(panel(page)).toBeVisible();
-  await page.locator('#tree-filter').click();
+  await field.click();
   await expect(panel(page)).toBeHidden();
-  await expect(page.locator('#tree-filter')).toBeFocused();
+  await expect(field).toBeFocused();
   // The button toggles it as well.
   await button.click();
   await expect(panel(page)).toBeVisible();
@@ -501,12 +496,12 @@ test('notice: button, panel, Later keeps it, Skip hides it until a newer release
   await expect(button).toBeHidden();
 
   // A newer release shows it again, quietly: no panel, and the user keeps typing where they were.
-  await page.locator('#tree-filter').fill('robot');
+  await field.fill('robot');
   server.setRelease(release('9.9.10', 'More fixes'));
   await tick(app);
   await expect(button).toHaveText('↑ Update 9.9.10');
   await expect(panel(page)).toBeHidden();
-  await expect(page.locator('#tree-filter')).toBeFocused();
+  await expect(field).toBeFocused();
 
   // Settings → Check for updates opens the panel in the window that asked.
   await checkForUpdates(page);
@@ -574,7 +569,6 @@ async function recordPanel(page) {
 test('Restart to update on the top bar restarts at once when nothing is connected', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9'));
   const { app, page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
-  await closeConnectionDialog(page);
   const button = updateButton(page);
   await expect(button).toHaveAttribute('aria-haspopup', 'dialog'); // opens the panel while offered
   await page.evaluate(() => window.api.updateDownload());
@@ -659,9 +653,7 @@ test('Restart to update on the top bar asks in the panel while a broker is conne
 test('Restart to update: every window shows the Installing dialog, its bar moving, then the install starts', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9'));
   const { app, page, errors } = await env.launch({ env: overrides(server, { MQTTSCOPE_UPDATE_KIND: 'nsis', MQTTSCOPE_UPDATE_FAKE: '1' }) });
-  await closeConnectionDialog(page);
   const second = await newWindow(app);
-  await closeConnectionDialog(second);
   await second.emulateMedia({ reducedMotion: 'reduce' });
   await page.evaluate(() => window.api.updateDownload());
   for (const p of [page, second]) await expect(updateButton(p)).toHaveText('Restart to update');
@@ -689,23 +681,30 @@ test('Restart to update: every window shows the Installing dialog, its bar movin
 
   await expect.poll(() => installed(app)).toBe(true);
   // The real app now quits; this one stays, and so does the dialog, also in a
-  // window opened now (without its connection dialog). Keys stay in it.
+  // window opened now (over its New connection tab's dialog). Keys stay in it.
   const third = await newWindow(app);
   await expect(installingDialog(third)).toBeVisible();
   await expect(installingDialog(third)).toBeFocused();
-  await expect(third.locator('.conn-dialog')).toHaveCount(0);
+  await expect(third.locator('.conn-dialog')).toBeAttached();
+  const covered = await third.locator('.conn-dialog .conn-item.active').evaluate((item) => {
+    const r = item.getBoundingClientRect();
+    return !!document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('.installing-overlay');
+  });
+  expect(covered).toBe(true);
   await page.keyboard.press('Escape');
   await page.keyboard.press('Tab');
   for (const p of [page, second]) await expect(installingDialog(p)).toBeVisible();
   await expect(installingDialog(page)).toBeFocused();
 
-  // Nothing opens over it or takes its focus: neither Connections… (the menu
-  // action allowed over other dialogs) nor Check for updates (called directly: Settings is under the dialog).
-  await clickMenu(app, 'File', 'Connections…');
+  // Nothing opens over it or takes its focus: neither New Connection Tab…
+  // (the menu action allowed over other dialogs) nor Check for updates
+  // (called directly: Settings is under the dialog).
+  await clickMenu(app, 'File', 'New Connection Tab…');
   await page.evaluate(() => window.api.checkForUpdates()); // the Settings button cannot be reached under the dialog
   await expect.poll(() => server.requests()).toBe(2);
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 300)));
-  await expect(page.locator('.conn-dialog')).toHaveCount(0);
+  await expect(page.locator('.conn-tab')).toHaveCount(1);
+  await expect(page.locator('.modal-overlay')).toHaveCount(1); // the Installing dialog's
   await expect(panel(page)).toBeHidden();
   await expect(toast(page)).toHaveCount(0);
   await expect(installingDialog(page)).toBeFocused();
@@ -718,7 +717,6 @@ test('Restart to update: every window shows the Installing dialog, its bar movin
 test('the Installing dialog keeps moving while the main process is busy', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9'));
   const { app, page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
-  await closeConnectionDialog(page);
   await page.evaluate(() => window.api.updateDownload());
   await expect(updateButton(page)).toHaveText('Restart to update');
   await updateButton(page).click();
@@ -787,7 +785,6 @@ test('started after an update (--updated), the first window comes to the front, 
 test('AppImage: the Installing dialog says the app restarts', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9'));
   const { page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
-  await closeConnectionDialog(page);
   await page.evaluate(() => window.api.updateDownload());
   await expect(updateButton(page)).toHaveText('Restart to update');
   await updateButton(page).click();
@@ -798,7 +795,6 @@ test('AppImage: the Installing dialog says the app restarts', async ({ env }) =>
 test('a failed install from the panel closes the Installing dialog; the panel shows the error and Retry', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9'));
   const { app, page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
-  await closeConnectionDialog(page);
   // Opened while offered: once downloaded, the top-bar button restarts instead.
   await openPanel(page);
   await panelButton(page, 'Download update').click();
@@ -824,7 +820,6 @@ test('manual build opens the release page; pacman build shows the command', asyn
   // Builds that cannot update themselves: Download opens that version's release page.
   const manual = await env.launch({ env: overrides(server) });
   const openedManual = await stubOpenExternal(manual.app);
-  await closeConnectionDialog(manual.page);
   await openPanel(manual.page);
   await expect(panelButtons(manual.page)).toHaveText(['Download', 'Later', 'Skip this version']);
   await panelButton(manual.page, 'Download').click();
@@ -835,7 +830,6 @@ test('manual build opens the release page; pacman build shows the command', asyn
   // pacman: the command that builds this exact version, to copy.
   const { app, page, errors } = await env.launch({ env: overrides(server, { MQTTSCOPE_UPDATE_KIND: 'pacman' }) });
   const opened = await stubOpenExternal(app);
-  await closeConnectionDialog(page);
   await expect(updateButton(page)).toHaveText('↑ Update 9.9.9');
   await openPanel(page);
   await expect(panel(page)).toContainText('Installed by the package manager. Update with:');
@@ -854,7 +848,6 @@ test('release notes are shown as text', async ({ env }) => {
   const body = '<img src=x onerror=alert(1)>\n- item';
   const server = await env.releaseServer(release('9.9.9', body));
   const { app, page, errors } = await env.launch({ env: overrides(server) });
-  await closeConnectionDialog(page);
   await openPanel(page);
   expect(await notes(page).evaluate((n) => n.textContent)).toBe(body);
   await expect(panel(page).locator('img')).toHaveCount(0);
@@ -881,7 +874,6 @@ test('a new window shows the current update state', async ({ env }) => {
 
   // A download started in one window shows in all of them, and in one opened mid-download.
   await holdDownloads(app);
-  await closeConnectionDialog(second);
   await openPanel(second);
   await panelButton(second, 'Download update').click();
   for (const p of [page, second]) await expect(updateButton(p)).toHaveText('Downloading 50%');
@@ -900,7 +892,6 @@ test('turning the setting off stops automatic checks; the Settings button still 
   const server = await env.releaseServer(release(VERSION));
   const { app, page, userData, errors } = await env.launch({ env: overrides(server) });
   await expect.poll(() => server.requests()).toBe(1); // the startup check
-  await closeConnectionDialog(page);
 
   await page.locator('#btn-settings').click();
   const dialog = page.locator('.modal.settings');
@@ -940,7 +931,6 @@ test('turning the setting off stops automatic checks; the Settings button still 
 test('a failed download shows its error in the panel, and Retry can succeed', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9'));
   const { app, page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
-  await closeConnectionDialog(page);
   await app.evaluate(() => (globalThis.__updateDownloadError = 'net::ERR_CONNECTION_RESET'));
   await openPanel(page);
   await panelButton(page, 'Download update').click();
@@ -983,7 +973,6 @@ test('Check for updates answers latest, failure and development builds with a to
 test('Escape closes the panel and returns focus to the button', async ({ env }) => {
   const server = await env.releaseServer(release('9.9.9'));
   const { page, errors } = await env.launch({ env: overrides(server) });
-  await closeConnectionDialog(page);
   const button = updateButton(page);
 
   // Keyboard only: Enter opens it, Tab goes into it (it follows the button), Escape closes it.
@@ -1007,12 +996,42 @@ test('Escape closes the panel and returns focus to the button', async ({ env }) 
   await expect(button).toBeFocused();
 
   // Escape elsewhere closes it without taking focus from where it is.
+  const field = page.locator('.conn-dialog [name="name"]');
   await button.click();
   await expect(panel(page)).toBeVisible();
-  await page.locator('#tree-filter').focus();
+  await field.focus();
   await page.keyboard.press('Escape');
   await expect(panel(page)).toBeHidden();
-  await expect(page.locator('#tree-filter')).toBeFocused();
+  await expect(field).toBeFocused();
+  expect(errors).toEqual([]);
+});
+
+test('in a New connection tab that Escape would close, Escape closes the open panel first', async ({ env }) => {
+  const server = await env.releaseServer(release('9.9.9'));
+  const { page, errors } = await env.launch({ env: overrides(server) });
+  const button = updateButton(page);
+  const tabs = page.locator('.conn-tab');
+  await expect(button).toHaveText('↑ Update 9.9.9');
+  await page.locator('.tab-new').click();
+  await expect(tabs).toHaveCount(2);
+
+  // From the button, and from the tab's dialog: the panel closes, the tab stays.
+  await button.click();
+  await expect(panel(page)).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await expect(tabs).toHaveCount(2);
+  const field = page.locator('.conn-dialog [name="name"]');
+  await button.click();
+  await expect(panel(page)).toBeVisible();
+  await field.focus();
+  await page.keyboard.press('Escape');
+  await expect(panel(page)).toBeHidden();
+  await expect(tabs).toHaveCount(2);
+  await expect(field).toBeFocused();
+  // With the panel closed, Escape closes the tab.
+  await page.keyboard.press('Escape');
+  await expect(tabs).toHaveCount(1);
   expect(errors).toEqual([]);
 });
 
@@ -1021,7 +1040,6 @@ test('in a narrow window the button and panel stay inside the window', async ({ 
   const server = await env.releaseServer(release('9.9.9', long));
   const { page, errors } = await env.launch({ env: overrides(server, SELF_UPDATING) });
   await page.setViewportSize({ width: 598, height: 1300 });
-  await closeConnectionDialog(page);
 
   await expect(updateButton(page)).toBeInViewport({ ratio: 1 });
   await openPanel(page);
@@ -1057,7 +1075,6 @@ test('Settings → Check for updates: latest and errors are toasts above the ope
   const server = await env.releaseServer(release(VERSION));
   const { page, errors } = await env.launch({ env: overrides(server) });
   await expect.poll(() => server.requests()).toBe(1);
-  await closeConnectionDialog(page);
   await page.locator('#btn-settings').click();
   await settingsDialog(page).locator('[name="historyLimit"]').fill('7');
 
@@ -1081,7 +1098,6 @@ test('Settings → Check for updates: a newer version closes an unchanged dialog
   const server = await env.releaseServer(release(VERSION));
   const { page, errors } = await env.launch({ env: overrides(server) });
   await expect.poll(() => server.requests()).toBe(1);
-  await closeConnectionDialog(page);
   await expect(updateButton(page)).toBeHidden();
   server.setRelease(release('9.9.9', 'Fresh notes'));
 
@@ -1097,7 +1113,6 @@ test('Settings → Check for updates: with unsaved edits a newer version is a to
   const server = await env.releaseServer(release(VERSION));
   const { page, errors } = await env.launch({ env: overrides(server) });
   await expect.poll(() => server.requests()).toBe(1);
-  await closeConnectionDialog(page);
   server.setRelease(release('9.9.9'));
 
   await page.locator('#btn-settings').click();
@@ -1126,7 +1141,6 @@ test('an announced check (the macOS menu item) shows its answer in the window th
   const server = await env.releaseServer(release(VERSION));
   const { app, page, errors } = await env.launch({ env: overrides(server) });
   await expect.poll(() => server.requests()).toBe(1);
-  await closeConnectionDialog(page);
   const announce = () => app.evaluate(() => globalThis.__checkForUpdatesNow({ announce: true }));
 
   await announce();

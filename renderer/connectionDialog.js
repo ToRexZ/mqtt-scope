@@ -1,26 +1,63 @@
 // Connection manager: a list of saved broker profiles and an editor for the
-// selected one. Edits are saved automatically.
+// selected one. Edits are saved automatically. One per window: the shell
+// draws it in the active New connection tab (mount), and it shows that tab's
+// connection status.
 
-import { el, button, toast, overlayHost } from './ui.js';
+import { el, button, toast } from './ui.js';
 import { comboFromEvent, isTypingTarget } from './keys.js';
 import { DEFAULT_PORTS, blankProfile, parseSubscriptions, formatSubscriptions, newId } from './profiles.js';
 
 
 export class ConnectionDialog {
-  // opts: api, onConnect(profile)
+  // opts: api, getBinding(id), onProfilesChanged() — the list was loaded,
+  // reloaded or edited
   constructor(opts) {
     this.opts = opts;
     this.api = opts.api;
     this.profiles = [];
     this.selectedId = null;
     this.status = null;
+    this.openIds = new Set(); // profiles open in a tab, in any window
+    this.seenHosts = new WeakSet(); // the tabs it has been drawn in
+    this.host = null; // the tab element it is drawn in
+    this.mounted = null; // mount()'s options: closable, failed, onConnect(profile), onCancel()
+    this.tabProfileId = undefined; // that tab's profile when last mounted
+    this.box = el('div', 'conn-dialog');
+    this.box.addEventListener('keydown', (e) => this.handleKey(e));
   }
 
   async load() {
     this.security = await this.api.profileSecurity().catch(() => null);
     this.profiles = await this.api.listProfiles();
-    if (!this.profiles.length) this.profiles = [blankProfile('Local broker')];
-    this.selectedId = this.profiles[0].id;
+    // One to start with, saved before it connects (main keeps plots only for
+    // saved profiles).
+    if (!this.profiles.length) {
+      this.profiles = [blankProfile('Local broker')];
+      this.dirty = true;
+    }
+    // Registered before the set is read, so no change falls between the two.
+    this.api.onOpenProfilesChanged((ids) => this.setOpenProfiles(ids));
+    this.setOpenProfiles(await this.api.openProfiles());
+    this.selectedId = this.firstClosed().id;
+    this.opts.onProfilesChanged?.();
+  }
+
+  // The first profile that is not open, else the first.
+  firstClosed() {
+    return this.profiles.find((p) => !this.openIds.has(p.id)) || this.profiles[0];
+  }
+
+  // Delete follows what is open, without redrawing the form.
+  setOpenProfiles(ids) {
+    this.openIds = new Set(ids);
+    this.renderDelete();
+  }
+
+  renderDelete() {
+    if (!this.deleteBtn) return;
+    const open = this.openIds.has(this.selectedId);
+    this.deleteBtn.disabled = open;
+    this.deleteBtn.title = open ? 'Close its tab first' : 'Delete this connection';
   }
 
   // Picks up changes saved by another window, unless this one has unsaved edits.
@@ -28,7 +65,8 @@ export class ConnectionDialog {
     if (this.dirty) return;
     this.profiles = await this.api.listProfiles();
     if (!this.profiles.some((p) => p.id === this.selectedId)) this.selectedId = this.profiles[0]?.id ?? null;
-    if (this.overlay) this.render();
+    if (this.host) this.render(this.box.contains(document.activeElement) ? 'list' : null);
+    this.opts.onProfilesChanged?.();
   }
 
   setSubscriptions(id, subs) {
@@ -44,6 +82,7 @@ export class ConnectionDialog {
 
   persist() {
     this.dirty = true;
+    this.opts.onProfilesChanged?.();
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.flush(), 300);
   }
@@ -61,23 +100,65 @@ export class ConnectionDialog {
     }
   }
 
-  isOpen() {
-    return !!this.overlay;
+  isMounted() {
+    return !!this.host;
   }
 
-  open() {
-    if (this.overlay) return;
-    this.overlay = el('div', 'modal-overlay');
-    this.box = el('div', 'modal conn-dialog');
-    this.overlay.append(this.box);
-    overlayHost().append(this.overlay);
-    this.overlay.addEventListener('keydown', (e) => this.handleKey(e));
-    this.render();
+  // Draws the dialog in `host`, the content of a New connection tab; mounting
+  // in the same tab again takes the new options. The tab's profile is
+  // selected when the dialog is drawn in it and when the tab gets another one
+  // (Connect, or a tab reopened for its profile), not while the user browses
+  // the list. opts: closable (× and Esc call onCancel), failed (the tab's last
+  // attempt failed: Connect reads Retry for its profile), onConnect(profile),
+  // onCancel(), profileId, focus (false leaves the focus where it is, e.g.
+  // in a dialog over the window).
+  mount(host, { profileId = null, focus = true, ...opts }) {
+    const moved = this.host !== host;
+    if (moved) {
+      this.unmount();
+      this.host = host;
+      host.append(this.box);
+    }
+    this.mounted = opts;
+    const select = profileId !== this.tabProfileId && profileId !== this.selectedId && this.profiles.some((p) => p.id === profileId);
+    this.tabProfileId = profileId;
+    if (select) this.selectedId = profileId;
+    // A fresh picker starts on a profile it could connect, not one that is open.
+    else if (moved && profileId == null && !this.seenHosts.has(host) && this.openIds.has(this.selectedId)) this.selectedId = this.firstClosed().id;
+    this.seenHosts.add(host);
+    if (moved) this.render(focus ? 'list' : null);
+    else if (select) this.render(this.box.contains(document.activeElement) ? 'list' : null);
+    else {
+      this.renderClose();
+      this.renderConnectLabel();
+    }
+  }
+
+  // Its tab was hidden, closed or connected.
+  unmount() {
+    if (!this.host) return;
+    this.flush();
+    this.box.remove();
+    this.host = null;
+    this.mounted = null;
+    this.tabProfileId = undefined;
+  }
+
+  // Mod+K in a New connection tab.
+  focus() {
+    this.box.querySelector('.conn-item.active')?.focus();
+  }
+
+  // × and Esc (the shell's, see app.js): closes its tab, unless that is the
+  // window's only one. Returns whether it did.
+  cancel() {
+    if (!this.host || !this.mounted?.closable) return false;
+    this.mounted.onCancel();
+    return true;
   }
 
   // Enter (rebindable) connects; arrow keys move through the list.
   handleKey(e) {
-    if (e.key === 'Escape') return this.close();
     const t = e.target;
     const connectKey = this.opts.getBinding?.('connectSelected') ?? 'Enter';
     if (connectKey && comboFromEvent(e) === connectKey) {
@@ -98,16 +179,9 @@ export class ConnectionDialog {
     }
   }
 
-  close() {
-    this.flush();
-    this.overlay?.remove();
-    this.overlay = null;
-  }
-
+  // The connection status of the tab it is drawn in.
   onStatus(status) {
     this.status = status;
-    if (!this.overlay) return;
-    if (status.state === 'connected') return this.close();
     this.renderStatus();
   }
 
@@ -121,9 +195,11 @@ export class ConnectionDialog {
   }
 
   // focus: 'list' puts focus on the selected connection (so Enter connects),
-  // 'name' on the name field (for a new connection).
+  // 'name' on the name field (for a new connection), null leaves it.
   render(focus = 'list') {
     this.box.textContent = '';
+    this.connectBtn = null;
+    this.deleteBtn = null;
     const side = el('div', 'conn-list');
     const listHead = el('div', 'conn-list-head');
     listHead.append(
@@ -154,10 +230,25 @@ export class ConnectionDialog {
     const p = this.selected;
     if (p) this.renderForm(form, p);
 
-    const close = button('×', 'Close (Esc)', () => this.close(), 'btn icon modal-close');
-    this.box.append(side, form, close);
+    this.box.append(side, form);
+    this.renderClose();
     if (focus === 'name') form.querySelector('input[name="name"]')?.select();
-    else side.querySelector('.conn-item.active')?.focus();
+    else if (focus === 'list') side.querySelector('.conn-item.active')?.focus();
+  }
+
+  // × only where the tab may be cancelled.
+  renderClose() {
+    const shown = this.box.querySelector(':scope > .modal-close');
+    if (!this.mounted?.closable) return shown?.remove();
+    if (!shown) this.box.append(button('×', 'Close this tab (Esc)', () => this.cancel(), 'btn icon modal-close'));
+  }
+
+  // Retry where the tab's last attempt with the selected profile failed.
+  renderConnectLabel() {
+    if (!this.connectBtn) return;
+    const retry = !!this.mounted?.failed && this.selectedId === this.tabProfileId;
+    this.connectBtn.textContent = retry ? 'Retry' : 'Connect';
+    this.connectBtn.title = retry ? 'Try connecting to this broker again' : 'Connect to this broker';
   }
 
   renderForm(form, p) {
@@ -298,7 +389,7 @@ export class ConnectionDialog {
     this.statusEl = el('div', 'conn-status-line');
     const actions = el('div', 'modal-actions');
     actions.append(
-      button('Delete', 'Delete this connection', () => this.remove(p), 'btn danger'),
+      (this.deleteBtn = button('Delete', 'Delete this connection', () => this.remove(p), 'btn danger')),
       button('Duplicate', 'Copy this connection', () => {
         const copy = { ...structuredClone(p), id: newId(), name: `${p.name} (copy)` };
         this.profiles.push(copy);
@@ -307,11 +398,13 @@ export class ConnectionDialog {
         this.render('name');
       }),
       el('span', 'spacer'),
-      button('Connect', 'Connect to this broker', () => this.connect(), 'btn primary connect-btn'),
+      (this.connectBtn = button('Connect', 'Connect to this broker', () => this.connect(), 'btn primary connect-btn')),
     );
     form.append(el('h3', '', 'Connection'), grid, tlsBox, this.statusEl, actions);
     syncProtocol();
     this.renderStatus();
+    this.renderConnectLabel();
+    this.renderDelete();
   }
 
   refreshListItem(p) {
@@ -323,20 +416,26 @@ export class ConnectionDialog {
   }
 
   async remove(p) {
+    if (this.openIds.has(p.id)) return; // the button is disabled, but its tab may have opened since
     if (!(await this.api.confirm({ message: `Delete connection “${p.name}”?`, okLabel: 'Delete' }))) return;
+    if (this.openIds.has(p.id)) return; // it was opened while the question showed
     this.profiles = this.profiles.filter((x) => x !== p);
     if (!this.profiles.length) this.profiles.push(blankProfile('Local broker'));
-    this.selectedId = this.profiles[0].id;
+    this.selectedId = this.firstClosed().id;
     this.dirty = true;
+    this.opts.onProfilesChanged?.();
     await this.flush();
     this.render();
   }
 
+  // Connects the tab it is drawn in (taken now: the tab may change while the
+  // edits are saved).
   async connect() {
     const p = this.selected;
-    if (!p) return;
+    const target = this.mounted?.onConnect;
+    if (!p || !target) return;
     if (!String(p.host || '').trim()) return toast('Host is required', 'error');
     await this.flush();
-    this.opts.onConnect(p);
+    target(p);
   }
 }

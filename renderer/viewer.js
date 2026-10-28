@@ -6,6 +6,7 @@ import { el, button, showMenu, markMatches, toast } from './ui.js';
 import { iconButton } from './icons.js';
 import {
   decode,
+  plainMessage,
   preview,
   formatBytes,
   formatTime,
@@ -103,10 +104,9 @@ export class MessageViewer {
     this.search = el('input', 'search');
     this.search.placeholder = 'Search message…';
     this.search.spellcheck = false;
-    let searchTimer;
     this.search.addEventListener('input', () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => {
+      clearTimeout(this.searchTimer);
+      this.searchTimer = setTimeout(() => {
         this.query = this.search.value;
         this.hitIndex = 0;
         this.render(true);
@@ -190,6 +190,32 @@ export class MessageViewer {
     this.root.classList.toggle('no-history', !this.showHistory);
   }
 
+  // The view mode, wrapping and history column are shared through
+  // localStorage; another tab may have changed them while this one was hidden.
+  reloadPrefs() {
+    const mode = loadPref('mode', 'tree');
+    const wrap = loadPref('wrap', false);
+    const showHistory = loadPref('history', true);
+    if (showHistory !== this.showHistory) {
+      this.showHistory = showHistory;
+      this.root.classList.toggle('no-history', !showHistory);
+    }
+    if (mode === this.mode && wrap === this.wrap) return;
+    this.mode = mode;
+    this.wrap = wrap;
+    this.render(true);
+  }
+
+  // Stops pending renders and the chart (the tab closed).
+  dispose() {
+    clearTimeout(this.updateTimer);
+    clearTimeout(this.searchTimer);
+    this.updateTimer = null;
+    this.disposeChart?.();
+    this.disposeChart = null;
+    this.root.remove();
+  }
+
   focusSearch() {
     this.search.focus();
     this.search.select();
@@ -248,6 +274,34 @@ export class MessageViewer {
 
   toggleLive() {
     this.pinned = this.pinned ? null : this.current();
+    this.render(true);
+  }
+
+  // What restore() brings back (structured-clone friendly). The held message
+  // is named by its time and its place from the newest, since the restored
+  // history holds copies of the messages; it comes along itself too, for
+  // when it is no longer in the history (trimmed).
+  snapshot() {
+    const h = this.source?.history;
+    return {
+      pinned: this.pinned && { topic: this.source.path, ts: this.pinned.ts, back: h.length - 1 - h.indexOf(this.pinned), message: plainMessage(this.pinned) },
+      expandedByTopic: [...this.expandedByTopic].map(([topic, paths]) => [topic, [...paths]]),
+      plotByTopic: [...this.plotByTopic],
+      query: this.query,
+    };
+  }
+
+  // After show() of the topic that was shown: the held message is looked up
+  // in its history (gone from it, the copy that came along is held).
+  restore(s) {
+    this.expandedByTopic = new Map(s.expandedByTopic.map(([topic, paths]) => [topic, new Set(paths)]));
+    this.plotByTopic = new Map(s.plotByTopic);
+    this.query = this.search.value = s.query;
+    if (s.pinned && this.source?.path === s.pinned.topic) {
+      const h = this.source.history;
+      const at = h[h.length - 1 - s.pinned.back];
+      this.pinned = at?.ts === s.pinned.ts ? at : s.pinned.message;
+    }
     this.render(true);
   }
 

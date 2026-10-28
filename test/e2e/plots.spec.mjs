@@ -11,6 +11,7 @@ import {
   makeUserData,
   profile,
   connect,
+  reconnected,
   rowByPath,
   waitForTopic,
   menu,
@@ -22,7 +23,7 @@ import {
   toast,
   viewerBody,
   viewerTab,
-  waitForFile,
+  waitForLayout,
 } from './fixtures.mjs';
 
 const card = (page, title) => page.locator('.plot-card').filter({ has: page.locator('.plot-title', { hasText: new RegExp(`^${title.replace(/[$.*+?()[\]]/g, '\\$&')}$`) }) });
@@ -183,8 +184,7 @@ test('plots: add from tree and inspector, live values, window, freeze, remove, C
   ]);
 
   // Plot definitions persist.
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => {
-    const d = JSON.parse(b);
+  await waitForLayout(userData, `p${broker.port}`, (d) => {
     const plots = d.tabs?.[0]?.plots || [];
     return plots.length === 2 && plots[0].title === 'Climate' && plots[0].windowSec === 60 && plots[0].series.length === 1;
   });
@@ -193,8 +193,8 @@ test('plots: add from tree and inspector, live values, window, freeze, remove, C
 
   const second = await env.launch({ userData });
   const page2 = second.page;
+  await reconnected(page2); // its tab comes back
   await expect(page2.locator('#plot-count')).toHaveText('2');
-  await connect(page2);
   await plotsTab(page2).click();
   const climate2 = card(page2, 'Climate');
   await expect(climate2.locator('.legend-label')).toHaveText(['m/temp']);

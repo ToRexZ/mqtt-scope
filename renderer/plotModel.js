@@ -6,9 +6,9 @@
 // calls onChange() (the panel saves then). Plot, tab and layout objects
 // handed out are live: read them, but change them only through these methods.
 //
-// Saved as two documents (see plotsDocFrom in plotLayouts.js): toDoc() with
-// the tabs, and legacyDoc(), a copy of the tab on screen in the 0.1 format so
-// an older version opening the same data still finds its plots.
+// Saved as toDoc(), one per profile (main/layoutStore.js). A profile from
+// before 0.4.0 starts with the files of then, which are only read: the tabs
+// (plotTabs) and the 0.1 document (plots); see plotsDocFrom in plotLayouts.js.
 
 import {
   WINDOWS,
@@ -49,15 +49,14 @@ export class PlotModel {
     this.load(doc, { legacy });
   }
 
-  // Replaces the state with saved documents (does not call onChange).
-  // keepActive: stay on the tab on screen when it still exists (another
-  // window saved; each window shows its own tab).
-  load(doc, { legacy = null, keepActive = false } = {}) {
+  // Replaces the state with a profile's saved tabs, or for a profile from
+  // before 0.4.0 with the plotTabs and plots files (legacy) of then (does not
+  // call onChange).
+  load(doc, { legacy = null } = {}) {
     const { tabs, activeTabId, newer } = plotsDocFrom(doc, legacy);
-    const active = this.activeTabId;
     const selected = this.selectedId;
     this.tabs = tabs;
-    this.activeTabId = keepActive && tabs.some((t) => t.id === active) ? active : activeTabId;
+    this.activeTabId = activeTabId;
     // Saved by a newer version: saving from here could lose what it added.
     this.newer = newer;
     for (const t of this.tabs) this.syncTabLayout(t);
@@ -67,12 +66,6 @@ export class PlotModel {
   // The tabs document to save.
   toDoc() {
     return { version: PLOTS_DOC_VERSION, tabs: this.tabs, activeTabId: this.activeTabId, legacyMirror: this.plots };
-  }
-
-  // The 0.1 document to save next to it: the plots of the tab on screen,
-  // marked as written by this version (an older one drops the mark).
-  legacyDoc() {
-    return { plots: this.plots, writtenBy: PLOTS_DOC_VERSION };
   }
 
   // Keeps a tab's arrangement in step with its plots (new plots are added

@@ -81,6 +81,12 @@ export function searchableText(msg) {
   return msg._search;
 }
 
+// The message as received, without the caches above (and hasNumbers' in
+// fields.js): what goes to another window.
+export function plainMessage(m) {
+  return { topic: m.topic, payload: m.payload, qos: m.qos, retain: m.retain, ts: m.ts, props: m.props };
+}
+
 export function formatBytes(n) {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1023.95) return `${(n / 1024).toFixed(1)} KB`;

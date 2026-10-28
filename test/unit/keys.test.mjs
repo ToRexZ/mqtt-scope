@@ -137,6 +137,42 @@ describe('keys the focused element uses itself', () => {
   });
 });
 
+describe('tab shortcuts', () => {
+  test('default shortcuts do not clash', () => {
+    assert.equal(conflicts(resolveBindings({})).size, 0);
+  });
+  test('Ctrl+Tab is Mod+Tab off macOS and Ctrl+Tab on macOS', () => {
+    assert.equal(comboFromEvent({ key: 'Tab', ctrlKey: true }, false), 'Mod+Tab');
+    assert.equal(comboFromEvent({ key: 'Tab', ctrlKey: true }, true), 'Ctrl+Tab');
+  });
+  test('tab shortcuts have menu accelerators', () => {
+    assert.equal(toAccelerator('Mod+Shift+T'), 'CmdOrCtrl+Shift+T');
+    assert.equal(toAccelerator('Mod+PageDown'), 'CmdOrCtrl+PageDown');
+  });
+  test('a saved custom binding for the Plots tab is kept', () => {
+    assert.equal(resolveBindings(normalizeOverrides({ tabPlots: 'Mod+3' })).tabPlots, 'Mod+3');
+  });
+  test('the defaults', () => {
+    const b = resolveBindings({});
+    assert.equal(b.newTab, 'Mod+T');
+    assert.equal(b.closeTab, 'Mod+W');
+    assert.equal(b.reopenTab, 'Mod+Shift+T');
+    assert.equal(b.nextTabAlt, 'Mod+PageDown');
+    assert.equal(b.goToTab1, 'Mod+1');
+    assert.equal(b.goToTab8, 'Mod+8');
+    assert.equal(b.goToLastTab, 'Mod+9');
+    assert.equal(b.tabInspector, 'Alt+1');
+    assert.equal(b.tabPlots, 'Alt+2');
+    assert.equal(ACTIONS.find((a) => a.id === 'connections').label, 'Open a new connection tab');
+  });
+  test('no tab default takes a fixed shortcut, on any platform', () => {
+    for (const [platform, mac] of [['Linux x86_64', false], ['Win32', false], ['MacIntel', true]]) {
+      const bound = new Set(ACTIONS.map((a) => displayCombo(a.default, mac)));
+      for (const { combo } of fixedShortcuts(platform)) assert.ok(!bound.has(combo), `${platform}: ${combo}`);
+    }
+  });
+});
+
 describe('fixedShortcuts', () => {
   const combos = (platform) => Object.fromEntries(fixedShortcuts(platform).map((s) => [s.label, s.combo]));
 
@@ -153,6 +189,10 @@ describe('fixedShortcuts', () => {
     assert.equal(combos('Win32')['Zoom in'], 'Ctrl+Plus');
     assert.equal(combos('MacIntel').Quit, '⌘Q');
     assert.equal(combos('MacIntel')['Full screen'], '⌃⌘F');
+    // macOS closes a window (a pop-out too) with the File menu's key; Mod+W
+    // is Close the tab there as elsewhere.
+    assert.equal(combos('MacIntel')['Close window'], '⌘⇧W');
+    assert.equal(combos('Win32')['Close window'], undefined);
   });
 
   test('none of them is also a rebindable action key', () => {

@@ -57,6 +57,9 @@ export class PlotsPanel {
       },
     });
     this.data = new PlotData();
+    this.profileId = undefined; // the profile whose plots these are (see loadProfile)
+    this.saveTo = null; // the profile changes are saved for
+    this.loadSeq = 0;
     this.charts = new Map(); // plot id -> LineChart (the tab on screen)
     this.cards = new Map(); // plot id -> card element (the tab on screen)
     this.openSeries = new Set(); // series ids expanded in the settings panel
@@ -68,8 +71,24 @@ export class PlotsPanel {
     this.visible = false;
     this.build(host);
     this.trackSeries();
-    setInterval(() => this.visible && !this.frozenAt && this.redraw(), REDRAW_MS);
-    document.addEventListener('fullscreenchange', () => this.onFullscreenChange());
+    this.redrawTimer = setInterval(() => this.visible && !this.frozenAt && this.redraw(), REDRAW_MS);
+    this.onFullscreen = () => this.onFullscreenChange();
+    document.addEventListener('fullscreenchange', this.onFullscreen);
+  }
+
+  // Stops the redraw timer, the charts and the document listener (the tab
+  // closed). Collected data is left to the garbage collector.
+  dispose() {
+    clearInterval(this.redrawTimer);
+    this.redrawTimer = null;
+    clearTimeout(this.saveTimer);
+    this.saveTimer = null;
+    this.loadSeq++; // a profile's plots still being read are not shown
+    document.removeEventListener('fullscreenchange', this.onFullscreen);
+    if (this.soloId) this.leaveSolo();
+    this.disposeCharts();
+    this.visible = false;
+    this.root.remove();
   }
 
   // ------------------------------------------------------------ reading
@@ -98,26 +117,32 @@ export class PlotsPanel {
 
   // ------------------------------------------------------------ persistence
 
-  // keepActive: another window saved; stay on the tab shown here.
-  async load({ keepActive = false } = {}) {
+  // Shows the plots kept for a profile (main/layoutStore.js), which changes
+  // are saved to from then on. null, a tab without a profile, shows an empty
+  // tab and saves nothing. Changes not saved yet go to the profile they were
+  // made for first.
+  async loadProfile(profileId) {
+    const seq = ++this.loadSeq;
+    if (this.saveTimer) await this.flushSave();
+    if (seq !== this.loadSeq) return; // another profile was asked for meanwhile
+    this.profileId = profileId;
+    this.saveTo = null; // until its plots are read: saving could replace them
     try {
-      const [tabs, legacy] = await Promise.all([this.api.storeGet('plotTabs'), this.api.storeGet('plots')]);
-      this.model.load(tabs, { legacy, keepActive });
+      const { doc, legacy } = profileId === null ? { doc: null, legacy: null } : await this.api.layoutGet(profileId);
+      if (seq !== this.loadSeq) return; // another profile was asked for meanwhile
+      this.model.load(doc, { legacy });
+      this.saveTo = profileId;
       if (this.model.newer && !this.warnedNewer) {
-        this.warnedNewer = true;
+        this.warnedNewer = true; // once: a picker reads them again on every attempt
         toast('These plots were saved by a newer MQTT Scope. Changes made here are not saved, so nothing it added is lost.', 'error');
       }
     } catch (err) {
-      toast(`Could not load plots: ${err.message}`, 'error');
+      if (seq !== this.loadSeq) return;
+      this.model.load(null);
+      toast(`Could not load plots: ${err.message}. Changes made here are not saved.`, 'error');
     }
     this.trackSeries();
     this.renderAll();
-  }
-
-  // Picks up plot definitions saved by another window (collected data stays).
-  async reload() {
-    if (this.saveTimer) return; // this window has changes about to be saved
-    await this.load({ keepActive: true });
   }
 
   persist() {
@@ -125,18 +150,52 @@ export class PlotsPanel {
     this.saveTimer = setTimeout(() => this.flushSave(), SAVE_DELAY_MS);
   }
 
-  // Saves the tabs, and the tab on screen in the 0.1 format for older versions.
+  // Saves the tabs for the profile. Plots saved by a newer version are not:
+  // that could lose what it added.
   async flushSave() {
     clearTimeout(this.saveTimer);
     this.saveTimer = null;
-    if (this.model.newer) return;
+    if (this.saveTo === null || this.model.newer) return;
     try {
-      // The 0.1 copy first: other windows reload when plotTabs changes.
-      await this.api.storeSet('plots', this.model.legacyDoc());
-      await this.api.storeSet('plotTabs', this.model.toDoc());
+      await this.api.layoutSet(this.saveTo, this.model.toDoc());
     } catch (err) {
       toast(`Could not save plots: ${err.message}`, 'error');
     }
+  }
+
+  // What restoreSnapshot() brings back (structured-clone friendly): the
+  // plots as they are now, saved or not, the profile they are saved for,
+  // their points and the view (zoom, freeze, selected plot).
+  snapshot() {
+    return {
+      profileId: this.profileId,
+      saveTo: this.saveTo,
+      doc: structuredClone(this.model.toDoc()),
+      newer: this.model.newer,
+      data: this.data.snapshot(),
+      zoomByTab: [...this.zoomByTab],
+      yZoom: [...this.yZoom],
+      frozenAt: this.frozenAt,
+      selectedId: this.model.selectedId,
+    };
+  }
+
+  // Not read again from main (the snapshot may hold changes not saved yet);
+  // later changes are saved for the same profile.
+  restoreSnapshot(s) {
+    this.loadSeq++; // a profile's plots still being read are not shown
+    this.profileId = s.profileId;
+    this.saveTo = s.saveTo;
+    this.model.load(s.doc);
+    this.model.newer = s.newer;
+    this.warnedNewer = s.newer;
+    this.model.select(s.selectedId);
+    this.data.restore(s.data);
+    this.zoomByTab = new Map(s.zoomByTab);
+    this.yZoom = new Map(s.yZoom);
+    this.setFrozen(s.frozenAt);
+    this.trackSeries();
+    this.renderAll();
   }
 
   // Collect data for exactly the plotted series; new ones start from the
@@ -266,7 +325,12 @@ export class PlotsPanel {
   }
 
   toggleFreeze() {
-    this.frozenAt = this.frozenAt ? null : Date.now();
+    this.setFrozen(this.frozenAt ? null : Date.now());
+  }
+
+  // Stops the time axis at `at` (ms), or lets it run again (null).
+  setFrozen(at) {
+    this.frozenAt = at;
     this.freezeBtn.textContent = this.frozenAt ? 'Resume' : 'Freeze';
     this.freezeBtn.classList.toggle('on', !!this.frozenAt);
     this.redraw();
@@ -529,7 +593,8 @@ export class PlotsPanel {
       initial: 300,
       min: 200,
       max: () => Math.max(220, Math.min(700, this.root.clientWidth - 360)),
-      apply: (px) => this.root.style.setProperty('--ps-w', `${px}px`),
+      // On the body: every connection tab shares the width.
+      apply: (px) => document.body.style.setProperty('--ps-w', `${px}px`),
     });
   }
 

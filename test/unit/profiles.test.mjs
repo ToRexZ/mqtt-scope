@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { blankProfile, parseSubscriptions, formatSubscriptions, DEFAULT_PORTS, newId } from '../../renderer/profiles.js';
+import { blankProfile, connectSignature, parseSubscriptions, formatSubscriptions, DEFAULT_PORTS, newId } from '../../renderer/profiles.js';
 import { prng } from './_util.mjs';
 
 describe('blankProfile', () => {
@@ -161,5 +161,33 @@ describe('round-trip', () => {
 
   test('a qos>0 topic ending in " <digit>" round-trips', () => {
     roundTrip([{ topic: 'room 1', qos: 2 }]);
+  });
+});
+
+describe('connectSignature', () => {
+  test('ignores the name and subscriptions', () => {
+    const p = blankProfile();
+    const q = { ...p, name: 'Renamed', subscriptions: [{ topic: 'x', qos: 1 }] };
+    assert.equal(connectSignature(q), connectSignature(p));
+  });
+
+  test('changes with the host', () => {
+    const p = blankProfile();
+    assert.notEqual(connectSignature({ ...p, host: 'other' }), connectSignature(p));
+  });
+
+  test('missing and empty fields count the same', () => {
+    const p = blankProfile();
+    const { clientId, caFile, ...rest } = p;
+    assert.equal(connectSignature(rest), connectSignature(p));
+  });
+
+  test('numbers typed in the form equal the saved numbers', () => {
+    // A form field gives '5'; the profile saved and loaded again has 5.
+    const p = blankProfile();
+    assert.equal(connectSignature({ ...p, port: '1883', mqttVersion: '4', keepalive: '60' }), connectSignature(p));
+    assert.equal(connectSignature({ ...p, mqttVersion: ' ' }), connectSignature({ ...p, mqttVersion: undefined }));
+    assert.notEqual(connectSignature({ ...p, mqttVersion: '5' }), connectSignature(p));
+    assert.notEqual(connectSignature({ ...p, port: '' }), connectSignature({ ...p, port: 0 }));
   });
 });

@@ -30,12 +30,12 @@ async function openPlotWindow(env) {
 }
 
 test('it starts with the points collected so far and shows the latest value', async ({ env }) => {
-  const { win, page, errors } = await openPlotWindow(env);
+  const { broker, win, page, errors } = await openPlotWindow(env);
   const inMain = await page.evaluate(() => window.__mqttscope.plots.points('hall/temp', null).length);
   expect(await win.evaluate(() => window.__plotWindow.data.points('hall/temp', null).length)).toBe(inMain);
   await expect(win.locator('.legend-label')).toHaveText('Temperature');
   await expect(win.locator('.legend-value')).toHaveText('23');
-  await expect(win).toHaveTitle('Temperature — MQTT Scope');
+  await expect(win).toHaveTitle(`Test broker ${broker.port} — Temperature`);
   expect(errors).toEqual([]);
 });
 
@@ -89,6 +89,17 @@ test('it closes with its main window', async ({ env }) => {
   const closed = win.waitForEvent('close');
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().endsWith('index.html')).close());
   await closed;
+});
+
+test('the Close tab key (Ctrl+W) closes the plot window, not a tab', async ({ env }) => {
+  const { app, win, page, errors } = await openPlotWindow(env);
+  const closed = win.waitForEvent('close');
+  await win.locator('.plot-title').click();
+  await win.keyboard.press(`${process.platform === 'darwin' ? 'Meta' : 'Control'}+w`).catch(() => {}); // gone before the key comes up
+  await closed;
+  expect(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length)).toBe(1);
+  expect(await page.evaluate(() => window.__mqttscope.shell.tabs.map((t) => t.status.state))).toEqual(['connected']);
+  expect(errors).toEqual([]);
 });
 
 test('Reload (Ctrl+R) in the main window starts the pop-out over too', async ({ env }) => {

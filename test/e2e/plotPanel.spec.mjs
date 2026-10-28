@@ -2,8 +2,8 @@
 // synced time bar across plots, and plot tabs with export/import.
 
 import path from 'node:path';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { test, expect, makeUserData, profile, connect, waitForTopic, mockDialogs, dialogCalls, tempDir, waitForFile, readJson } from './fixtures.mjs';
+import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { test, expect, makeUserData, profile, connect, waitForTopic, mockDialogs, dialogCalls, tempDir, waitForFile, waitForLayout } from './fixtures.mjs';
 
 const plotsTab = (page) => page.locator('.right-tabs .tab[data-tab="plots"]');
 const panel = (page) => page.locator('.plot-settings');
@@ -27,11 +27,11 @@ async function setup(env) {
     plots.persist();
   });
   await plotsTab(ctx.page).click();
-  return { broker, userData, ...ctx };
+  return { broker, userData, profileId: `p${broker.port}`, ...ctx };
 }
 
 test('settings panel: rename, window, legend, y axis, series label, colour, display, visibility', async ({ env }) => {
-  const { page, userData, errors } = await setup(env);
+  const { page, userData, profileId, errors } = await setup(env);
   const card = page.locator('.plot-card').first();
   await expect(card).toHaveClass(/selected/);
   await expect(panel(page).locator('input[name="plot-title"]')).toHaveValue('Battery');
@@ -81,8 +81,8 @@ test('settings panel: rename, window, legend, y axis, series label, colour, disp
   await expect.poll(async () => (await chartSeries(page)).map((s) => s.label)).toEqual(['Battery %', 'Driving']);
 
   // Everything is saved.
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => {
-    const p = JSON.parse(b).tabs[0].plots[0];
+  await waitForLayout(userData, profileId, (d) => {
+    const p = d.tabs[0].plots[0];
     return p.title === 'Robot' && p.windowSec === 60 && p.legendValues === false && p.yMax === 100 && p.series[0].display === 'step' && p.series[0].slot === 3;
   });
   // Selecting another plot shows its settings.
@@ -116,7 +116,7 @@ test('hovering one plot moves the time bar on all plots and shows values at that
 });
 
 test('tabs: create, rename, switch, duplicate, export and import, delete; each tab keeps its own plots', async ({ env }) => {
-  const { app, page, userData, errors } = await setup(env);
+  const { app, page, userData, profileId, errors } = await setup(env);
   const tabs = page.locator('.plot-tabs .plot-tab');
   const titles = page.locator('.plot-card .plot-title');
   await expect(tabs).toHaveCount(1);
@@ -190,18 +190,15 @@ test('tabs: create, rename, switch, duplicate, export and import, delete; each t
   await expect(tabs).toHaveCount(3);
 
   // Tabs persist, with the one on screen.
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => JSON.parse(b).tabs?.length === 3);
-  const saved = readJson(path.join(userData, 'plotTabs.json'));
+  const saved = await waitForLayout(userData, profileId, (d) => d.tabs?.length === 3);
   expect(saved.tabs.map((t) => [t.name, t.plots.length])).toEqual([
     ['Plots', 2],
     ['Safety signals', 1],
     ['Safety signals copy', 1],
   ]);
   expect(saved.tabs.some((t) => t.id === saved.activeTabId)).toBe(true);
-  // The tab on screen is also saved in the 0.1 format, for older versions.
-  const legacy = readJson(path.join(userData, 'plots.json'));
-  expect(legacy).toEqual({ plots: saved.tabs.find((t) => t.id === saved.activeTabId).plots, writtenBy: 2 });
-  expect(saved.legacyMirror).toEqual(legacy.plots);
+  // Plots are kept per profile: nothing is written in the format of older versions.
+  expect(existsSync(path.join(userData, 'plots.json'))).toBe(false);
   expect(errors).toEqual([]);
 });
 

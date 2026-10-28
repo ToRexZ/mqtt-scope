@@ -6,6 +6,69 @@ All notable changes to MQTT Scope. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- **Connection tabs.** Each connection is a tab in a strip below the title
+  bar, like browser tabs, with its own topic tree, inspector, plots and
+  publisher. A dot on every tab shows its state (green connected, amber
+  connecting, red failed or dropped, grey disconnected). Tabs in the
+  background stay connected and keep recording messages and plot data. Names
+  that do not fit scroll slowly (an ellipsis with reduced motion); the strip
+  scrolls sideways when the tabs reach their minimum width. Reorder tabs by
+  dragging, right-click for Close, Close other tabs, Close tabs to the right,
+  Move to new window, Reconnect or Disconnect, middle-click or press Ctrl+W
+  to close, and Ctrl+Shift+T reopens the last closed tab.
+- **New connection tab.** **+**, Ctrl+T and Ctrl+K open a tab with the
+  connection dialog inside it, so the other tabs stay usable. Esc closes it
+  (not when it is the window's only tab).
+- **One tab per profile.** Opening a profile that is already open switches to
+  its tab, also when it is in another window (two clients with one client ID
+  would throw each other off the broker). For the same reason two profiles
+  with the same client ID cannot both be open on one broker: connecting the
+  second says which tab uses it. A profile that is open cannot be deleted
+  (Close its tab first). Editing an open profile applies at the tab's next
+  connect and shows a "reconnect to apply" hint.
+- **Moving tabs between windows.** Drag a tab onto another window's strip, or
+  out of every window to open it in a new one, or use **Move to new window**.
+  The connection is not interrupted and messages are not lost; the tab keeps
+  its tree, history, plots and pop-out windows, which follow it.
+- **Plot layouts per profile.** Each profile remembers its own plot tabs and
+  plots. Existing profiles start with the layout you had before. A profile
+  opened for the first time starts with a copy of the most recently used one.
+- **Reopen tabs on launch** (Settings → General, on by default): the app comes
+  back with its windows (maximized or full screen if they were), tabs and
+  active tab as they were, and connects them.
+  With it off, closing a window with several connections asks "Close n
+  connections?".
+- Shortcuts, all changeable in Settings → Keyboard: Ctrl+T new tab, Ctrl+W
+  close, Ctrl+Tab / Ctrl+Shift+Tab or Ctrl+PageDown / Ctrl+PageUp next and
+  previous tab, Ctrl+1 to Ctrl+8 go to a tab, Ctrl+9 the last tab,
+  Ctrl+Shift+T reopen. They work while typing in the publisher too.
+
+### Changed
+
+- The connection pill is gone: the tab shows the connection, and Disconnect,
+  Subscriptions, the message counts, Pause and Clear are in the tab's toolbar.
+  The window title is "MQTT Scope — " followed by the active tab's name.
+- Inspector and Plots moved from Ctrl+1 / Ctrl+2 to **Alt+1 / Alt+2**, since
+  Ctrl+1 to Ctrl+9 now pick tabs. If you never changed these two shortcuts
+  they move on their own; custom bindings are kept. On macOS next and previous
+  tab are Ctrl+Tab and Ctrl+Shift+Tab (Cmd+Tab belongs to the system).
+- Inspector and plot pop-out windows are titled with the profile name, and
+  only show messages of their own connection. Ctrl+W (the Close tab shortcut)
+  closes a pop-out window.
+- macOS: Cmd+W closes a tab (or the pop-out window in front), no longer the
+  window; Close Window is Cmd+Shift+W (File menu).
+- The restart-to-update confirmation counts connections in all tabs.
+- History limits and the pause queue apply to each tab separately, so several
+  busy tabs use that much memory each.
+- Plot layouts are saved in a new file, `profileLayouts.json`. `plotTabs.json`
+  and `plots.json` are only read (to give existing profiles their starting
+  layout) and are never changed, so going back to 0.3 shows the plot layout you
+  had before upgrading.
+
 ## [0.3.1] - 2026-10-23
 
 ### Changed

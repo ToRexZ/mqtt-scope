@@ -15,6 +15,7 @@ import {
   viewerBody,
   historyItems,
   mockDialogs,
+  activeTabName,
   tempDir,
   waitForFile,
   readJson,
@@ -141,8 +142,8 @@ test('windows: each has its own broker connection; saved data syncs between them
   await expect.poll(() => page.evaluate(() => window.__mqttscope.tree.find('only/on/a').messageCount)).toBe(2);
   expect(await page.evaluate(() => window.__mqttscope.tree.find('only/on/b'))).toBeNull();
   expect(await page2.evaluate(() => window.__mqttscope.tree.find('only/on/a'))).toBeNull();
-  await expect(page.locator('#conn-label')).toHaveText('Broker A');
-  await expect(page2.locator('#conn-label')).toHaveText('Broker B');
+  await expect(activeTabName(page)).toHaveText('Broker A');
+  await expect(activeTabName(page2)).toHaveText('Broker B');
 
   // A message saved in one window appears in the other.
   await page.locator('#publisher-host .topic-input').fill('shared/topic');

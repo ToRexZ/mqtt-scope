@@ -2,7 +2,7 @@
 
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
-import { test, expect, makeUserData, profile, connect, rowByPath, waitForTopic, waitForFile, historyItems } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, reconnected, rowByPath, waitForTopic, waitForFile, historyItems } from './fixtures.mjs';
 
 const settingsDialog = (page) => page.locator('.modal.settings');
 
@@ -34,7 +34,7 @@ test('settings: messages kept per topic limits history and persists', async ({ e
   await dlg.locator('[name="historyLimit"]').fill('5');
   await dlg.getByRole('button', { name: 'Save' }).click();
   await expect(dlg).toHaveCount(0);
-  expect(await page.evaluate(() => window.__mqttscope.settings)).toEqual({ historyLimit: 5, historyMB: 64, autoExpand: true, checkForUpdates: true, keys: {} });
+  expect(await page.evaluate(() => window.__mqttscope.settings)).toEqual({ historyLimit: 5, historyMB: 64, autoExpand: true, checkForUpdates: true, restoreTabs: true, keys: {} });
 
   // Cancel discards changes.
   await page.locator('#btn-settings').click();
@@ -66,7 +66,7 @@ test('settings: messages kept per topic limits history and persists', async ({ e
   // After a restart the limit still applies.
   const second = await env.launch({ userData });
   const page2 = second.page;
-  await connect(page2);
+  await reconnected(page2); // its tab comes back
   await page2.locator('#btn-settings').click();
   await expect(settingsDialog(page2).locator('[name="historyLimit"]')).toHaveValue('5');
   await settingsDialog(page2).getByRole('button', { name: 'Cancel' }).click();

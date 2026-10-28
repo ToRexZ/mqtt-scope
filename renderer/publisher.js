@@ -7,9 +7,12 @@ import { decode, parseHex, formatTime, unsafeJson, hasUnsafeIntegers } from './p
 
 const RECENT_LIMIT = 50;
 const newId = () => Math.random().toString(36).slice(2, 10);
+let instances = 0; // each connection tab has a publisher; their topic lists need distinct ids
 
 export class Publisher {
-  // opts: api, getTopics(prefix) -> string[], onToggle(collapsed)
+  // opts: api, getTopics(prefix) -> string[], getSelectedTopic(),
+  //       onToggle(collapsed), onPersist() — the saved or recent messages are
+  //       being written
   constructor(host, opts) {
     this.opts = opts;
     this.api = opts.api;
@@ -32,9 +35,9 @@ export class Publisher {
     this.topic = el('input', 'input topic-input');
     this.topic.placeholder = 'Topic to publish to';
     this.topic.spellcheck = false;
-    this.topic.setAttribute('list', 'pub-topics');
     this.topicList = el('datalist');
-    this.topicList.id = 'pub-topics';
+    this.topicList.id = `pub-topics-${++instances}`;
+    this.topic.setAttribute('list', this.topicList.id);
     this.topic.addEventListener('input', () => {
       this.setFollow(false);
       this.fillTopicList();
@@ -81,14 +84,13 @@ export class Publisher {
     this.payload = el('textarea', 'payload-editor');
     this.payload.spellcheck = false;
     this.payload.placeholder = 'Payload — JSON, text or hex bytes depending on the format above';
-    let vTimer;
     this.payload.addEventListener('input', () => {
       this.setFollow(false);
-      clearTimeout(vTimer);
-      vTimer = setTimeout(() => this.validate(), 200);
+      clearTimeout(this.validateTimer);
+      this.validateTimer = setTimeout(() => this.validate(), 200);
     });
     this.payload.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab' && !e.shiftKey) {
+      if (e.key === 'Tab' && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey) {
         e.preventDefault();
         document.execCommand('insertText', false, '  ');
       }
@@ -118,6 +120,12 @@ export class Publisher {
     this.setListMode('saved');
   }
 
+  // The tab closed: nothing of it may run later.
+  dispose() {
+    clearTimeout(this.validateTimer);
+    this.root.remove();
+  }
+
   setFollow(on) {
     this.follow = on;
     this.followBtn.classList.toggle('on', on);
@@ -137,6 +145,7 @@ export class Publisher {
   }
 
   persist() {
+    this.opts.onPersist?.();
     return this.api
       .storeSet('savedMessages', { saved: this.saved, recent: this.recent })
       .catch((err) => toast(`Could not save messages: ${err.message}`, 'error'));
@@ -218,6 +227,30 @@ export class Publisher {
     this.format.value = entry.format || 'text';
     this.qos.value = String(entry.qos || 0);
     this.retain.checked = !!entry.retain;
+    this.validate();
+    this.renderList();
+  }
+
+  // The message being composed, as typed, and whether the topic follows the
+  // tree (the saved and recent messages are shared, not part of it).
+  draft() {
+    return {
+      topic: this.topic.value,
+      payload: this.payload.value,
+      format: this.format.value,
+      qos: Number(this.qos.value),
+      retain: this.retain.checked,
+      follow: this.follow,
+    };
+  }
+
+  setDraft(d) {
+    this.topic.value = d.topic;
+    this.payload.value = d.payload;
+    this.format.value = d.format;
+    this.qos.value = String(d.qos);
+    this.retain.checked = d.retain;
+    this.setFollow(d.follow);
     this.validate();
     this.renderList();
   }
