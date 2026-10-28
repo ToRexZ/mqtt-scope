@@ -26,9 +26,10 @@ saved messages. Runs on Linux, Windows and macOS.
   are shared by all tabs and windows.
 - The connection list shows which connections are **Open** in a tab and, with
   a dot, which brokers are online: green when the host and port take a
-  connection, a ring when not (hover for why). It checks every 15 seconds
-  while shown, with a plain TCP connection: no TLS, no login. The sort button
-  orders the list by name, open and online first, or as saved.
+  connection, a ring when not (hover for why). It checks with a plain TCP
+  connection (no TLS, no login; a broker may log it) while the list is shown:
+  every 15 seconds while the window is in front, every minute otherwise. The
+  sort button orders the list by name, open and online first, or as saved.
 - Passwords are encrypted with the operating system keychain when one is
   available; the connection dialog says when it is not.
 

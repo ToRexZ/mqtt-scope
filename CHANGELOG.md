@@ -26,8 +26,9 @@ All notable changes to MQTT Scope. The format follows
 - **Connection list: open, online, sorted.** Connections open in a tab (in any
   window) are marked **Open**, and Connect on one reads **Go to tab**. A dot
   shows whether each broker is online (its host and port take a TCP
-  connection; no TLS or login), checked every 15 seconds while the list is
-  shown and again after its host or port is edited. A sort button orders the
+  connection; no TLS or login), checked while the list is shown (every 15
+  seconds while the window is in front, every minute otherwise) and again
+  after its host or port is edited. A sort button orders the
   list by name, open and online first, or as saved; all windows keep the
   choice.
 - **One tab per profile.** Opening a profile that is already open switches to

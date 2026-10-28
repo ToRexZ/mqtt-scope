@@ -168,12 +168,19 @@ test('a closed tab stops its timers and observers', async ({ env }) => {
   expect(closed).toHaveLength(20);
   for (const t of closed) expect(t).toEqual({ redrawTimer: null, resizeObserver: null, attached: false });
   expect(await tabCount(page)).toBe(1);
-  const net = await page.evaluate(() => ({
-    listeners: Object.fromEntries(Object.entries(window.__net.listeners).filter(([, n]) => n !== 0)),
-    observers: window.__net.observers,
-    intervals: window.__net.intervals.size,
-  }));
-  expect(net).toEqual({ listeners: {}, observers: 0, intervals: 0 });
+  // The tab left is a New connection tab: the connection dialog shown in it
+  // checks the brokers on a timer of its own, one however many tabs came and
+  // went.
+  const net = await page.evaluate(() => {
+    const { connections } = window.__mqttscope;
+    return {
+      listeners: Object.fromEntries(Object.entries(window.__net.listeners).filter(([, n]) => n !== 0)),
+      observers: window.__net.observers,
+      intervals: [...window.__net.intervals].filter((id) => id !== connections.probeTimer).length,
+      probing: connections.probeTimer !== null,
+    };
+  });
+  expect(net).toEqual({ listeners: {}, observers: 0, intervals: 0, probing: true });
   expect(await app.evaluate(() => globalThis.__mqttscopeConnections.size)).toBe(1);
   expect(errors).toEqual([]);
 });

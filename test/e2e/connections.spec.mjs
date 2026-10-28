@@ -441,11 +441,13 @@ test('a failed connect keeps the dialog with the error; Connect retries', async 
   await expect(button).toHaveText('Retry'); // through the client's own retries
   await expect(toast(page, 'error')).toHaveCount(0);
 
-  // Retry is for the tab's profile; another one reads Connect.
+  // Retry is for the tab's profile; another one reads Connect. The tab's own
+  // profile is not marked Open in its list.
   await pick('Up');
   await expect(button).toHaveText('Connect');
   await pick('Down');
   await expect(button).toHaveText('Retry');
+  await expect(dlg.locator('.conn-open')).toHaveCount(0);
 
   // Another profile from the list connects this same tab instead.
   await pick('Up');
@@ -864,11 +866,21 @@ test('the list sorts by name, by open and online first, or as saved; the choice 
   await sortBtn.click();
   await expect(page.locator('.ctx-menu .ctx-item')).toHaveText(['Saved order', 'Name', 'Open and online first']);
   await expect(page.locator('.ctx-menu .ctx-item.checked')).toHaveText('Saved order');
+  await expect(sortBtn).toHaveAttribute('aria-expanded', 'true');
   await page.keyboard.press('Escape');
+  await expect(page.locator('.ctx-menu')).toHaveCount(0);
+  await expect(sortBtn).toHaveAttribute('aria-expanded', 'false');
+  await expect(sortBtn).toBeFocused();
 
-  // Name: case-insensitive, numbers by value. The arrow keys follow the list.
-  await sortBy('Name');
+  // Name, from the keyboard: case-insensitive, numbers by value. The arrow
+  // keys in the menu leave the list alone; in the list they follow its order.
+  await page.keyboard.press('Enter');
+  await expect(page.locator('.ctx-menu .ctx-item.checked')).toBeFocused();
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
   await expect(names).toHaveText(['alpha', 'Beta', 'Robot-9', 'robot-10']);
+  await expect(dlg.locator('.conn-item.active .conn-name')).toHaveText('robot-10');
+  await expect(sortBtn).toBeFocused();
   await expect(sortBtn).toHaveAttribute('title', 'Sort connections: Name');
   await dlg.locator('.conn-item', { hasText: 'alpha' }).click();
   await page.keyboard.press('ArrowDown');

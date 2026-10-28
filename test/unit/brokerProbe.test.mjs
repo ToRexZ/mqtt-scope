@@ -6,15 +6,21 @@ import assert from 'node:assert/strict';
 import net from 'node:net';
 import { requireFromRoot } from './_util.mjs';
 
-const { probe, probeAll, validTargets } = requireFromRoot('./main/brokerProbe.js');
+const { probe, probeAll, validTargets, createLimiter } = requireFromRoot('./main/brokerProbe.js');
 
 async function listening() {
   const sockets = [];
-  const srv = net.createServer((s) => sockets.push(s));
+  let closed = 0;
+  const srv = net.createServer((s) => {
+    sockets.push(s);
+    s.on('close', () => closed++);
+    s.on('error', () => {});
+  });
   await new Promise((r) => srv.listen(0, '127.0.0.1', r));
   return {
     port: srv.address().port,
     accepted: () => sockets.length,
+    closed: () => closed,
     close: () => new Promise((r) => {
       for (const s of sockets) s.destroy();
       srv.close(r);
@@ -37,6 +43,8 @@ test('a listening port is online, and the probe closes its socket', async () => 
   try {
     assert.deepEqual(await probe({ host: '127.0.0.1', port: srv.port }, { resolve: noResolve }), { online: true });
     assert.equal(srv.accepted(), 1);
+    for (let i = 0; i < 100 && !srv.closed(); i++) await new Promise((r) => setTimeout(r, 10));
+    assert.equal(srv.closed(), 1, 'the broker sees the connection close');
   } finally {
     await srv.close();
   }
@@ -88,6 +96,20 @@ test('a host name that does not resolve is offline', async () => {
   assert.deepEqual(await probe({ host: 'empty.test', port: 1883 }, { resolve: async () => [] }), { online: false, error: 'Host not found' });
 });
 
+test('a name lookup that takes too long is offline, after the timeout', async () => {
+  const t0 = Date.now();
+  const r = await probe({ host: 'slow.test', port: 1883 }, { timeout: 80, resolve: () => new Promise(() => {}) });
+  assert.deepEqual(r, { online: false, error: 'Name lookup timed out' });
+  assert.ok(Date.now() - t0 < 1000);
+});
+
+test('a connect that throws is offline, not a hang', async () => {
+  const connect = () => {
+    throw new Error('bad address');
+  };
+  assert.deepEqual(await probe({ host: '127.0.0.1', port: 1883 }, { connect, resolve: noResolve }), { online: false, error: 'bad address' });
+});
+
 test('probeAll answers by id and probes each host and port once', async () => {
   const srv = await listening();
   const closed = await closedPort();
@@ -127,6 +149,43 @@ test('probeAll runs a limited number of probes at once', async () => {
   const out = await probeAll(targets, { connect, resolve: noResolve, parallel: 6 });
   assert.equal(Object.keys(out).length, 40);
   assert.ok(most <= 6, `at most 6 at once, saw ${most}`);
+});
+
+test('without a limit of its own, probeAll shares one limit of 16 with every other call', async () => {
+  let running = 0;
+  let most = 0;
+  const connect = () => {
+    const s = new net.Socket();
+    running++;
+    most = Math.max(most, running);
+    setTimeout(() => {
+      running--;
+      s.emit('error', Object.assign(new Error('refused'), { code: 'ECONNREFUSED' }));
+    }, 5);
+    return s;
+  };
+  const call = (n) => probeAll(Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, host: '127.0.0.1', port: 2000 + n * 100 + i })), { connect, resolve: noResolve });
+  const out = await Promise.all([call(0), call(1), call(2)]);
+  assert.deepEqual(out.map((o) => Object.keys(o).length), [20, 20, 20]);
+  assert.ok(most <= 16, `at most 16 at once, saw ${most}`);
+  assert.ok(most > 6, 'the calls do run in parallel');
+});
+
+test('createLimiter runs the next function when one settles, also when it throws', async () => {
+  const limit = createLimiter(1);
+  const order = [];
+  const a = limit(async () => {
+    order.push('a');
+    throw new Error('x');
+  });
+  const b = limit(async () => order.push('b'));
+  await Promise.all([a, b]);
+  assert.deepEqual(order, ['a', 'b']);
+});
+
+test('an id named __proto__ is kept', async () => {
+  const out = await probeAll([{ id: '__proto__', host: 'nowhere.test', port: 1 }], { resolve: async () => [] });
+  assert.deepEqual(Object.keys(out), ['__proto__']);
 });
 
 test('validTargets keeps well-formed targets only, and at most 500', () => {

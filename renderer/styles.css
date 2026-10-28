@@ -1911,6 +1911,11 @@ body.moving-plot * {
   background: var(--accent);
   color: #fff;
 }
+.ctx-item:focus-visible {
+  outline: none;
+  background: var(--accent);
+  color: #fff;
+}
 .ctx-menu.has-checks .ctx-item {
   position: relative;
   padding-left: 26px;
