@@ -154,6 +154,13 @@ body.resizing-y {
 .btn.danger {
   color: var(--err);
 }
+/* Looks off but still answers a click (with why it is off). */
+.btn[aria-disabled='true'],
+.btn[aria-disabled='true']:hover {
+  opacity: 0.45;
+  background: var(--panel-2);
+  cursor: default;
+}
 .btn.on {
   background: var(--accent-soft);
   border-color: var(--accent);

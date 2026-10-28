@@ -60,7 +60,12 @@ export async function launchApp({ userData = makeUserData(), headless = !process
 // answers: { confirm: boolean, saveFile: path|null, openFile: path|null }
 export async function mockDialogs(app, answers) {
   await app.evaluate(({ dialog }, a) => {
-    dialog.showMessageBox = async () => ({ response: a.confirm === false ? 1 : 0 });
+    // The action is the button that is not Cancel (see main/dialogs.js).
+    dialog.showMessageBox = async (...args) => {
+      const o = args.find((x) => x && typeof x === 'object' && 'message' in x) || {};
+      const cancel = o.cancelId ?? 1;
+      return { response: a.confirm === false ? cancel : Math.max(0, (o.buttons || []).findIndex((_, i) => i !== cancel)) };
+    };
     dialog.showSaveDialog = async () => (a.saveFile ? { canceled: false, filePath: a.saveFile } : { canceled: true });
     dialog.showOpenDialog = async () => (a.openFile ? { canceled: false, filePaths: [a.openFile] } : { canceled: true, filePaths: [] });
   }, answers);

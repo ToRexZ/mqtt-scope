@@ -186,10 +186,12 @@ export class ConnectionDialog {
     this.renderConnectLabel();
   }
 
+  // Dimmed, not disabled, for a profile open in a tab: a click says why it
+  // cannot be deleted (see remove).
   renderDelete() {
     if (!this.deleteBtn) return;
     const open = this.openIds.has(this.selectedId);
-    this.deleteBtn.disabled = open;
+    this.deleteBtn.setAttribute('aria-disabled', String(open));
     this.deleteBtn.title = open ? 'Close its tab first' : 'Delete this connection';
   }
 
@@ -633,9 +635,16 @@ export class ConnectionDialog {
   }
 
   async remove(p) {
-    if (this.openIds.has(p.id)) return; // the button is disabled, but its tab may have opened since
+    // Not while it is open in a tab (also when that tab opened while the
+    // question showed): says so instead.
+    const open = () => {
+      if (!this.openIds.has(p.id)) return false;
+      toast(`“${p.name || '(unnamed)'}” is open in a tab: close its tab first to delete it`, 'error');
+      return true;
+    };
+    if (open()) return;
     if (!(await this.api.confirm({ message: `Delete connection “${p.name}”?`, okLabel: 'Delete' }))) return;
-    if (this.openIds.has(p.id)) return; // it was opened while the question showed
+    if (open()) return;
     this.profiles = this.profiles.filter((x) => x !== p);
     if (!this.profiles.length) this.profiles.push(blankProfile('Local broker'));
     this.selectedId = this.firstClosed().id;

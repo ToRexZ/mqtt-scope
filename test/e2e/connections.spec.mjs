@@ -680,19 +680,31 @@ test('an open profile cannot be deleted', async ({ env }) => {
   await expect.poll(() => tabCount(page)).toBe(2);
   const del = page.locator('.conn-dialog').getByRole('button', { name: 'Delete', exact: true });
   await pickProfile(page, 'Broker B');
-  await expect(del).toBeEnabled();
+  await expect(del).toHaveAttribute('aria-disabled', 'false');
   await pickProfile(page, 'Broker A');
-  await expect(del).toBeDisabled();
+  await expect(del).toHaveAttribute('aria-disabled', 'true');
   await expect(del).toHaveAttribute('title', 'Close its tab first');
+  await expect(del).toHaveCSS('opacity', '0.45');
+  // A click says why, without asking or deleting. (Playwright does not click
+  // what is aria-disabled; a user can.)
+  await del.click({ force: true });
+  await expect(toast(page, 'error')).toHaveText('“Broker A” is open in a tab: close its tab first to delete it');
+  expect(await dialogCalls(app)).toEqual([]);
+  await expect(page.locator('.conn-dialog .conn-item .conn-name')).toHaveText(['Broker A', 'Broker B']);
 
-  // Closing its tab frees it, without redrawing the dialog.
+  // Closing its tab frees it, without redrawing the dialog; Delete then asks
+  // and deletes.
   await page.evaluate((id) => window.__mqttscope.shell.closeTab(id), idA);
-  await expect(del).toBeEnabled();
+  await expect(del).toHaveAttribute('aria-disabled', 'false');
   await expect(del).toHaveAttribute('title', 'Delete this connection');
+  await expect(del).toHaveCSS('opacity', '1');
+  await del.click();
+  await expect.poll(() => dialogCalls(app)).toEqual([{ kind: 'confirm', message: 'Delete connection “Broker A”?' }]);
+  await expect(page.locator('.conn-dialog .conn-item .conn-name')).toHaveText(['Broker B']);
   expect(errors).toEqual([]);
 });
 
-// Delete is disabled for an open profile; a window that did not know yet
+// Delete refuses an open profile; a window that did not know yet
 // that it was open (another window opened it meanwhile) cannot delete it
 // either.
 test('a save that leaves out an open profile keeps it, and its layout', async ({ env }) => {

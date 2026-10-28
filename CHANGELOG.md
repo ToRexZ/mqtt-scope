@@ -35,8 +35,9 @@ All notable changes to MQTT Scope. The format follows
   its tab, also when it is in another window (two clients with one client ID
   would throw each other off the broker). For the same reason two profiles
   with the same client ID cannot both be open on one broker: connecting the
-  second says which tab uses it. A profile that is open cannot be deleted
-  (Close its tab first). Editing an open profile applies at the tab's next
+  second says which tab uses it. A profile that is open cannot be deleted:
+  its Delete is dimmed and says to close its tab first. Editing an open
+  profile applies at the tab's next
   connect and shows a "reconnect to apply" hint.
 - **Moving tabs between windows.** Drag a tab onto another window's strip, or
   out of every window to open it in a new one, or use **Move to new window**.
@@ -76,6 +77,8 @@ All notable changes to MQTT Scope. The format follows
   and `plots.json` are only read (to give existing profiles their starting
   layout) and are never changed, so going back to 0.3 shows the plot layout you
   had before upgrading.
+- Linux: questions such as "Delete connection?" put Cancel on the left and the
+  action on the right, as other GTK apps do (Enter still cancels).
 
 ## [0.3.1] - 2026-10-23
 

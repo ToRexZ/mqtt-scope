@@ -191,7 +191,7 @@ test('renaming a profile keeps its layout; deleting removes it', async ({ env })
   await page.evaluate((id) => window.__mqttscope.shell.closeTab(id, { confirmed: true }), idB);
   await mockDialogs(first.app, { confirm: true });
   await dlg.locator('.conn-item', { hasText: 'Profile B' }).click();
-  await expect(dlg.getByRole('button', { name: 'Delete' })).toBeEnabled();
+  await expect(dlg.getByRole('button', { name: 'Delete' })).toHaveAttribute('aria-disabled', 'false');
   await dlg.getByRole('button', { name: 'Delete' }).click();
   await expect(dlg.locator('.conn-item .conn-name')).toHaveText(['Renamed A']);
   const file = path.join(userData, 'profileLayouts.json');
