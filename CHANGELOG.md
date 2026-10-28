@@ -14,31 +14,36 @@ All notable changes to MQTT Scope. The format follows
   bar, like browser tabs, with its own topic tree, inspector, plots and
   publisher. A dot on every tab shows its state (green connected, amber
   connecting, red failed or dropped, grey disconnected). Tabs in the
-  background stay connected and keep recording messages and plot data. Names
-  that do not fit scroll slowly (an ellipsis with reduced motion); the strip
-  scrolls sideways when the tabs reach their minimum width. Reorder tabs by
-  dragging, right-click for Close, Close other tabs, Close tabs to the right,
-  Move to new window, Reconnect or Disconnect, middle-click or press Ctrl+W
-  to close, and Ctrl+Shift+T reopens the last closed tab.
+  background stay connected and keep recording messages and plot data.
+- **The tab strip** shows full names while there is room, then shrinks the
+  tabs, and scrolls sideways once they reach their minimum width; the
+  MQTT Scope name collapses to its logo when the strip needs the space. Names
+  that do not fit scroll slowly (an ellipsis with reduced motion), and hovering
+  a tab shows its full name. Reorder tabs by dragging; right-click for Close,
+  Close other tabs, Close tabs to the right, Move to new window, Reconnect or
+  Disconnect. Middle-click or Ctrl+W closes a tab, asking first only when its
+  plots hold recorded data; closing the last tab leaves a New connection tab.
+  Ctrl+Shift+T reopens the last closed tab. With the strip focused, the arrow
+  keys move between tabs.
 - **New connection tab.** **+**, Ctrl+T and Ctrl+K open a tab with the
   connection dialog inside it, so the other tabs stay usable. Esc closes it
-  (not when it is the window's only tab).
+  (not when it is the window's only tab). A connect that fails keeps the
+  dialog with the error, and Connect reads **Retry**.
 - **Connection list: open, online, sorted.** Connections open in a tab (in any
   window) are marked **Open**, and Connect on one reads **Go to tab**. A dot
   shows whether each broker is online (its host and port take a TCP
   connection; no TLS or login), checked while the list is shown (every 15
   seconds while the window is in front, every minute otherwise) and again
-  after its host or port is edited. A sort button orders the
-  list by name, open and online first, or as saved; all windows keep the
-  choice.
+  after its host or port is edited. A sort button orders the list by name,
+  open and online first, or as saved; all windows keep the choice.
 - **One tab per profile.** Opening a profile that is already open switches to
   its tab, also when it is in another window (two clients with one client ID
   would throw each other off the broker). For the same reason two profiles
   with the same client ID cannot both be open on one broker: connecting the
   second says which tab uses it. A profile that is open cannot be deleted:
   its Delete is dimmed and says to close its tab first. Editing an open
-  profile applies at the tab's next
-  connect and shows a "reconnect to apply" hint.
+  profile applies at the tab's next connect and shows a "reconnect to apply"
+  hint.
 - **Moving tabs between windows.** Drag a tab onto another window's strip, or
   out of every window to open it in a new one, or use **Move to new window**.
   The connection is not interrupted and messages are not lost; the tab keeps
@@ -48,9 +53,8 @@ All notable changes to MQTT Scope. The format follows
   opened for the first time starts with a copy of the most recently used one.
 - **Reopen tabs on launch** (Settings → General, on by default): the app comes
   back with its windows (maximized or full screen if they were), tabs and
-  active tab as they were, and connects them.
-  With it off, closing a window with several connections asks "Close n
-  connections?".
+  active tab as they were, and connects them. With it off, closing a window
+  with several connections asks "Close n connections?".
 - Shortcuts, all changeable in Settings → Keyboard: Ctrl+T new tab, Ctrl+W
   close, Ctrl+Tab / Ctrl+Shift+Tab or Ctrl+PageDown / Ctrl+PageUp next and
   previous tab, Ctrl+1 to Ctrl+8 go to a tab, Ctrl+9 the last tab,
@@ -79,6 +83,12 @@ All notable changes to MQTT Scope. The format follows
   had before upgrading.
 - Linux: questions such as "Delete connection?" put Cancel on the left and the
   action on the right, as other GTK apps do (Enter still cancels).
+
+### Screenshots
+
+![Two connection tabs, each with its own toolbar, topic tree and inspector](https://raw.githubusercontent.com/ToRexZ/mqtt-scope/v0.4.0/docs/screenshots/inspector.png)
+
+![The connection list in a New connection tab: open connections marked Open, a dot per broker that answers, and the sort button](https://raw.githubusercontent.com/ToRexZ/mqtt-scope/v0.4.0/docs/screenshots/connections.png)
 
 ## [0.3.1] - 2026-10-23
 
