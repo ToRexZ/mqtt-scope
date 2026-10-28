@@ -6,7 +6,7 @@
     <title>MQTT Scope: free MQTT client for Linux, Windows and macOS</title>
     <meta
       name="description"
-      content="MQTT Scope is a free, open-source desktop MQTT client and MQTT Explorer alternative: live topic tree, large JSON message inspector with diff, live plots and state transitions, and a publisher with saved messages. MQTT 3.1.1 and 5, TLS and WebSocket."
+      content="MQTT Scope is a free, open-source desktop MQTT client and MQTT Explorer alternative: live topic tree, large JSON message inspector with diff, live plots and state transitions, a publisher with saved messages, and several brokers in tabs. MQTT 3.1.1 and 5, TLS and WebSocket."
     />
     <link rel="canonical" href="https://torexz.github.io/mqtt-scope/" />
     <meta name="google-site-verification" content="04lkoTWeNOICjEmIJTZwgEglYKk_W6CWlT2H-uoos2o" />
@@ -138,7 +138,8 @@
         <p class="kicker">Free MQTT client for Linux, Windows and macOS</p>
         <p class="lead">
           A desktop MQTT client for busy brokers: every topic in a live tree, large JSON messages you can actually read,
-          live plots of any value, and a publisher that remembers the messages you send most.
+          live plots of any value, a publisher that remembers the messages you send most, and every broker in its own
+          tab.
         </p>
         <div class="cta">
           <a class="button primary" id="primary-download" href="https://github.com/ToRexZ/mqtt-scope/releases/latest">Download</a>
@@ -220,9 +221,21 @@
           <a class="shot-link" href="screenshots/publisher-saved.png"><picture><source type="image/webp" srcset="screenshots/publisher-saved.webp" /><img class="shot" src="screenshots/publisher-saved.png" alt="Publisher with a library of saved messages" loading="lazy" width="1600" height="1000" /></picture></a>
         </article>
 
+        <article class="feature">
+          <div class="text">
+            <h3>Every broker in its own tab</h3>
+            <p>
+              Open as many brokers as you like, like browser tabs, each with its own tree, plots and publisher. Tabs in
+              the background keep recording. The connection list shows which brokers are already open and which are
+              online right now, sorted the way you want, and the app reopens your tabs where you left them.
+            </p>
+          </div>
+          <a class="shot-link" href="screenshots/connections.png"><picture><source type="image/webp" srcset="screenshots/connections.webp" /><img class="shot" src="screenshots/connections.png" alt="Connection list in a new tab: two open connections marked Open with green online dots, a third broker offline, and the sort button" loading="lazy" width="1600" height="1000" /></picture></a>
+        </article>
+
         <ul class="grid">
           <li><strong>Every transport</strong> TCP, TLS with client certificates, WebSocket; MQTT 3.1.1 and 5.0.</li>
-          <li><strong>Connection tabs</strong> One broker per tab, like browser tabs. Background tabs keep recording; drag a tab to reorder it, to another window, or out to a new one. Each profile keeps its own plot layout.</li>
+          <li><strong>Tabs between windows</strong> Drag a tab to reorder it, to another window, or out to a new one, without dropping its connection. Each profile keeps its own plot layout.</li>
           <li><strong>Live subscriptions</strong> Add or remove topic filters without reconnecting.</li>
           <li><strong>Exact numbers</strong> 64-bit ids and nanosecond timestamps are shown and re-sent exactly.</li>
           <li><strong>Your shortcuts</strong> Every keyboard shortcut can be changed; Enter connects to the selected broker.</li>
