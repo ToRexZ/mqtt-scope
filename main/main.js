@@ -5,6 +5,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { ConnectionRegistry } = require('./connections');
 const { createProfileStore, keepOpen } = require('./profileStore');
+const { probeAll, validTargets } = require('./brokerProbe');
 const { createJsonStore } = require('./jsonStore');
 const { createLayoutStore } = require('./layoutStore');
 const { WindowState, placeBounds } = require('./windowState');
@@ -608,6 +609,12 @@ function registerIpc() {
     return res;
   });
   ipcMain.handle('profiles:security', () => storageSecurity());
+  // Which brokers of the connection list answer (main windows only).
+  ipcMain.handle('profiles:probe', (e, targets) => {
+    if (!windows.has(e.sender.id)) throw new Error('Unknown window');
+    const resolve = async (host) => (await e.sender.session.resolveHost(host)).endpoints.map((ep) => ep.address);
+    return probeAll(validTargets(targets), { resolve });
+  });
   // A profile is open in one tab app-wide, so its layout needs no broadcast.
   // Main windows read and write layouts (not pop-outs), of profiles there are.
   const layoutId = (e, profileId) => {

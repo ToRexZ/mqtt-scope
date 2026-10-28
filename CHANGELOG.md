@@ -23,6 +23,13 @@ All notable changes to MQTT Scope. The format follows
 - **New connection tab.** **+**, Ctrl+T and Ctrl+K open a tab with the
   connection dialog inside it, so the other tabs stay usable. Esc closes it
   (not when it is the window's only tab).
+- **Connection list: open, online, sorted.** Connections open in a tab (in any
+  window) are marked **Open**, and Connect on one reads **Go to tab**. A dot
+  shows whether each broker is online (its host and port take a TCP
+  connection; no TLS or login), checked every 15 seconds while the list is
+  shown and again after its host or port is edited. A sort button orders the
+  list by name, open and online first, or as saved; all windows keep the
+  choice.
 - **One tab per profile.** Opening a profile that is already open switches to
   its tab, also when it is in another window (two clients with one client ID
   would throw each other off the broker). For the same reason two profiles

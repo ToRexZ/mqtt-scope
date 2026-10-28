@@ -30,7 +30,8 @@ export function closeMenu() {
 
 export const menuOpen = () => !!openMenu;
 
-// items: [{ label, action, disabled }] or 'separator'
+// items: [{ label, action, disabled, checked }] or 'separator'. An item with
+// `checked` (true or false) is one of a set of choices, ticked when true.
 export function showMenu(x, y, items) {
   closeMenu();
   const menu = el('div', 'ctx-menu');
@@ -39,7 +40,12 @@ export function showMenu(x, y, items) {
       menu.append(el('div', 'ctx-sep'));
       continue;
     }
-    const row = el('div', 'ctx-item' + (item.disabled ? ' disabled' : ''), item.label);
+    const row = el('div', 'ctx-item' + (item.disabled ? ' disabled' : '') + (item.checked ? ' checked' : ''), item.label);
+    if ('checked' in item) {
+      menu.classList.add('has-checks');
+      row.setAttribute('role', 'menuitemradio');
+      row.setAttribute('aria-checked', String(!!item.checked));
+    }
     if (!item.disabled) {
       row.addEventListener('click', () => {
         closeMenu();

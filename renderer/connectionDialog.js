@@ -1,12 +1,26 @@
 // Connection manager: a list of saved broker profiles and an editor for the
 // selected one. Edits are saved automatically. One per window: the shell
 // draws it in the active New connection tab (mount), and it shows that tab's
-// connection status.
+// connection status. The list marks the profiles open in a tab and whether
+// each broker answers (main probes them while the dialog is shown), and can
+// be sorted.
 
-import { el, button, toast } from './ui.js';
+import { el, button, toast, showMenu } from './ui.js';
+import { iconButton } from './icons.js';
 import { comboFromEvent, isTypingTarget } from './keys.js';
-import { DEFAULT_PORTS, blankProfile, parseSubscriptions, formatSubscriptions, newId } from './profiles.js';
+import { DEFAULT_PORTS, SORT_MODES, blankProfile, normalizeSort, parseSubscriptions, formatSubscriptions, newId, probeTarget, sortProfiles } from './profiles.js';
 
+const SORT_KEY = 'mqttscope.connections.sort'; // shared by all windows
+const PROBE_EVERY_MS = 15000;
+const PROBE_EDIT_MS = 800; // after the host or port was last typed
+
+function savedSort() {
+  try {
+    return normalizeSort(localStorage.getItem(SORT_KEY));
+  } catch {
+    return 'saved';
+  }
+}
 
 export class ConnectionDialog {
   // opts: api, getBinding(id), onProfilesChanged() — the list was loaded,
@@ -22,8 +36,88 @@ export class ConnectionDialog {
     this.host = null; // the tab element it is drawn in
     this.mounted = null; // mount()'s options: closable, failed, onConnect(profile), onCancel()
     this.tabProfileId = undefined; // that tab's profile when last mounted
+    this.sortMode = savedSort();
+    this.reach = new Map(); // profile id -> { key, online, error }: main's last answer for that host and port
+    this.probeTimer = null;
     this.box = el('div', 'conn-dialog');
     this.box.addEventListener('keydown', (e) => this.handleKey(e));
+    // Another window changed the sort.
+    window.addEventListener('storage', (e) => {
+      if (e.key !== SORT_KEY) return;
+      this.sortMode = normalizeSort(e.newValue);
+      this.renderList();
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && this.probeTimer) this.probe();
+    });
+  }
+
+  // The profiles in the order the list shows them.
+  get ordered() {
+    return sortProfiles(this.profiles, this.sortMode, { openIds: this.openIds, online: (id) => this.reachOf(id).online });
+  }
+
+  // Whether the broker of profile `id` answered: { online: true | false |
+  // undefined (not checked yet, or its host or port changed since), error,
+  // target }. A profile without a host or port has no target.
+  reachOf(id) {
+    const p = this.profiles.find((x) => x.id === id);
+    const target = p ? probeTarget(p) : null;
+    const r = this.reach.get(id);
+    return target && r?.key === target.key ? { ...r, target } : { online: undefined, target };
+  }
+
+  setSort(mode) {
+    this.sortMode = normalizeSort(mode);
+    try {
+      localStorage.setItem(SORT_KEY, this.sortMode);
+    } catch {}
+    this.renderList();
+  }
+
+  // Probes every profile now and then while the dialog is shown.
+  startProbing() {
+    if (this.probeTimer) return;
+    this.probeTimer = setInterval(() => this.probe(), PROBE_EVERY_MS);
+    this.probe();
+  }
+
+  stopProbing() {
+    clearInterval(this.probeTimer);
+    clearTimeout(this.editProbeTimer);
+    this.probeTimer = null;
+  }
+
+  // Asks main which brokers answer: all of them, or the profile `only`.
+  async probe(only = null) {
+    if (!only && (document.hidden || this.probing)) return;
+    const targets = (only ? [only] : this.profiles).map(probeTarget).filter(Boolean);
+    if (!targets.length) return;
+    if (!only) this.probing = true;
+    let results;
+    try {
+      results = await this.api.probeBrokers(targets.map(({ id, host, port }) => ({ id, host, port })));
+    } catch {
+      return;
+    } finally {
+      if (!only) this.probing = false;
+    }
+    let changed = false;
+    for (const t of targets) {
+      const r = results?.[t.id];
+      if (!r) continue;
+      const before = this.reach.get(t.id);
+      if (before?.key !== t.key || before.online !== r.online || before.error !== r.error) changed = true;
+      this.reach.set(t.id, { key: t.key, online: !!r.online, error: r.online ? undefined : String(r.error || 'No answer') });
+    }
+    if (changed) this.renderList();
+  }
+
+  // The host or port of `p` was typed: probe it once the typing pauses.
+  probeSoon(p) {
+    clearTimeout(this.editProbeTimer);
+    if (!this.probeTimer) return;
+    this.editProbeTimer = setTimeout(() => this.probe(p), PROBE_EDIT_MS);
   }
 
   async load() {
@@ -42,15 +136,18 @@ export class ConnectionDialog {
     this.opts.onProfilesChanged?.();
   }
 
-  // The first profile that is not open, else the first.
+  // The first profile in the list that is not open, else the first.
   firstClosed() {
-    return this.profiles.find((p) => !this.openIds.has(p.id)) || this.profiles[0];
+    const list = this.ordered;
+    return list.find((p) => !this.openIds.has(p.id)) || list[0];
   }
 
-  // Delete follows what is open, without redrawing the form.
+  // The list, Delete and Connect follow what is open, without redrawing the form.
   setOpenProfiles(ids) {
     this.openIds = new Set(ids);
+    this.renderList();
     this.renderDelete();
+    this.renderConnectLabel();
   }
 
   renderDelete() {
@@ -66,6 +163,7 @@ export class ConnectionDialog {
     this.profiles = await this.api.listProfiles();
     if (!this.profiles.some((p) => p.id === this.selectedId)) this.selectedId = this.profiles[0]?.id ?? null;
     if (this.host) this.render(this.box.contains(document.activeElement) ? 'list' : null);
+    if (this.probeTimer) this.probe(); // profiles added there
     this.opts.onProfilesChanged?.();
   }
 
@@ -118,6 +216,7 @@ export class ConnectionDialog {
       this.unmount();
       this.host = host;
       host.append(this.box);
+      this.startProbing();
     }
     this.mounted = opts;
     const select = profileId !== this.tabProfileId && profileId !== this.selectedId && this.profiles.some((p) => p.id === profileId);
@@ -138,6 +237,7 @@ export class ConnectionDialog {
   unmount() {
     if (!this.host) return;
     this.flush();
+    this.stopProbing();
     this.box.remove();
     this.host = null;
     this.mounted = null;
@@ -170,8 +270,9 @@ export class ConnectionDialog {
     }
     if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !isTypingTarget(t)) {
       e.preventDefault();
-      const i = this.profiles.findIndex((p) => p.id === this.selectedId);
-      const next = this.profiles[Math.max(0, Math.min(this.profiles.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
+      const list = this.ordered;
+      const i = list.findIndex((p) => p.id === this.selectedId);
+      const next = list[Math.max(0, Math.min(list.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1)))];
       if (next && next.id !== this.selectedId) {
         this.selectedId = next.id;
         this.render();
@@ -202,29 +303,26 @@ export class ConnectionDialog {
     this.deleteBtn = null;
     const side = el('div', 'conn-list');
     const listHead = el('div', 'conn-list-head');
-    listHead.append(
-      el('span', 'pane-title', 'Connections'),
+    const sortBtn = (this.sortBtn = iconButton('sort', 'Sort connections', () => {
+      const r = sortBtn.getBoundingClientRect();
+      showMenu(r.left, r.bottom + 4, SORT_MODES.map((m) => ({ label: m.label, checked: m.id === this.sortMode, action: () => this.setSort(m.id) })));
+    }, 'btn icon small conn-sort'));
+    const actions = el('div', 'conn-list-actions');
+    actions.append(
+      sortBtn,
       button('+ New', 'Add a connection', () => {
         const p = blankProfile();
         this.profiles.push(p);
         this.selectedId = p.id;
         this.persist();
         this.render('name');
+        this.probeSoon(p);
       }, 'btn small'),
     );
-    side.append(listHead);
-    for (const p of this.profiles) {
-      const item = el('div', 'conn-item' + (p.id === this.selectedId ? ' active' : ''));
-      item.tabIndex = p.id === this.selectedId ? 0 : -1;
-      item.title = 'Double-click or press Enter to connect';
-      item.append(el('div', 'conn-name', p.name || '(unnamed)'), el('div', 'conn-url', `${p.protocol}://${p.host}:${p.port}`));
-      item.addEventListener('click', () => {
-        this.selectedId = p.id;
-        this.render();
-      });
-      item.addEventListener('dblclick', () => this.connect());
-      side.append(item);
-    }
+    listHead.append(el('span', 'pane-title', 'Connections'), actions);
+    this.listEl = el('div', 'conn-items');
+    side.append(listHead, this.listEl);
+    this.renderList();
 
     const form = el('div', 'conn-form');
     const p = this.selected;
@@ -236,6 +334,59 @@ export class ConnectionDialog {
     else if (focus === 'list') side.querySelector('.conn-item.active')?.focus();
   }
 
+  // The list alone, in the chosen order; the form stays as it is. Keeps the
+  // focus on the selected connection when it was in the list.
+  renderList() {
+    if (!this.listEl) return;
+    const focused = this.listEl.contains(document.activeElement);
+    const sortTitle = `Sort connections: ${SORT_MODES.find((m) => m.id === this.sortMode).label}`;
+    this.sortBtn.title = sortTitle;
+    this.sortBtn.setAttribute('aria-label', sortTitle);
+    this.listEl.textContent = '';
+    for (const p of this.ordered) {
+      const item = el('div', 'conn-item' + (p.id === this.selectedId ? ' active' : ''));
+      item.dataset.id = p.id;
+      item.tabIndex = p.id === this.selectedId ? 0 : -1;
+      item.title = 'Double-click or press Enter to connect';
+      const top = el('div', 'conn-item-top');
+      top.append(el('span', 'reach-dot'), el('div', 'conn-name'));
+      if (this.openIds.has(p.id)) {
+        const badge = el('span', 'conn-open', 'Open');
+        badge.title = 'Open in a tab: Connect goes to it';
+        top.append(badge);
+      }
+      item.append(top, el('div', 'conn-url'));
+      this.fillListItem(item, p);
+      item.addEventListener('click', () => {
+        this.selectedId = p.id;
+        this.render();
+      });
+      item.addEventListener('dblclick', () => this.connect());
+      this.listEl.append(item);
+    }
+    if (focused) this.listEl.querySelector('.conn-item.active')?.focus();
+  }
+
+  // The name, address and broker dot of the list entry of `p`.
+  fillListItem(item, p) {
+    item.querySelector('.conn-name').textContent = p.name || '(unnamed)';
+    item.querySelector('.conn-url').textContent = `${p.protocol}://${p.host}:${p.port}`;
+    const dot = item.querySelector('.reach-dot');
+    const { online, error, target } = this.reachOf(p.id);
+    const state = !target ? 'none' : online === undefined ? 'checking' : online ? 'online' : 'offline';
+    dot.className = `reach-dot ${state}`;
+    dot.dataset.state = state;
+    dot.title = {
+      none: '',
+      checking: 'Checking whether the broker answers…',
+      online: `Online: ${target?.host}:${target?.port} answers`,
+      offline: `Offline: ${error}`,
+    }[state];
+    if (state === 'none') dot.removeAttribute('role');
+    else dot.setAttribute('role', 'img');
+    dot.setAttribute('aria-label', dot.title);
+  }
+
   // × only where the tab may be cancelled.
   renderClose() {
     const shown = this.box.querySelector(':scope > .modal-close');
@@ -243,12 +394,17 @@ export class ConnectionDialog {
     if (!shown) this.box.append(button('×', 'Close this tab (Esc)', () => this.cancel(), 'btn icon modal-close'));
   }
 
-  // Retry where the tab's last attempt with the selected profile failed.
+  // Retry where the tab's last attempt with the selected profile failed; Go
+  // to tab where the profile is open in another tab (see app.js showDuplicate).
   renderConnectLabel() {
     if (!this.connectBtn) return;
-    const retry = !!this.mounted?.failed && this.selectedId === this.tabProfileId;
-    this.connectBtn.textContent = retry ? 'Retry' : 'Connect';
-    this.connectBtn.title = retry ? 'Try connecting to this broker again' : 'Connect to this broker';
+    const own = this.selectedId === this.tabProfileId;
+    const [label, title] =
+      !!this.mounted?.failed && own ? ['Retry', 'Try connecting to this broker again']
+      : !own && this.openIds.has(this.selectedId) ? ['Go to tab', 'This connection is open in a tab: show it']
+      : ['Connect', 'Connect to this broker'];
+    this.connectBtn.textContent = label;
+    this.connectBtn.title = title;
   }
 
   renderForm(form, p) {
@@ -396,6 +552,7 @@ export class ConnectionDialog {
         this.selectedId = copy.id;
         this.persist();
         this.render('name');
+        this.probeSoon(copy);
       }),
       el('span', 'spacer'),
       (this.connectBtn = button('Connect', 'Connect to this broker', () => this.connect(), 'btn primary connect-btn')),
@@ -407,12 +564,12 @@ export class ConnectionDialog {
     this.renderDelete();
   }
 
+  // After an edit of the name, host or port. The entry keeps its place until
+  // the list is drawn again, so it does not jump while the name is typed.
   refreshListItem(p) {
-    const items = this.box.querySelectorAll('.conn-item');
-    const i = this.profiles.indexOf(p);
-    if (!items[i]) return;
-    items[i].querySelector('.conn-name').textContent = p.name || '(unnamed)';
-    items[i].querySelector('.conn-url').textContent = `${p.protocol}://${p.host}:${p.port}`;
+    const item = [...(this.listEl?.children || [])].find((x) => x.dataset.id === p.id);
+    if (item) this.fillListItem(item, p);
+    if (this.reach.get(p.id)?.key !== probeTarget(p)?.key) this.probeSoon(p);
   }
 
   async remove(p) {

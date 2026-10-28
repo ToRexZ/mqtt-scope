@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { blankProfile, connectSignature, parseSubscriptions, formatSubscriptions, DEFAULT_PORTS, newId } from '../../renderer/profiles.js';
+import { blankProfile, connectSignature, parseSubscriptions, formatSubscriptions, DEFAULT_PORTS, newId, SORT_MODES, normalizeSort, sortProfiles, probeTarget } from '../../renderer/profiles.js';
 import { prng } from './_util.mjs';
 
 describe('blankProfile', () => {
@@ -189,5 +189,52 @@ describe('connectSignature', () => {
     assert.equal(connectSignature({ ...p, mqttVersion: ' ' }), connectSignature({ ...p, mqttVersion: undefined }));
     assert.notEqual(connectSignature({ ...p, mqttVersion: '5' }), connectSignature(p));
     assert.notEqual(connectSignature({ ...p, port: '' }), connectSignature({ ...p, port: 0 }));
+  });
+});
+
+describe('sortProfiles', () => {
+  const p = (id, name) => ({ id, name });
+  const list = [p('a', 'robot-10'), p('b', 'Robot-9'), p('c', 'alpha'), p('d', ''), p('e', 'Beta')];
+  const ids = (xs) => xs.map((x) => x.id);
+
+  test('saved order is the list as it is, copied', () => {
+    const out = sortProfiles(list, 'saved');
+    assert.deepEqual(ids(out), ['a', 'b', 'c', 'd', 'e']);
+    assert.notEqual(out, list);
+  });
+
+  test('name: case-insensitive, numbers by value, unnamed last', () => {
+    assert.deepEqual(ids(sortProfiles(list, 'name')), ['c', 'e', 'b', 'a', 'd']);
+  });
+
+  test('status: open, then online, then not checked yet, then offline; by name within each', () => {
+    const openIds = new Set(['e', 'a']);
+    const online = { a: false, b: true, c: undefined, d: false, e: true };
+    assert.deepEqual(ids(sortProfiles(list, 'status', { openIds, online: (id) => online[id] })), ['e', 'a', 'b', 'c', 'd']);
+  });
+
+  test('equal names keep their saved order', () => {
+    const twins = [p('x', 'Same'), p('y', 'same'), p('z', 'Same')];
+    assert.deepEqual(ids(sortProfiles(twins, 'name')), ['x', 'y', 'z']);
+    assert.deepEqual(ids(sortProfiles(twins, 'status')), ['x', 'y', 'z']);
+  });
+
+  test('an unknown mode is saved order', () => {
+    assert.deepEqual(ids(sortProfiles(list, 'bogus')), ['a', 'b', 'c', 'd', 'e']);
+    assert.equal(normalizeSort('bogus'), 'saved');
+    assert.equal(normalizeSort(null), 'saved');
+    for (const m of SORT_MODES) assert.equal(normalizeSort(m.id), m.id);
+    assert.deepEqual(SORT_MODES.map((m) => m.id), ['saved', 'name', 'status']);
+  });
+});
+
+describe('probeTarget', () => {
+  test('host and port of a profile, or null when it has none', () => {
+    assert.deepEqual(probeTarget({ id: 'a', host: ' broker ', port: '1883' }), { id: 'a', host: 'broker', port: 1883, key: 'broker:1883' });
+    assert.equal(probeTarget({ id: 'a', host: 'Broker.Local', port: 8883 }).key, 'broker.local:8883');
+    assert.equal(probeTarget({ id: 'a', host: '  ', port: 1883 }), null);
+    assert.equal(probeTarget({ id: 'a', host: 'h', port: '' }), null);
+    assert.equal(probeTarget({ id: 'a', host: 'h', port: 0 }), null);
+    assert.equal(probeTarget({ id: 'a', host: 'h', port: 99999 }), null);
   });
 });

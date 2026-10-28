@@ -782,3 +782,116 @@ test('an edit in another window shows the hint', async ({ env }) => {
   await expect(page.locator('#tab-host .reconnect-hint')).toBeVisible();
   expect(errors).toEqual([]);
 });
+
+test('the list marks open connections and brokers that answer; Connect on an open one reads Go to tab', async ({ env }) => {
+  const up = await env.broker();
+  const down = await closedPort();
+  const { page, errors } = await env.launch({
+    userData: makeUserData({ profiles: [profile(up.port, { id: 'up', name: 'Up' }), profile(down, { id: 'down', name: 'Down' })] }),
+  });
+  const dlg = page.locator('.conn-dialog');
+  const item = (name) => dlg.locator('.conn-item').filter({ has: page.locator('.conn-name').getByText(name, { exact: true }) });
+  const dot = (name) => item(name).locator('.reach-dot');
+  const button = dlg.locator('.connect-btn');
+
+  // The broker that listens is online; the closed port is offline, with why.
+  await expect(dot('Up')).toHaveAttribute('data-state', 'online');
+  await expect(dot('Up')).toHaveAttribute('title', `Online: 127.0.0.1:${up.port} answers`);
+  await expect(dot('Down')).toHaveAttribute('data-state', 'offline');
+  await expect(dot('Down')).toHaveAttribute('title', 'Offline: Connection refused');
+  await expect(dlg.locator('.conn-open')).toHaveCount(0);
+
+  // Up opens in this tab; a new tab's list says so.
+  await item('Up').click();
+  await button.click();
+  await expect(dlg).toBeHidden();
+  const idUp = await activeId(page);
+  await page.click('.tab-new');
+  await expect(item('Up').locator('.conn-open')).toHaveText('Open');
+  await expect(item('Down').locator('.conn-open')).toHaveCount(0);
+  await expect(dlg.locator('.conn-item.active .conn-name')).toHaveText('Down');
+  await expect(button).toHaveText('Connect');
+
+  // Typing a port that answers re-checks that broker.
+  await dlg.locator('.conn-form [name="port"]').fill(String(up.port));
+  await expect(dot('Down')).toHaveAttribute('data-state', 'online');
+  await dlg.locator('.conn-form [name="port"]').fill(String(down));
+  await expect(dot('Down')).toHaveAttribute('data-state', 'offline');
+
+  // A profile without a host has no dot.
+  await dlg.locator('.conn-form [name="host"]').fill('');
+  await expect(dot('Down')).toHaveAttribute('data-state', 'none');
+  await dlg.locator('.conn-form [name="host"]').fill('127.0.0.1');
+
+  // Selecting the open one offers to go to its tab, which closes this picker.
+  await item('Up').click();
+  await expect(button).toHaveText('Go to tab');
+  await button.click();
+  await expect.poll(() => tabCount(page)).toBe(1);
+  expect(await activeId(page)).toBe(idUp);
+
+  // Closing the tab takes the mark away.
+  await page.keyboard.press(`${MOD}+t`);
+  await expect(item('Up').locator('.conn-open')).toHaveText('Open');
+  await tabEl(page, idUp).locator('.conn-tab-close').click();
+  await expect(dlg.locator('.conn-open')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('the list sorts by name, by open and online first, or as saved; the choice is kept', async ({ env }) => {
+  const up = await env.broker();
+  const down = await closedPort();
+  const userData = makeUserData({
+    profiles: [
+      profile(down, { id: 'r10', name: 'robot-10' }),
+      profile(up.port, { id: 'r9', name: 'Robot-9' }),
+      profile(down, { id: 'al', name: 'alpha' }),
+      profile(up.port, { id: 'be', name: 'Beta', clientId: 'beta' }),
+    ],
+  });
+  const first = await env.launch({ userData });
+  const { page, errors } = first;
+  const dlg = page.locator('.conn-dialog');
+  const names = dlg.locator('.conn-item .conn-name');
+  const sortBtn = dlg.locator('.conn-sort');
+  const sortBy = async (label) => {
+    await sortBtn.click();
+    await page.locator('.ctx-menu .ctx-item', { hasText: label }).click();
+  };
+
+  await expect(names).toHaveText(['robot-10', 'Robot-9', 'alpha', 'Beta']);
+  await expect(sortBtn).toHaveAttribute('title', 'Sort connections: Saved order');
+  await sortBtn.click();
+  await expect(page.locator('.ctx-menu .ctx-item')).toHaveText(['Saved order', 'Name', 'Open and online first']);
+  await expect(page.locator('.ctx-menu .ctx-item.checked')).toHaveText('Saved order');
+  await page.keyboard.press('Escape');
+
+  // Name: case-insensitive, numbers by value. The arrow keys follow the list.
+  await sortBy('Name');
+  await expect(names).toHaveText(['alpha', 'Beta', 'Robot-9', 'robot-10']);
+  await expect(sortBtn).toHaveAttribute('title', 'Sort connections: Name');
+  await dlg.locator('.conn-item', { hasText: 'alpha' }).click();
+  await page.keyboard.press('ArrowDown');
+  await expect(dlg.locator('.conn-item.active .conn-name')).toHaveText('Beta');
+
+  // Open and online first: Beta has a tab, Robot-9 answers, the others do not.
+  await dlg.locator('.connect-btn').click();
+  await expect(dlg).toBeHidden();
+  await page.click('.tab-new');
+  await sortBy('Open and online first');
+  await expect(names).toHaveText(['Beta', 'Robot-9', 'alpha', 'robot-10']);
+  await expect(dlg.locator('.conn-item').first().locator('.conn-open')).toHaveText('Open');
+
+  // Saved order again, and the choice survives a restart.
+  await sortBy('Saved order');
+  await expect(names).toHaveText(['robot-10', 'Robot-9', 'alpha', 'Beta']);
+  await sortBy('Name');
+  expect(errors).toEqual([]);
+  await env.closeApp(first);
+  const second = await env.launch({ userData });
+  const dlg2 = second.page.locator('.conn-dialog');
+  await second.page.click('.tab-new');
+  await expect(dlg2.locator('.conn-sort')).toHaveAttribute('title', 'Sort connections: Name');
+  await expect(dlg2.locator('.conn-item .conn-name')).toHaveText(['alpha', 'Beta', 'Robot-9', 'robot-10']);
+  expect(second.errors).toEqual([]);
+});
