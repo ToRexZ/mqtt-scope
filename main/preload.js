@@ -78,6 +78,9 @@ contextBridge.exposeInMainWorld('api', {
   listProfiles: () => ipcRenderer.invoke('profiles:list'),
   saveProfiles: (list) => ipcRenderer.invoke('profiles:save', list),
   profileSecurity: () => ipcRenderer.invoke('profiles:security'),
+  // [{ id, host, port }] -> { [id]: { online, error } } (main/brokerProbe.js);
+  // `first` goes before the probes already waiting
+  probeBrokers: (targets, first = false) => ipcRenderer.invoke('profiles:probe', targets, first),
   onStoreChanged: (cb) => ipcRenderer.on('store:changed', (_e, name) => cb(name)),
   storeGet: (name) => ipcRenderer.invoke('store:get', name),
   storeSet: (name, value) => ipcRenderer.invoke('store:set', name, value),

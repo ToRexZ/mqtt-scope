@@ -46,6 +46,43 @@ export function connectSignature(profile) {
   return JSON.stringify(SIGNATURE_FIELDS.map(value));
 }
 
+// How the connection list is ordered (the sort button in its header).
+export const SORT_MODES = [
+  { id: 'saved', label: 'Saved order' },
+  { id: 'name', label: 'Name' },
+  { id: 'status', label: 'Open and online first' },
+];
+
+export const normalizeSort = (mode) => (SORT_MODES.some((m) => m.id === mode) ? mode : 'saved');
+
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+
+// A sorted copy. 'name' puts unnamed profiles last; 'status' puts profiles
+// open in a tab first, then brokers that answered, then ones not checked
+// yet, then ones that did not answer, by name within each. online(id) is
+// true, false or undefined (not checked yet). Ties keep the saved order.
+export function sortProfiles(profiles, mode, { openIds = new Set(), online = () => undefined } = {}) {
+  const indexed = profiles.map((p, i) => ({ p, i }));
+  const byName = (a, b) => !a.p.name - !b.p.name || collator.compare(a.p.name || '', b.p.name || '');
+  const rank = ({ p }) => (openIds.has(p.id) ? 0 : { true: 1, undefined: 2, false: 3 }[String(online(p.id))]);
+  const compare = {
+    name: byName,
+    status: (a, b) => rank(a) - rank(b) || byName(a, b),
+  }[normalizeSort(mode)];
+  if (compare) indexed.sort((a, b) => compare(a, b) || a.i - b.i);
+  return indexed.map((x) => x.p);
+}
+
+// What main probes for a profile (see main/brokerProbe.js), or null when it
+// has no host or port yet. `key` tells whether a result still fits the
+// profile after an edit.
+export function probeTarget(p) {
+  const host = String(p.host ?? '').trim();
+  const port = String(p.port ?? '').trim() === '' ? NaN : Number(p.port);
+  if (!host || !Number.isInteger(port) || port < 1 || port > 65535) return null;
+  return { id: p.id, host, port, key: `${host.toLowerCase()}:${port}` };
+}
+
 export function parseSubscriptions(text) {
   return text
     .split('\n')

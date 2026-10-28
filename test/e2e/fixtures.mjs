@@ -163,9 +163,12 @@ export async function mockDialogs(app, answers) {
   await app.evaluate(({ dialog }, a) => {
     const calls = (globalThis.__dialogCalls ||= []);
     const opts = (args) => args.find((x) => x && typeof x === 'object' && ('message' in x || 'defaultPath' in x || 'properties' in x)) || {};
+    // The action is the button that is not Cancel (see main/dialogs.js).
     dialog.showMessageBox = async (...args) => {
-      calls.push({ kind: 'confirm', message: opts(args).message, detail: opts(args).detail });
-      return { response: a.confirm === false ? 1 : 0 };
+      const o = opts(args);
+      calls.push({ kind: 'confirm', message: o.message, detail: o.detail });
+      const cancel = o.cancelId ?? 1;
+      return { response: a.confirm === false ? cancel : Math.max(0, (o.buttons || []).findIndex((_, i) => i !== cancel)) };
     };
     dialog.showSaveDialog = async (...args) => {
       calls.push({ kind: 'save', defaultPath: opts(args).defaultPath });

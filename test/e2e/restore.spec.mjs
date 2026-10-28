@@ -64,17 +64,17 @@ const setBounds = (app, name, bounds) =>
   app.evaluate(({ BrowserWindow }, [n, b]) => BrowserWindow.getAllWindows().find((w) => w.getTitle() === `MQTT Scope — ${n}`).setBounds(b), [name, bounds]);
 const closeWindow = (app, name) => app.evaluate(({ BrowserWindow }, n) => BrowserWindow.getAllWindows().find((w) => w.getTitle() === `MQTT Scope — ${n}`).close(), name);
 
-// Answers every native message box with the button at `response` and
+// Answers every native message box with the button labelled `label` and
 // records what it asked.
-async function answerDialogs(app, response) {
-  await app.evaluate(({ dialog }, r) => {
+async function answerDialogs(app, label) {
+  await app.evaluate(({ dialog }, l) => {
     const asked = (globalThis.__asked ||= []);
     dialog.showMessageBox = async (...args) => {
       const { message, buttons } = args.find((a) => a && typeof a === 'object' && 'message' in a);
       asked.push({ message, buttons });
-      return { response: r };
+      return { response: buttons.indexOf(l) };
     };
-  }, response);
+  }, label);
 }
 const asked = (app) => app.evaluate(() => globalThis.__asked || []);
 
@@ -126,7 +126,7 @@ test('tabs come back after a relaunch, a disconnected one stays disconnected', a
   await page.click('.tab-new');
   const dlg = page.locator('.conn-dialog');
   await dlg.locator('.conn-item').filter({ has: page.locator('.conn-name').getByText('Broker B', { exact: true }) }).click();
-  await expect(dlg.getByRole('button', { name: 'Delete' })).toBeDisabled();
+  await expect(dlg.getByRole('button', { name: 'Delete' })).toHaveAttribute('aria-disabled', 'true');
   await expect(dlg.getByRole('button', { name: 'Delete' })).toHaveAttribute('title', 'Close its tab first');
   await dlg.locator('.connect-btn').click();
   await expect(tabNames(page)).toHaveText(['Broker A', 'Broker B', 'Broker C']);
@@ -189,7 +189,7 @@ test('a window closed while another stays open does not come back', async ({ env
   await expect(activeTabName(pages[names.findIndex((n) => n.length === 2)])).toHaveText('Broker C');
 
   // Closing it (restore is on: it closes without asking) forgets it.
-  await answerDialogs(app, 1);
+  await answerDialogs(app, 'Cancel');
   await expect.poll(() => openProfiles(app)).toEqual(['a', 'b', 'c']);
   await closeWindow(app, 'Broker C');
   await expect.poll(() => windowCount(app)).toBe(1);
@@ -373,15 +373,16 @@ test('closing a window with two connected tabs asks when restore is off', async 
   await connectTo(page, 'Broker A');
   await openTabTo(page, 'Broker B');
   const other = await openWindow(app); // so that closing the first does not quit
-  const question = { message: 'Close 2 connections?', buttons: ['Close', 'Cancel'] };
+  // Cancel on the left on Linux, as GTK has it (main/dialogs.js).
+  const question = { message: 'Close 2 connections?', buttons: process.platform === 'linux' ? ['Cancel', 'Close'] : ['Close', 'Cancel'] };
 
   // Cancel keeps the window and its connections; the next attempt asks again.
-  await answerDialogs(app, 1);
+  await answerDialogs(app, 'Cancel');
   await closeWindow(app, 'Broker B');
   await expect.poll(() => asked(app)).toEqual([question]);
   expect(await windowCount(app)).toBe(2);
   await expect.poll(() => tabStates(page)).toEqual(['Broker A: session connected', 'Broker B: session connected']);
-  await answerDialogs(app, 0);
+  await answerDialogs(app, 'Close');
   await closeWindow(app, 'Broker B');
   await expect.poll(() => windowCount(app)).toBe(1);
   expect(await asked(app)).toEqual([question, question]);
@@ -400,7 +401,7 @@ test('closing a window with two connected tabs asks when restore is off', async 
   // Quitting never asks (a question would be cancelled and keep the app).
   await connectTo(third, 'Broker A');
   await openTabTo(third, 'Broker B');
-  await answerDialogs(app, 1);
+  await answerDialogs(app, 'Cancel');
   const exited = new Promise((resolve) => app.process().once('exit', () => resolve('exited')));
   await app.evaluate(({ app: a }) => a.quit()).catch(() => {});
   const timeout = new Promise((resolve) => setTimeout(() => resolve('still running'), 8000));

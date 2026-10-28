@@ -58,8 +58,6 @@ const select = (topic) =>
 try {
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForSelector('.conn-dialog');
-  await page.waitForTimeout(500);
-  await shot('connections');
   await page.click('.connect-btn');
   await page.waitForFunction(() => window.__mqttscope.status.state === 'connected');
   await page.waitForFunction(() => !!window.__mqttscope.tree.find('uagv/v2/DemoRobotics/AGV-001/state'), null, { timeout: 15000 });
@@ -68,6 +66,13 @@ try {
   // shows the tab strip with two tabs; the first tab stays the active one.
   const firstTab = await page.evaluate(() => window.__mqttscope.shell.active.connId);
   await openTabTo(page, 'Demo over WebSocket');
+  // The connection list in a third tab: both demo connections open, every
+  // broker checked (Production is not there).
+  await page.click('.tab-new');
+  await page.waitForSelector('.conn-dialog');
+  await page.waitForFunction(() => !document.querySelector('.reach-dot.checking'), null, { timeout: 10000 });
+  await shot('connections');
+  await page.keyboard.press('Escape');
   await page.click(`.conn-tab[data-id="${firstTab}"]`);
   await page.waitForFunction((id) => window.__mqttscope.shell.active.connId === id, firstTab);
   // Two plot tabs: Fleet (lines) and Safety (state transitions + speed).

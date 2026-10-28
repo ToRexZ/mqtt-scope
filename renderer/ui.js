@@ -24,23 +24,40 @@ export function button(label, title, onClick, className = 'btn') {
 let openMenu = null;
 
 export function closeMenu() {
-  openMenu?.remove();
+  const menu = openMenu;
+  if (!menu) return;
   openMenu = null;
+  const hadFocus = menu.contains(document.activeElement);
+  menu.remove();
+  if (hadFocus) menu.returnFocus?.focus();
+  menu.onClose?.();
 }
 
 export const menuOpen = () => !!openMenu;
 
-// items: [{ label, action, disabled }] or 'separator'
-export function showMenu(x, y, items) {
+// items: [{ label, action, disabled, checked }] or 'separator'. An item with
+// `checked` (true or false) is one of a set of choices, ticked when true.
+// opts.keyboard: the menu takes the focus (the ticked or first item), the
+// arrow keys, Home and End move it, Enter or Space picks, Esc closes and gives
+// the focus back. opts.onClose() runs when it closes, however.
+export function showMenu(x, y, items, { keyboard = false, onClose } = {}) {
   closeMenu();
   const menu = el('div', 'ctx-menu');
+  menu.setAttribute('role', 'menu');
   for (const item of items) {
     if (item === 'separator') {
       menu.append(el('div', 'ctx-sep'));
       continue;
     }
-    const row = el('div', 'ctx-item' + (item.disabled ? ' disabled' : ''), item.label);
-    if (!item.disabled) {
+    const row = el('div', 'ctx-item' + (item.disabled ? ' disabled' : '') + (item.checked ? ' checked' : ''), item.label);
+    row.setAttribute('role', 'checked' in item ? 'menuitemradio' : 'menuitem');
+    if ('checked' in item) {
+      menu.classList.add('has-checks');
+      row.setAttribute('aria-checked', String(!!item.checked));
+    }
+    if (item.disabled) row.setAttribute('aria-disabled', 'true');
+    else {
+      if (keyboard) row.tabIndex = -1;
       row.addEventListener('click', () => {
         closeMenu();
         item.action();
@@ -48,11 +65,28 @@ export function showMenu(x, y, items) {
     }
     menu.append(row);
   }
+  menu.onClose = onClose;
   overlayHost().append(menu);
   const r = menu.getBoundingClientRect();
   menu.style.left = `${Math.min(x, window.innerWidth - r.width - 4)}px`;
   menu.style.top = `${Math.min(y, window.innerHeight - r.height - 4)}px`;
   openMenu = menu;
+  if (keyboard) {
+    menu.returnFocus = document.activeElement;
+    const rows = [...menu.querySelectorAll('.ctx-item[tabindex]')];
+    (rows.find((row) => row.classList.contains('checked')) || rows[0])?.focus();
+    menu.addEventListener('keydown', (e) => {
+      const i = rows.indexOf(document.activeElement);
+      const go = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: rows.length - 1 }[e.key];
+      if (go !== undefined) rows[(go + rows.length) % rows.length]?.focus();
+      else if (e.key === 'Enter' || e.key === ' ') rows[i]?.click();
+      else if (e.key === 'Escape') closeMenu();
+      else if (e.key === 'Tab') return closeMenu(); // the focus moves on as usual
+      else return;
+      e.preventDefault();
+      e.stopPropagation();
+    });
+  }
 }
 
 // Guarded so modules importing ui.js can be loaded in Node for unit tests.

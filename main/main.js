@@ -5,6 +5,8 @@ const path = require('node:path');
 const fs = require('node:fs');
 const { ConnectionRegistry } = require('./connections');
 const { createProfileStore, keepOpen } = require('./profileStore');
+const { probeAll, validTargets } = require('./brokerProbe');
+const { question } = require('./dialogs');
 const { createJsonStore } = require('./jsonStore');
 const { createLayoutStore } = require('./layoutStore');
 const { WindowState, placeBounds } = require('./windowState');
@@ -395,8 +397,9 @@ function createMainWindow({ bounds = null, restore = null, adopt = false } = {})
     asking = true;
     entry.closing = true;
     try {
-      const res = await dialog.showMessageBox(win, { type: 'warning', message: `Close ${n} connections?`, buttons: ['Close', 'Cancel'], defaultId: 1, cancelId: 1 });
-      return res.response === 0;
+      const { okId, ...buttons } = question('Close');
+      const res = await dialog.showMessageBox(win, { type: 'warning', message: `Close ${n} connections?`, ...buttons });
+      return res.response === okId;
     } finally {
       asking = false;
       entry.closing = flushed;
@@ -608,6 +611,13 @@ function registerIpc() {
     return res;
   });
   ipcMain.handle('profiles:security', () => storageSecurity());
+  // Which brokers of the connection list answer (main windows only).
+  ipcMain.handle('profiles:probe', (e, targets, first) => {
+    if (!windows.has(e.sender.id)) throw new Error('Unknown window');
+    const ses = e.sender.session; // not readable once the window is gone
+    const resolve = async (host) => (await ses.resolveHost(host)).endpoints.map((ep) => ep.address);
+    return probeAll(validTargets(targets), { resolve, first: first === true });
+  });
   // A profile is open in one tab app-wide, so its layout needs no broadcast.
   // Main windows read and write layouts (not pop-outs), of profiles there are.
   const layoutId = (e, profileId) => {
@@ -736,15 +746,14 @@ function registerIpc() {
   });
 
   ipcMain.handle('dialog:confirm', async (e, { message, detail, okLabel } = {}) => {
+    const { okId, ...buttons } = question(okLabel);
     const res = await dialog.showMessageBox(parent(e), {
       type: 'warning',
-      buttons: [String(okLabel || 'OK'), 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
+      ...buttons,
       message: String(message),
       detail: detail ? String(detail) : undefined,
     });
-    return res.response === 0;
+    return res.response === okId;
   });
 
   ipcMain.handle('file:save', async (e, { defaultName, data } = {}) => {

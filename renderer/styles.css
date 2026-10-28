@@ -154,6 +154,13 @@ body.resizing-y {
 .btn.danger {
   color: var(--err);
 }
+/* Looks off but still answers a click (with why it is off). */
+.btn[aria-disabled='true'],
+.btn[aria-disabled='true']:hover {
+  opacity: 0.45;
+  background: var(--panel-2);
+  cursor: default;
+}
 .btn.on {
   background: var(--accent-soft);
   border-color: var(--accent);
@@ -1911,6 +1918,20 @@ body.moving-plot * {
   background: var(--accent);
   color: #fff;
 }
+.ctx-item:focus-visible {
+  outline: none;
+  background: var(--accent);
+  color: #fff;
+}
+.ctx-menu.has-checks .ctx-item {
+  position: relative;
+  padding-left: 26px;
+}
+.ctx-item.checked::before {
+  content: '✓';
+  position: absolute;
+  left: 9px;
+}
 .ctx-item.disabled {
   color: var(--faint);
   cursor: default;
@@ -2040,10 +2061,54 @@ body.moving-plot * {
   background: var(--accent-soft);
   border-left-color: var(--accent);
 }
+.conn-list-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+/* Name row: whether the broker answers, the name, Open when it has a tab. */
+.conn-item-top {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.reach-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+.reach-dot.none {
+  visibility: hidden;
+}
+.reach-dot.checking {
+  border: 1.5px dashed var(--faint);
+}
+.reach-dot.online {
+  background: var(--ok);
+}
+.reach-dot.offline {
+  border: 1.5px solid var(--faint);
+}
 .conn-name {
+  flex: 1;
+  min-width: 0;
   font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.conn-open {
+  flex: none;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 16px;
 }
 .conn-url {
+  padding-left: 14px; /* under the name, past the dot */
   color: var(--muted);
   font-family: var(--mono);
   font-size: 11.5px;
