@@ -273,3 +273,34 @@ test('publisher safety: topic stops following the tree once edited, retain reset
   await expect(pub.publish).toBeEnabled();
   expect(errors).toEqual([]);
 });
+
+test('publisher at its minimum height: the editor and library keep their size and the publisher scrolls', async ({ env }) => {
+  const broker = await env.broker();
+  const { page, errors } = await env.connected(broker);
+  const pub = publisher(page);
+  const box = (sel) => pub.root.locator(sel).evaluate((e) => e.getBoundingClientRect().toJSON());
+
+  // Drag the splitter far down: the publisher stops at its minimum height.
+  const s = await page.locator('#split-right').boundingBox();
+  await page.mouse.move(s.x + s.width / 2, s.y + s.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(s.x + s.width / 2, s.y + 2000, { steps: 5 });
+  await page.mouse.up();
+  expect((await page.locator('#publisher-host').boundingBox()).height).toBe(140);
+
+  // Nothing is squashed: the editor shows several lines, and the library's
+  // tabs sit inside it with room for a list below.
+  expect((await box('.payload-editor')).height).toBeGreaterThanOrEqual(100);
+  const lib = await box('.pub-library');
+  const tabs = await box('.lib-tabs');
+  expect(tabs.bottom).toBeLessThan(lib.bottom);
+  expect((await box('.lib-list')).height).toBeGreaterThan(50);
+
+  // Below the header it scrolls instead; the header with its collapse button stays.
+  const scroll = pub.root.locator('.pub-scroll');
+  expect(await scroll.evaluate((e) => e.scrollHeight > e.clientHeight)).toBe(true);
+  await scroll.evaluate((e) => (e.scrollTop = e.scrollHeight));
+  await expect(pub.root.locator('.pub-head').getByRole('button', { name: 'Collapse publisher' })).toBeInViewport();
+  await expect(pub.root.locator('.lib-list')).toBeInViewport();
+  expect(errors).toEqual([]);
+});

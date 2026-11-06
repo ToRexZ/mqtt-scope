@@ -6,6 +6,13 @@ All notable changes to MQTT Scope. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **The publisher dragged to its smallest height** no longer squashes the
+  payload editor and the Saved/Recent list to a sliver with the list's tabs
+  cut off. They keep a usable height, and everything below the Publish header
+  scrolls instead.
+
 ## [0.4.0] - 2026-10-28
 
 ### Added

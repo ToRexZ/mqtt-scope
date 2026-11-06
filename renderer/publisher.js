@@ -113,7 +113,11 @@ export class Publisher {
     side.append(tabs, this.list);
     body.append(this.payload, side);
 
-    this.root.append(head, row1, row2, body);
+    // Everything below the header scrolls when the publisher is made too
+    // short for it, so the editor and library keep a usable height.
+    const scroll = el('div', 'pub-scroll');
+    scroll.append(row1, row2, body);
+    this.root.append(head, scroll);
     host.append(this.root);
     this.validate();
     this.setFollow(true);
