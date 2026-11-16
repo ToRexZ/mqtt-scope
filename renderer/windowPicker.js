@@ -72,7 +72,8 @@ export function openWindowPicker(anchor, sec, { onApply, onCancel = () => {} }) 
   root.addEventListener('keydown', (e) => {
     e.stopPropagation(); // Esc must not also reset a zoom; Space must not freeze
     if (e.key === 'Escape') finish(false);
-    else if (e.key === 'Enter') {
+    else if (e.key === 'Enter' && !e.target.closest('button')) {
+      // (On a focused button Enter presses that button.)
       e.preventDefault();
       finish(true);
     }

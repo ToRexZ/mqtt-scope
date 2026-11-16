@@ -248,7 +248,7 @@ test('narrow plots move some header buttons into a menu', async ({ env }) => {
   await expect(card.getByRole('button', { name: '+ Series' })).toBeHidden();
   await expect(card.locator('.plot-more')).toBeVisible();
   await card.locator('.plot-more').click();
-  await expect(page.locator('.ctx-menu .ctx-item')).toHaveText(['Add series…', 'Export CSV…', 'Open in its own window', 'Show as state transitions']);
+  await expect(page.locator('.ctx-menu .ctx-item')).toHaveText(['Add series…', 'Export CSV: all collected points…', 'Export CSV: visible range…', 'Open in its own window', 'Show as state transitions']);
   await page.locator('.ctx-menu .ctx-item', { hasText: 'Show as state transitions' }).click();
   await expect(cards(page).first()).toHaveClass(/kind-states/);
   expect(errors).toEqual([]);

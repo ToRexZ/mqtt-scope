@@ -53,6 +53,14 @@ test('custom time window: picker in header and settings, cancel, persistence', a
   await expect(header).toHaveValue('300');
   expect(await page.evaluate(() => window.__mqttscope.plots.plots[0].windowSec)).toBe(300);
 
+  // Enter on a focused Cancel button cancels (it does not apply the fields).
+  await header.selectOption('custom');
+  await hours.fill('3');
+  await picker.getByRole('button', { name: 'Cancel' }).focus();
+  await page.keyboard.press('Enter');
+  await expect(picker).toHaveCount(0);
+  await expect(header).toHaveValue('300');
+
   // 0 h 0 min cannot be applied; 1 h 30 min can (Enter applies).
   await header.selectOption('custom');
   await hours.fill('0');
