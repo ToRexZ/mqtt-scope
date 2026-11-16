@@ -1,7 +1,9 @@
 // The Custom… time-window picker: a small popover under the time-window menu
 // with an hours and a minutes field (digits only; arrows, ↑/↓ and the scroll
-// wheel step them). Apply takes 1 min to 24 h. Enter applies; Esc or a click
-// outside cancels. Keys typed in it never reach the app's shortcuts.
+// wheel step them). Apply takes 1 min to 24 h. Enter applies and Esc cancels,
+// both giving focus back to the menu. A click outside, focus leaving it, the
+// window losing focus, full screen changing, or its menu going away or being
+// hidden cancel it too. Keys typed in it never reach the app's shortcuts.
 //
 //   openWindowPicker(select, plot.windowSec, { onApply: (sec) => …, onCancel: () => … });
 
@@ -15,6 +17,7 @@ export function openWindowPicker(anchor, sec, { onApply, onCancel = () => {} }) 
   current?.();
   const start = splitWindow(sec);
   const root = el('div', 'window-picker');
+  root.tabIndex = -1; // a click on its padding keeps focus inside it
   const hours = field('window-hours', start.hours, 24, 'h', 'Hours');
   const minutes = field('window-minutes', start.minutes, 59, 'min', 'Minutes');
   const apply = button('Apply', 'Use this time window', () => finish(true), 'btn small primary');
@@ -46,6 +49,7 @@ export function openWindowPicker(anchor, sec, { onApply, onCancel = () => {} }) 
     input.addEventListener(
       'wheel',
       (e) => {
+        if (!e.deltaY) return; // sideways scrolling
         e.preventDefault();
         const v = Math.min(max, Math.max(0, (whole(input.value) ?? 0) + (e.deltaY < 0 ? 1 : -1)));
         input.value = String(v);
@@ -58,16 +62,25 @@ export function openWindowPicker(anchor, sec, { onApply, onCancel = () => {} }) 
     return { label: wrap, input };
   }
 
-  function finish(ok) {
+  let done = false;
+  function finish(ok, refocus = true) {
     const s = ok ? total() : null;
-    if (ok && s === null) return;
-    root.remove();
-    document.removeEventListener('mousedown', outside, true);
+    if (done || (ok && s === null)) return;
+    done = true;
     current = null;
+    watch.disconnect();
+    document.removeEventListener('mousedown', outside, true);
+    document.removeEventListener('fullscreenchange', dismiss);
+    window.removeEventListener('blur', dismiss);
+    root.remove();
     if (ok) onApply(s);
     else onCancel();
+    if (refocus && anchor.isConnected) anchor.focus();
   }
-  const outside = (e) => !root.contains(e.target) && finish(false);
+  // Cancels without taking focus back: the user has moved on.
+  const dismiss = () => finish(false, false);
+  const outside = (e) => !root.contains(e.target) && dismiss();
+  const watch = new MutationObserver(() => (!anchor.isConnected || !anchor.checkVisibility()) && dismiss());
 
   root.addEventListener('keydown', (e) => {
     e.stopPropagation(); // Esc must not also reset a zoom; Space must not freeze
@@ -78,8 +91,13 @@ export function openWindowPicker(anchor, sec, { onApply, onCancel = () => {} }) 
       finish(true);
     }
   });
+  root.addEventListener('focusout', (e) => !root.contains(e.relatedTarget) && dismiss());
   document.addEventListener('mousedown', outside, true);
-  current = () => finish(false);
+  document.addEventListener('fullscreenchange', dismiss);
+  window.addEventListener('blur', dismiss);
+  // Its menu re-rendered (plots drawn again) or hidden (another tab shown).
+  watch.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'class', 'style'] });
+  current = dismiss;
 
   update();
   overlayHost().append(root);

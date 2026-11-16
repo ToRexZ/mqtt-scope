@@ -2554,6 +2554,9 @@ body.plot-window {
 
 /* ------------------------------------------------------------ custom time-window picker */
 
+.window-picker:focus {
+  outline: none;
+}
 .window-picker {
   position: fixed;
   z-index: var(--z-menu);

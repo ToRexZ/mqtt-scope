@@ -23,7 +23,7 @@ import { renderPlotSettings } from './plotSettings.js';
 import { renderLegend, updateLegend, kindToggle, windowSelect, resetViewButton } from './plotCard.js';
 import { openPlotPicker } from './plotPicker.js';
 import { seriesKey } from './plotMath.js';
-import { MIN_PLOT_WIDTH, labelOf, sourceLabel, defaultDisplay, layoutWeight, minPlotHeight, chartSeries, chartRange, chartAxis, plotCsv } from './plotView.js';
+import { MIN_PLOT_WIDTH, labelOf, sourceLabel, defaultDisplay, layoutWeight, minPlotHeight, chartSeries, chartRange, chartAxis, plotCsv, csvRange } from './plotView.js';
 
 const SAVE_DELAY_MS = 300;
 const REDRAW_MS = 500;
@@ -348,7 +348,7 @@ export class PlotsPanel {
   // the plot shows (zoom, else its time window, ending at the freeze).
   exportCsv(plot, visibleOnly = false) {
     const pointsOf = (topic, segs) => this.data.points(topic, segs);
-    const range = visibleOnly ? chartRange(plot, chartSeries(plot, pointsOf), { zoom: this.zoomByTab.get(this.tab.id) || null, frozenAt: this.frozenAt, now: Date.now() }) : null;
+    const range = visibleOnly ? csvRange(plot, chartSeries(plot, pointsOf), { zoom: this.zoomByTab.get(this.tab.id) || null, frozenAt: this.frozenAt, now: Date.now() }) : null;
     const name = `${plot.title.replace(/[^\w.-]+/g, '_')}${visibleOnly ? '_visible' : ''}.csv`;
     this.api.saveFile(name, plotCsv(plot, pointsOf, range)).then((f) => f && toast(`Saved ${f}`));
   }
@@ -356,8 +356,8 @@ export class PlotsPanel {
   csvMenu(plot, e) {
     const r = e.currentTarget.getBoundingClientRect();
     showMenu(r.left, r.bottom + 4, [
-      { label: 'All collected points', action: () => this.exportCsv(plot) },
-      { label: 'Visible range', action: () => this.exportCsv(plot, true) },
+      { label: 'All collected points…', action: () => this.exportCsv(plot) },
+      { label: 'Visible range…', action: () => this.exportCsv(plot, true) },
     ]);
   }
 

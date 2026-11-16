@@ -92,6 +92,12 @@ export function chartRange(plot, series, { zoom = null, frozenAt = null, now = D
   return Number.isFinite(first) && first < frozenAt ? { t0: first, t1: frozenAt } : null;
 }
 
+// The range "Visible range" exports: the chart's range, and when frozen
+// nothing after the freeze (even with the window All and no data before it).
+export function csvRange(plot, series, opts = {}) {
+  return chartRange(plot, series, opts) ?? (opts.frozenAt ? { t0: -Infinity, t1: opts.frozenAt } : null);
+}
+
 // Axis settings for the chart: a value zoom wins over the plot's fixed range.
 export function chartAxis(plot, yZoom = null) {
   return { yMin: yZoom ? yZoom.yMin : plot.yMin, yMax: yZoom ? yZoom.yMax : plot.yMax, kind: plot.kind, timeGrid: plot.timeGrid !== false };

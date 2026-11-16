@@ -21,6 +21,7 @@ import {
   windowLabel,
   splitWindow,
   plotCsv,
+  csvRange,
 } from '../../renderer/plotView.js';
 import { sanitizePlot } from '../../renderer/plotLayouts.js';
 
@@ -130,6 +131,15 @@ describe('chart input', () => {
     const some = plotCsv(p, () => pts, { t0: 2000, t1: 3000 }).split('\n');
     assert.deepEqual(some.slice(1).map((l) => l.split(',')[1]), ['2000', '3000']);
     assert.equal(plotCsv(p, () => pts, { t0: 5000, t1: 6000 }).split('\n').length, 1, 'header only');
+  });
+
+  test('csvRange: what the chart shows, and never past a freeze', () => {
+    const series = [{ points: [{ t: 70_000, v: 1 }] }];
+    assert.deepEqual(csvRange(plot({ windowSec: 60 }), series, { now: 100_000 }), { t0: 70_000, t1: 100_000 });
+    assert.deepEqual(csvRange(plot({ windowSec: 0 }), series, { zoom: { t0: 5, t1: 9 } }), { t0: 5, t1: 9 });
+    assert.equal(csvRange(plot({ windowSec: 0 }), series, { now: 100_000 }), null, 'All, live: everything');
+    assert.deepEqual(csvRange(plot({ windowSec: 0 }), series, { frozenAt: 60_000 }), { t0: -Infinity, t1: 60_000 }, 'all data after the freeze');
+    assert.deepEqual(csvRange(plot({ windowSec: 0 }), [{ points: [] }], { frozenAt: 60_000 }), { t0: -Infinity, t1: 60_000 }, 'no data yet');
   });
 
   test('plotCsv: a JSON path is written without the topic', () => {

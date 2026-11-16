@@ -90,7 +90,11 @@ export function windowSelect(plot, onWindow, { name, className = 'select small w
   };
   fill(plot.windowSec);
   select.addEventListener('change', () => {
-    if (select.value !== 'custom') return onWindow(Number(select.value));
+    if (select.value !== 'custom') {
+      const sec = Number(select.value);
+      fill(sec); // a preset replaces the custom entry
+      return onWindow(sec);
+    }
     select.value = String(plot.windowSec); // until a window is applied
     openWindowPicker(select, plot.windowSec, {
       onApply: (sec) => {
