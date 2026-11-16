@@ -16,6 +16,7 @@ import {
   historyItems,
   mockDialogs,
   activeTabName,
+  menu,
   tempDir,
   waitForFile,
   readJson,
@@ -237,6 +238,7 @@ test('CSV export neutralises spreadsheet formulas in aliases', async ({ env }) =
   const file = path.join(tempDir(), 'p.csv');
   await mockDialogs(app, { saveFile: file });
   await page.locator('.plot-card').getByRole('button', { name: 'CSV' }).click();
+  await menu(page, 'All collected points');
   await waitForFile(file);
   const line = readFileSync(file, 'utf8').split('\n')[1];
   expect(line).toContain(`"'=HYPERLINK(""http://x"")"`);

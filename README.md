@@ -115,7 +115,8 @@ saved messages. Runs on Linux, Windows and macOS.
   shows the values at that moment in each legend.
 - Quick add: right-click a numeric topic, or a number in the inspector's Tree
   view, → *Add to new plot* / *Add to plot “…”*. Up to 8 series per plot,
-  freeze (**Space**), CSV export (time, series alias, topic, path, value).
+  freeze (**Space**), CSV export (time, series alias, topic, path, value) of
+  all collected points or only the visible range.
 
 ![Plots](docs/screenshots/plots.png)
 

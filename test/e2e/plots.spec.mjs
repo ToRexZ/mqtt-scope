@@ -158,6 +158,8 @@ test('plots: add from tree and inspector, live values, window, freeze, remove, C
   const csvFile = path.join(tempDir(), 'climate.csv');
   await mockDialogs(app, { saveFile: csvFile });
   await climate.getByRole('button', { name: 'CSV' }).click();
+  expect(await menuLabels(page)).toEqual(['All collected points', 'Visible range']);
+  await menu(page, 'All collected points');
   await expect(toast(page).filter({ hasText: `Saved ${csvFile}` })).toBeVisible();
   expect(await dialogCalls(app)).toContainEqual({ kind: 'save', defaultPath: 'Climate.csv' });
   const csv = readFileSync(csvFile, 'utf8').split('\n');
@@ -174,6 +176,7 @@ test('plots: add from tree and inspector, live values, window, freeze, remove, C
   const robotCsv = path.join(tempDir(), 'robot.csv');
   await mockDialogs(app, { saveFile: robotCsv });
   await p2.getByRole('button', { name: 'CSV' }).click();
+  await menu(page, 'All collected points');
   await expect(toast(page).filter({ hasText: `Saved ${robotCsv}` })).toBeVisible();
   const robotRows = readFileSync(robotCsv, 'utf8').split('\n').slice(1).map((l) => l.split(',').slice(2).join(','));
   expect(robotRows).toEqual([
@@ -182,6 +185,26 @@ test('plots: add from tree and inspector, live values, window, freeze, remove, C
     '"m/robot › $.battery.volt","m/robot","$.battery.volt",12.1',
     '"m/robot › $.battery.volt","m/robot","$.battery.volt",12',
   ]);
+
+  // CSV of the visible range: while frozen, points that arrived after the
+  // freeze are left out (all collected points still has them).
+  await freeze.click();
+  await broker.publish('m/temp', '31.5');
+  await expect.poll(() => page.evaluate(() => window.__mqttscope.plots.data.points('m/temp', null).length)).toBe(4);
+  const visibleCsv = path.join(tempDir(), 'climate_visible.csv');
+  await mockDialogs(app, { saveFile: visibleCsv });
+  await climate.getByRole('button', { name: 'CSV' }).click();
+  await menu(page, 'Visible range');
+  await expect(toast(page).filter({ hasText: `Saved ${visibleCsv}` })).toBeVisible();
+  expect(await dialogCalls(app)).toContainEqual({ kind: 'save', defaultPath: 'Climate_visible.csv' });
+  expect(readFileSync(visibleCsv, 'utf8').split('\n').slice(1).map((l) => l.split(',')[5])).toEqual(['20', '21.5', '30']);
+  const allCsv = path.join(tempDir(), 'climate_all.csv');
+  await mockDialogs(app, { saveFile: allCsv });
+  await climate.getByRole('button', { name: 'CSV' }).click();
+  await menu(page, 'All collected points');
+  await expect(toast(page).filter({ hasText: `Saved ${allCsv}` })).toBeVisible();
+  expect(readFileSync(allCsv, 'utf8').split('\n').slice(1).map((l) => l.split(',')[5])).toEqual(['20', '21.5', '30', '31.5']);
+  await resume.click();
 
   // Plot definitions persist.
   await waitForLayout(userData, `p${broker.port}`, (d) => {

@@ -4,7 +4,7 @@
 
 import { decode, formatDateTime } from './payload.js';
 import { getAt } from './jsonPath.js';
-import { windowRange, nearest, isBinary, pointAtOrBefore } from './plotMath.js';
+import { windowRange, nearest, isBinary, pointAtOrBefore, pointsBetween } from './plotMath.js';
 import { MAX_SERIES, sourceLabel } from './plotLayouts.js';
 
 export { sourceLabel };
@@ -106,4 +106,20 @@ export function legendValue(plot, series, points, { hoverTime = null, frozenAt =
   if (!p) return { text: '–', title: 'No data yet' };
   const asState = (plot.kind === 'states' || series.display === 'state') && isBinary(points);
   return { text: asState ? String(p.v === 1) : String(Number(p.v.toPrecision(6))), title: formatDateTime(p.t) };
+}
+
+// The plot's points as CSV (every series, hidden ones too): all collected
+// points, or only those with range.t0 <= t <= range.t1.
+export function plotCsv(plot, pointsOf, range = null) {
+  // Quote text cells; a leading = + - @ would run as a formula in spreadsheets.
+  const q = (v) => `"${String(v).replace(/^([=+\-@\t\r])/, "'$1").replace(/"/g, '""')}"`;
+  const rows = ['time_iso,epoch_ms,series,topic,path,value'];
+  for (const s of plot.series) {
+    const path = s.segs && s.segs.length ? sourceLabel('', s.segs).replace(/^ › /, '') : '';
+    const all = pointsOf(s.topic, s.segs);
+    for (const p of range ? pointsBetween(all, range.t0, range.t1) : all) {
+      rows.push(`${new Date(p.t).toISOString()},${p.t},${q(labelOf(s))},${q(s.topic)},${q(path)},${p.v}`);
+    }
+  }
+  return rows.join('\n');
 }

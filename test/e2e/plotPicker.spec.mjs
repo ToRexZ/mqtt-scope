@@ -122,6 +122,7 @@ test('picker: scrollable topic list, message structure, multi-select with aliase
   const csvFile = path.join(dir, 'plot.csv');
   await mockDialogs(app, { saveFile: csvFile });
   await page.locator('.plot-card').getByRole('button', { name: 'CSV' }).click();
+  await menu(page, 'All collected points');
   await waitForFile(csvFile);
   const csv = readFileSync(csvFile, 'utf8').split('\n');
   expect(csv[0]).toBe('time_iso,epoch_ms,series,topic,path,value');

@@ -23,7 +23,7 @@ import { renderPlotSettings } from './plotSettings.js';
 import { renderLegend, updateLegend, kindToggle, windowSelect, resetViewButton } from './plotCard.js';
 import { openPlotPicker } from './plotPicker.js';
 import { seriesKey } from './plotMath.js';
-import { MIN_PLOT_WIDTH, labelOf, sourceLabel, defaultDisplay, layoutWeight, minPlotHeight, chartSeries, chartRange, chartAxis } from './plotView.js';
+import { MIN_PLOT_WIDTH, labelOf, sourceLabel, defaultDisplay, layoutWeight, minPlotHeight, chartSeries, chartRange, chartAxis, plotCsv } from './plotView.js';
 
 const SAVE_DELAY_MS = 300;
 const REDRAW_MS = 500;
@@ -344,17 +344,21 @@ export class PlotsPanel {
     for (const c of this.charts.values()) c.draw();
   }
 
-  exportCsv(plot) {
-    // Quote text cells; a leading = + - @ would run as a formula in spreadsheets.
-    const q = (v) => `"${String(v).replace(/^([=+\-@\t\r])/, "'$1").replace(/"/g, '""')}"`;
-    const rows = ['time_iso,epoch_ms,series,topic,path,value'];
-    for (const s of plot.series) {
-      const path = s.segs && s.segs.length ? sourceLabel('', s.segs).replace(/^ › /, '') : '';
-      for (const p of this.data.points(s.topic, s.segs)) {
-        rows.push(`${new Date(p.t).toISOString()},${p.t},${q(labelOf(s))},${q(s.topic)},${q(path)},${p.v}`);
-      }
-    }
-    this.api.saveFile(`${plot.title.replace(/[^\w.-]+/g, '_')}.csv`, rows.join('\n')).then((f) => f && toast(`Saved ${f}`));
+  // Saves the plot's points as CSV: all collected points, or only the range
+  // the plot shows (zoom, else its time window, ending at the freeze).
+  exportCsv(plot, visibleOnly = false) {
+    const pointsOf = (topic, segs) => this.data.points(topic, segs);
+    const range = visibleOnly ? chartRange(plot, chartSeries(plot, pointsOf), { zoom: this.zoomByTab.get(this.tab.id) || null, frozenAt: this.frozenAt, now: Date.now() }) : null;
+    const name = `${plot.title.replace(/[^\w.-]+/g, '_')}${visibleOnly ? '_visible' : ''}.csv`;
+    this.api.saveFile(name, plotCsv(plot, pointsOf, range)).then((f) => f && toast(`Saved ${f}`));
+  }
+
+  csvMenu(plot, e) {
+    const r = e.currentTarget.getBoundingClientRect();
+    showMenu(r.left, r.bottom + 4, [
+      { label: 'All collected points', action: () => this.exportCsv(plot) },
+      { label: 'Visible range', action: () => this.exportCsv(plot, true) },
+    ]);
   }
 
   // Opens the plot live in its own window (it stays in the tab as well).
@@ -703,7 +707,7 @@ export class PlotsPanel {
       }),
       // In a narrow plot these move into the ⋯ menu (see styles.css).
       button('+ Series', 'Add more values to this plot', () => this.openPicker(plot.id), 'btn small wide-only'),
-      button('CSV', 'Export collected points as CSV', () => this.exportCsv(plot), 'btn small wide-only'),
+      button('CSV', 'Export points as CSV', (e) => this.csvMenu(plot, e), 'btn small wide-only'),
       iconButton('settings', 'Plot settings', () => {
         this.select(plot.id);
         this.toggleSettings(true);
@@ -714,7 +718,8 @@ export class PlotsPanel {
         const r = e.currentTarget.getBoundingClientRect();
         showMenu(r.left, r.bottom + 4, [
           { label: 'Add series…', action: () => this.openPicker(plot.id) },
-          { label: 'Export CSV…', action: () => this.exportCsv(plot) },
+          { label: 'Export CSV: all collected points…', action: () => this.exportCsv(plot) },
+          { label: 'Export CSV: visible range…', action: () => this.exportCsv(plot, true) },
           { label: 'Open in its own window', action: () => this.popOut(plot) },
           'separator',
           { label: plot.kind === 'states' ? 'Show as lines' : 'Show as state transitions', action: () => this.setKind(plot, plot.kind === 'states' ? 'timeseries' : 'states') },
