@@ -10,6 +10,7 @@ import {
   samePlots,
   layoutFile,
   parseLayoutFile,
+  isValidWindow,
 } from '../../renderer/plotLayouts.js';
 import { stateSegments, isBinary } from '../../renderer/plotMath.js';
 
@@ -51,6 +52,13 @@ describe('sanitizePlot', () => {
     assert.equal(p.yMin, null);
     assert.equal(p.yMax, 5);
     assert.equal(p.title, 't0', 'title falls back to the first topic');
+  });
+  test('keeps a custom time window', () => {
+    assert.equal(sanitizePlot({ series: [{ topic: 't' }], windowSec: 5400 }).windowSec, 5400);
+  });
+  test('isValidWindow: presets and whole minutes from 1 min to 24 h', () => {
+    for (const v of [0, 60, 300, 900, 3600, 5400, 7200, 86400]) assert.equal(isValidWindow(v), true, String(v));
+    for (const v of [-60, 30, 90, 86460, 1.5, NaN, '300', null]) assert.equal(isValidWindow(v), false, String(v));
   });
   test('rejects non-plots', () => {
     assert.equal(sanitizePlot({ title: 'x' }), null);

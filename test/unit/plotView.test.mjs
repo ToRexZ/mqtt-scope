@@ -18,6 +18,8 @@ import {
   chartAxis,
   legendValue,
   MIN_PLOT_HEIGHT,
+  windowLabel,
+  splitWindow,
 } from '../../renderer/plotView.js';
 import { sanitizePlot } from '../../renderer/plotLayouts.js';
 
@@ -102,6 +104,19 @@ describe('chart input', () => {
     assert.deepEqual(chartRange(p, series, { now: 100_000 }), { t0: 40_000, t1: 100_000 });
     assert.deepEqual(chartRange(p, series, { now: 100_000, frozenAt: 70_000 }), { t0: 10_000, t1: 70_000 });
     assert.equal(chartRange(plot({ windowSec: 0 }), series, { now: 1 }), null);
+  });
+
+  test('windowLabel: presets, then hours and minutes', () => {
+    assert.deepEqual(
+      [60, 300, 900, 3600, 0, 5400, 7200, 2700, 86400].map(windowLabel),
+      ['1 min', '5 min', '15 min', '1 h', 'All', '1 h 30 min', '2 h', '45 min', '24 h'],
+    );
+  });
+
+  test('splitWindow: hours and minutes, "All" starts the picker at 1 h', () => {
+    assert.deepEqual(splitWindow(5400), { hours: 1, minutes: 30 });
+    assert.deepEqual(splitWindow(300), { hours: 0, minutes: 5 });
+    assert.deepEqual(splitWindow(0), { hours: 1, minutes: 0 });
   });
 
   test('a frozen "All" plot stops at the freeze, however much data arrives after it', () => {

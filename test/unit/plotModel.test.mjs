@@ -172,6 +172,9 @@ describe('changing plots and series', () => {
     assert.equal(m.updatePlot(p.id, { timeGrid: false }), true);
     assert.equal(p.timeGrid, false);
     assert.equal(m.updatePlot(p.id, { timeGrid: 'off' }), false);
+    assert.equal(m.updatePlot(p.id, { windowSec: 7200 }), true, 'a custom window');
+    assert.equal(p.windowSec, 7200);
+    assert.equal(m.updatePlot(p.id, { windowSec: 90 }), false, 'not whole minutes');
     assert.equal(m.updatePlot('nope', { title: 'X' }), false);
   });
 

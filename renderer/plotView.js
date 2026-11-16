@@ -10,6 +10,20 @@ import { MAX_SERIES, sourceLabel } from './plotLayouts.js';
 export { sourceLabel };
 
 export const WINDOW_LABELS = { 60: '1 min', 300: '5 min', 900: '15 min', 3600: '1 h', 0: 'All' };
+
+// The label of a time window: a preset's own, else "1 h 30 min", "2 h", "45 min".
+export function windowLabel(sec) {
+  if (WINDOW_LABELS[sec]) return WINDOW_LABELS[sec];
+  const { hours, minutes } = splitWindow(sec);
+  return [hours && `${hours} h`, minutes && `${minutes} min`].filter(Boolean).join(' ');
+}
+
+// A window as whole hours and minutes, for the Custom… picker ("All" starts it at 1 h).
+export function splitWindow(sec) {
+  if (!sec) return { hours: 1, minutes: 0 };
+  return { hours: Math.floor(sec / 3600), minutes: Math.floor((sec % 3600) / 60) };
+}
+
 export const KIND_LABELS = { timeseries: 'Time series', states: 'State transitions' };
 export const DISPLAY_LABELS = [
   ['line', 'Line'],
