@@ -150,6 +150,9 @@ All notable changes to MQTT Scope. The format follows
 
 ### Added
 
+- **Custom plot time window.** Choose **Custom…** in a plot's time-window menu
+  (plot header, settings panel or pop-out window) and pick any hours and
+  minutes up to 24 h, e.g. 1 h 30 min or 2 h.
 - Release files come with signed GitHub build attestations: check a download
   with `gh attestation verify <file> --repo ToRexZ/mqtt-scope`.
 

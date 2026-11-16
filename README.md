@@ -96,6 +96,8 @@ saved messages. Runs on Linux, Windows and macOS.
   (true/false, or shades with the value written in), with the current value
   next to the label. Plots of booleans start in this mode. In a *Lines* plot,
   single series can still be drawn as a state lane below the y-axis.
+- **Time window**: 1 min, 5 min, 15 min, 1 h or All, or **Custom…** to pick
+  any hours and minutes up to 24 h (e.g. 1 h 30 min).
 - **Zoom**: drag across a plot to zoom into that time range (all plots in the
   tab follow) and, when you drag a box, that value range. Double-click, Esc or
   **Reset view** (on each zoomed plot, and in the toolbar) returns to the live

@@ -81,6 +81,13 @@ test('its Lines/States and time window only change this window', async ({ env })
   await win.locator('.window-select').selectOption('60');
   expect(await win.evaluate(() => [window.__plotWindow.plot.kind, window.__plotWindow.plot.windowSec])).toEqual(['states', 60]);
   expect(await page.evaluate(() => [window.__mqttscope.plots.plots[0].kind, window.__mqttscope.plots.plots[0].windowSec])).toEqual(['timeseries', 300]);
+  // Custom… works here too.
+  await win.locator('.window-select').selectOption('custom');
+  await win.locator('.window-picker input[name="window-hours"]').fill('1');
+  await win.locator('.window-picker input[name="window-minutes"]').fill('30');
+  await win.locator('.window-picker').getByRole('button', { name: 'Apply' }).click();
+  await expect(win.locator('.window-select')).toHaveValue('5400');
+  expect(await win.evaluate(() => window.__plotWindow.plot.windowSec)).toBe(5400);
   expect(errors).toEqual([]);
 });
 
