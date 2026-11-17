@@ -2,8 +2,7 @@
 // hours + minutes picker (plot header and settings panel); cancelling keeps
 // the old window; the chosen window is labelled and saved.
 
-import path from 'node:path';
-import { test, expect, makeUserData, profile, connect, waitForTopic, waitForFile } from './fixtures.mjs';
+import { test, expect, makeUserData, profile, connect, waitForTopic, waitForLayout } from './fixtures.mjs';
 
 const plotsTab = (page) => page.locator('.right-tabs .tab[data-tab="plots"]');
 const panel = (page) => page.locator('.plot-settings');
@@ -27,7 +26,7 @@ async function setup(env, userData) {
 }
 
 test('custom time window: picker in header and settings, cancel, persistence', async ({ env }) => {
-  const { app, page, userData, errors } = await setup(env);
+  const { app, page, userData, broker, errors } = await setup(env);
   const header = page.locator('.plot-card').first().locator('.window-select');
   const settings = panel(page).locator('select[name="plot-window"]');
   const picker = page.locator('.window-picker');
@@ -93,11 +92,10 @@ test('custom time window: picker in header and settings, cancel, persistence', a
   await expect(header).toHaveValue('7200');
 
   // Saved, and still "2 h" after a restart.
-  await waitForFile(path.join(userData, 'plotTabs.json'), (b) => JSON.parse(b).tabs[0].plots[0].windowSec === 7200);
+  await waitForLayout(userData, `p${broker.port}`, (d) => d.tabs[0].plots[0].windowSec === 7200);
   expect(errors).toEqual([]);
   await env.closeApp({ app });
   const again = await env.launch({ userData });
-  await again.page.locator('.conn-dialog .modal-close').click();
   await plotsTab(again.page).click();
   await expect(again.page.locator('.plot-card .window-select option:checked')).toHaveText('2 h');
 });
@@ -143,12 +141,14 @@ test('the picker gives focus back, keeps a zoom, and closes with its view', asyn
   await expect(header.locator('option')).toHaveText(presets);
   await expect(settings.locator('option')).toHaveText(presets);
 
-  // Sideways scrolling over a field leaves it alone; scrolling up steps it.
+  // Scrolling up over a field steps it; sideways scrolling leaves it alone.
+  // (Wheel events sent to the field: headless Chromium doesn't deliver
+  // cancelable wheel events from page.mouse.wheel.)
   await open();
-  await minutes.hover();
-  await page.mouse.wheel(40, 0);
-  await expect(minutes).toHaveValue('15');
-  await page.mouse.wheel(0, -40);
+  const wheel = (deltaX, deltaY) => minutes.dispatchEvent('wheel', { deltaX, deltaY });
+  await wheel(0, -40);
+  await expect(minutes).toHaveValue('16');
+  await wheel(40, 0);
   await expect(minutes).toHaveValue('16');
 
   // It closes (cancelled) when the window loses focus…
