@@ -19,9 +19,12 @@ keeps coming. Today each click of **Publish** sends once.
    - With Repeat ticked, **Publish** reads **Start**. Start sends the message
      at once and then at the chosen rate until stopped; the button then reads
      **Stop** (highlighted) and shows how many were sent, e.g. `Stop (42)`.
-   - Rate (chosen by the maintainer, 19 Nov: "make it Hz, selectable"): a
-     dropdown of 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100 Hz; default 1 Hz.
-     Changing it while running applies from the next message.
+   - Rate in Hz (maintainer, 19 Nov: "make it Hz, selectable", "also allow to
+     type the number in"): a field you type a rate into, with a dropdown of
+     0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100 Hz; default 1 Hz. Any rate from
+     0.01 to 100 Hz (decimals allowed); outside that, or not a number, the
+     field is marked and Start is disabled. Changing it while running applies
+     from the next message.
 2. **What is sent** is the message as it was at Start (topic, payload, format,
    QoS, retain). Editing while it runs doesn't change what is sent; a note under
    the row says "Sending the message as it was at Start — Stop and Start again
