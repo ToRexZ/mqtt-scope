@@ -619,6 +619,14 @@ describe('extractNumber', () => {
     assert.equal(n('[1]'), undefined);
   });
 
+  test('selector paths: the entry with that name, wherever it moved; missing → undefined', () => {
+    const path = ['status', { field: 'name', equals: 'A' }, 'values', { field: 'key', equals: 'T' }, 'value'];
+    assert.equal(n('{"status":[{"name":"A","values":[{"key":"T","value":"21.5"}]}]}', path), 21.5);
+    assert.equal(n('{"status":[{"name":"B","values":[{"key":"T","value":"60"}]},{"name":"A","values":[{"key":"M","value":"1"},{"key":"T","value":" 22 "}]}]}', path), 22);
+    assert.equal(n('{"status":[{"name":"B","values":[{"key":"T","value":"60"}]}]}', path), undefined);
+    assert.equal(n('{"status":[{"name":"A","values":[{"key":"T","value":"abc"}]}]}', path), undefined);
+  });
+
   test('JSON paths into objects and arrays', () => {
     const p = '{"a":{"b":[10,{"c":3.5}]},"s":" 12 ","t":true,"f":false,"z":null,"e":"","x":"abc","big":1e400,"inf":"Infinity","neg":"-2e-3"}';
     assert.equal(n(p, ['a', 'b', 0]), 10);

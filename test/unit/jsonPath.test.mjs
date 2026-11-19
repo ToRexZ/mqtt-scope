@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { childPath, pathFromSegments, getAt, ancestorPaths, parsePath } from '../../renderer/jsonPath.js';
+import { childPath, pathFromSegments, getAt, ancestorPaths, parsePath, isSelector, namedSegs, nameParts } from '../../renderer/jsonPath.js';
 import { prng } from './_util.mjs';
 
 describe('childPath', () => {
@@ -172,5 +172,74 @@ describe('parsePath', () => {
       // Number segments stay numbers and string segments stay strings.
       parsePath(p).forEach((s, k) => assert.equal(typeof s, typeof segs[k]));
     }
+  });
+});
+
+describe('selectors (array entries picked by name)', () => {
+  const sel = (field, equals) => ({ field, equals });
+  const diagSegs = ['status', sel('name', 'A/B'), 'values', sel('key', 'T'), 'value'];
+  const diag = {
+    status: [
+      { name: 'MOTOR', values: [{ key: 'T', value: '60' }] },
+      { name: 'A/B', level: 2, values: [{ key: 'MODE', value: '3' }, { key: 'T', value: '21.5' }] },
+    ],
+  };
+
+  test('isSelector: only { field: key|name, equals: non-empty string }', () => {
+    assert.equal(isSelector(sel('key', 'T')), true);
+    assert.equal(isSelector(sel('name', 'x')), true);
+    for (const bad of [sel('id', 'x'), sel('key', ''), sel('key', 3), { field: 'key' }, 'key', 3, null, [], { field: 'key', equals: 'x', more: 1 }]) {
+      assert.equal(isSelector(bad), false, JSON.stringify(bad));
+    }
+  });
+
+  test('printed as a JSONPath filter, and parsed back', () => {
+    const text = '$.status[?(@.name=="A/B")].values[?(@.key=="T")].value';
+    assert.equal(pathFromSegments(diagSegs), text);
+    assert.equal(childPath('$.a', sel('key', 'T')), '$.a[?(@.key=="T")]');
+    assert.deepEqual(parsePath(text), diagSegs);
+    for (const odd of ['q"x\\y])', 'é ✓', ' spaced ', '[?(@.key=="x")]']) {
+      const segs = ['a', sel('key', odd), 'value'];
+      assert.deepEqual(parsePath(pathFromSegments(segs)), segs, odd);
+    }
+    assert.throws(() => parsePath('$.a[?(@.id=="x")]'), /Invalid path/);
+    assert.throws(() => parsePath('$.a[?(@.key=="")]'), /Invalid path/);
+    assert.throws(() => parsePath('$.a[?(@.key==x)]'), /Invalid path/);
+  });
+
+  test('getAt follows the entry with that name, wherever it is', () => {
+    assert.equal(getAt(diag, diagSegs), '21.5');
+    assert.equal(getAt(diag, ['status', sel('name', 'A/B'), 'level']), 2);
+    assert.equal(getAt(diag, ['status', sel('name', 'GONE'), 'level']), undefined);
+    assert.equal(getAt({ status: { name: 'A/B' } }, ['status', sel('name', 'A/B')]), undefined, 'not an array');
+    assert.equal(getAt({ a: [null, 3, { key: 'T', v: 1 }] }, ['a', sel('key', 'T'), 'v']), 1, 'skips non-objects');
+    assert.equal(getAt({ a: [{ key: 'T', v: 1 }, { key: 'T', v: 2 }] }, ['a', sel('key', 'T'), 'v']), 1, 'first match');
+  });
+
+  test('namedSegs: positional steps become names where the entry has a unique key/name', () => {
+    assert.deepEqual(namedSegs(diag, ['status', 1, 'values', 1, 'value']), diagSegs);
+    assert.deepEqual(namedSegs(diag, ['status', 1, 'level']), ['status', sel('name', 'A/B'), 'level']);
+    assert.deepEqual(namedSegs(diag, diagSegs), diagSegs, 'already named');
+    assert.deepEqual(namedSegs({ a: [{ key: 'K', name: 'N', v: 1 }] }, ['a', 0, 'v']), ['a', sel('key', 'K'), 'v'], 'key before name');
+    assert.deepEqual(namedSegs({ a: [{ key: 'K', v: 1 }, { key: 'K', v: 2 }] }, ['a', 1, 'v']), ['a', 1, 'v'], 'duplicate name');
+    assert.deepEqual(namedSegs({ a: [{ key: 'K', name: 'N1' }, { key: 'K', name: 'N2' }] }, ['a', 1]), ['a', sel('name', 'N2')], 'duplicate key, unique name');
+    assert.deepEqual(namedSegs({ a: [{ key: 7, v: 1 }] }, ['a', 0, 'v']), ['a', 0, 'v'], 'not a string');
+    assert.deepEqual(namedSegs({ a: [{ key: '', v: 1 }] }, ['a', 0, 'v']), ['a', 0, 'v'], 'empty name');
+    assert.deepEqual(namedSegs({ a: [5, 6] }, ['a', 1]), ['a', 1], 'array of numbers');
+    assert.deepEqual(namedSegs({ a: [[{ key: 'K' }]] }, ['a', 0, 0, 'key']), ['a', 0, sel('key', 'K'), 'key'], 'nested arrays');
+    assert.deepEqual(namedSegs({}, ['x', 0]), ['x', 0], 'path not in the message');
+    assert.equal(namedSegs(diag, null), null);
+    assert.deepEqual(namedSegs(diag, []), []);
+  });
+
+  test('nameParts: the names (and fields after them) for a label; null without a selector', () => {
+    assert.deepEqual(nameParts(diagSegs), ['A/B', 'T']);
+    assert.deepEqual(nameParts(['status', sel('name', 'A'), 'level']), ['A', 'level']);
+    assert.deepEqual(nameParts(['robots', sel('name', 'r1'), 'battery', 'charge']), ['r1', 'battery', 'charge']);
+    assert.deepEqual(nameParts(['a', sel('key', 'K'), 'list', 2]), ['K', 'list', '[2]']);
+    assert.deepEqual(nameParts(['top', 'a', sel('key', 'K'), 'value']), ['top', 'K'], 'fields before the array are kept');
+    assert.deepEqual(nameParts([sel('key', 'K'), 'value']), ['K'], 'payload is the array');
+    assert.equal(nameParts(['a', 0, 'value']), null);
+    assert.equal(nameParts(null), null);
   });
 });
