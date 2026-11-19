@@ -2551,3 +2551,38 @@ body.plot-window {
 .reconnect-hint[hidden] {
   display: none;
 }
+
+/* ------------------------------------------------------------ custom time-window picker */
+
+.window-picker:focus {
+  outline: none;
+}
+.window-picker {
+  position: fixed;
+  z-index: var(--z-menu);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: var(--panel-3);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.35);
+}
+.window-picker-fields {
+  display: flex;
+  gap: 12px;
+}
+.window-picker-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.window-picker-field .input {
+  width: 64px;
+}
+.window-picker-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}

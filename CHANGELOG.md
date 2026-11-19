@@ -6,6 +6,15 @@ All notable changes to MQTT Scope. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Custom plot time window.** Choose **Custom…** in a plot's time-window menu
+  (plot header, settings panel or pop-out window) and pick any hours and
+  minutes up to 24 h, e.g. 1 h 30 min or 2 h.
+- **CSV export of the visible range.** A plot's **CSV** button asks whether to
+  save all collected points or only the visible range (the time window, zoom or
+  freeze shown).
+
 ## [0.4.1] - 2026-11-06
 
 ### Fixed

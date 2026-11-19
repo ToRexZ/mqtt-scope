@@ -4,12 +4,26 @@
 
 import { decode, formatDateTime } from './payload.js';
 import { getAt } from './jsonPath.js';
-import { windowRange, nearest, isBinary, pointAtOrBefore } from './plotMath.js';
+import { windowRange, nearest, isBinary, pointAtOrBefore, pointsBetween } from './plotMath.js';
 import { MAX_SERIES, sourceLabel } from './plotLayouts.js';
 
 export { sourceLabel };
 
 export const WINDOW_LABELS = { 60: '1 min', 300: '5 min', 900: '15 min', 3600: '1 h', 0: 'All' };
+
+// The label of a time window: a preset's own, else "1 h 30 min", "2 h", "45 min".
+export function windowLabel(sec) {
+  if (WINDOW_LABELS[sec]) return WINDOW_LABELS[sec];
+  const { hours, minutes } = splitWindow(sec);
+  return [hours && `${hours} h`, minutes && `${minutes} min`].filter(Boolean).join(' ');
+}
+
+// A window as whole hours and minutes, for the Custom… picker ("All" starts it at 1 h).
+export function splitWindow(sec) {
+  if (!sec) return { hours: 1, minutes: 0 };
+  return { hours: Math.floor(sec / 3600), minutes: Math.floor((sec % 3600) / 60) };
+}
+
 export const KIND_LABELS = { timeseries: 'Time series', states: 'State transitions' };
 export const DISPLAY_LABELS = [
   ['line', 'Line'],
@@ -78,6 +92,12 @@ export function chartRange(plot, series, { zoom = null, frozenAt = null, now = D
   return Number.isFinite(first) && first < frozenAt ? { t0: first, t1: frozenAt } : null;
 }
 
+// The range "Visible range" exports: the chart's range, and when frozen
+// nothing after the freeze (even with the window All and no data before it).
+export function csvRange(plot, series, opts = {}) {
+  return chartRange(plot, series, opts) ?? (opts.frozenAt ? { t0: -Infinity, t1: opts.frozenAt } : null);
+}
+
 // Axis settings for the chart: a value zoom wins over the plot's fixed range.
 export function chartAxis(plot, yZoom = null) {
   return { yMin: yZoom ? yZoom.yMin : plot.yMin, yMax: yZoom ? yZoom.yMax : plot.yMax, kind: plot.kind, timeGrid: plot.timeGrid !== false };
@@ -92,4 +112,20 @@ export function legendValue(plot, series, points, { hoverTime = null, frozenAt =
   if (!p) return { text: '–', title: 'No data yet' };
   const asState = (plot.kind === 'states' || series.display === 'state') && isBinary(points);
   return { text: asState ? String(p.v === 1) : String(Number(p.v.toPrecision(6))), title: formatDateTime(p.t) };
+}
+
+// The plot's points as CSV (every series, hidden ones too): all collected
+// points, or only those with range.t0 <= t <= range.t1.
+export function plotCsv(plot, pointsOf, range = null) {
+  // Quote text cells; a leading = + - @ would run as a formula in spreadsheets.
+  const q = (v) => `"${String(v).replace(/^([=+\-@\t\r])/, "'$1").replace(/"/g, '""')}"`;
+  const rows = ['time_iso,epoch_ms,series,topic,path,value'];
+  for (const s of plot.series) {
+    const path = s.segs && s.segs.length ? sourceLabel('', s.segs).replace(/^ › /, '') : '';
+    const all = pointsOf(s.topic, s.segs);
+    for (const p of range ? pointsBetween(all, range.t0, range.t1) : all) {
+      rows.push(`${new Date(p.t).toISOString()},${p.t},${q(labelOf(s))},${q(s.topic)},${q(path)},${p.v}`);
+    }
+  }
+  return rows.join('\n');
 }

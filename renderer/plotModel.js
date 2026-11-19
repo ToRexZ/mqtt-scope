@@ -11,7 +11,7 @@
 // (plotTabs) and the 0.1 document (plots); see plotsDocFrom in plotLayouts.js.
 
 import {
-  WINDOWS,
+  isValidWindow,
   PLOT_KINDS,
   DISPLAYS,
   MAX_SERIES,
@@ -291,7 +291,7 @@ export class PlotModel {
     for (const [key, value] of Object.entries(patch)) {
       if (key === 'title' && typeof value === 'string' && value.trim()) set('title', value.trim().slice(0, 120));
       else if (key === 'kind' && PLOT_KINDS.includes(value)) set('kind', value);
-      else if (key === 'windowSec' && WINDOWS.includes(value)) set('windowSec', value);
+      else if (key === 'windowSec' && isValidWindow(value)) set('windowSec', value);
       else if ((key === 'legend' || key === 'legendValues' || key === 'timeGrid') && typeof value === 'boolean') set(key, value);
       else if ((key === 'yMin' || key === 'yMax') && (value === null || (typeof value === 'number' && Number.isFinite(value)))) set(key, value);
     }

@@ -13,9 +13,9 @@
 
 import { el, button } from './ui.js';
 import { iconButton, setIcon } from './icons.js';
-import { WINDOWS, MAX_SERIES } from './plotLayouts.js';
-import { WINDOW_LABELS, KIND_LABELS, DISPLAY_LABELS, labelOf, sourceLabel, paletteVar } from './plotView.js';
-import { resolvedColor } from './plotCard.js';
+import { MAX_SERIES } from './plotLayouts.js';
+import { KIND_LABELS, DISPLAY_LABELS, labelOf, sourceLabel, paletteVar } from './plotView.js';
+import { resolvedColor, windowSelect } from './plotCard.js';
 
 const LINE_WIDTHS = [1, 2, 3, 4, 5, 6];
 
@@ -35,8 +35,7 @@ export function renderPlotSettings(container, { model, plot, openSeries, onChang
   title.addEventListener('input', () => update({ title: title.value }, 'title'));
   const kind = select('plot-kind', Object.entries(KIND_LABELS), plot.kind);
   kind.addEventListener('change', () => update({ kind: kind.value }, 'all'));
-  const win = select('plot-window', WINDOWS.map((sec) => [String(sec), WINDOW_LABELS[sec]]), String(plot.windowSec));
-  win.addEventListener('change', () => update({ windowSec: Number(win.value) }, 'card'));
+  const win = windowSelect(plot, (windowSec) => update({ windowSec }, 'card'), { name: 'plot-window', className: 'select' });
 
   // Legend
   const check = (label, key) => {

@@ -5,8 +5,9 @@
 import { el, button } from './ui.js';
 import { icon } from './icons.js';
 import { WINDOWS } from './plotLayouts.js';
+import { openWindowPicker } from './windowPicker.js';
 import { seriesKey } from './plotMath.js';
-import { WINDOW_LABELS, labelOf, sourceLabel, seriesCss, paletteVar, showsLegend, legendValue } from './plotView.js';
+import { windowLabel, labelOf, sourceLabel, seriesCss, paletteVar, showsLegend, legendValue } from './plotView.js';
 
 // A series' colour as #rrggbb (its own, else its palette colour).
 export function resolvedColor(series) {
@@ -73,11 +74,34 @@ export function resetViewButton(onReset) {
   return b;
 }
 
-// The time-window menu. onWindow(seconds) is called with the choice.
-export function windowSelect(plot, onWindow) {
-  const select = el('select', 'select small window-select');
+// The time-window menu: the presets, the plot's custom window (if any) and
+// Custom…, which opens the hours + minutes picker. onWindow(seconds) is
+// called with the choice.
+export function windowSelect(plot, onWindow, { name, className = 'select small window-select' } = {}) {
+  const select = el('select', className);
+  if (name) select.name = name;
   select.title = 'Time window';
-  for (const sec of WINDOWS) select.append(Object.assign(el('option', '', WINDOW_LABELS[sec]), { value: String(sec), selected: sec === plot.windowSec }));
-  select.addEventListener('change', () => onWindow(Number(select.value)));
+  const fill = (current) => {
+    select.textContent = '';
+    const timed = WINDOWS.filter(Boolean);
+    if (!WINDOWS.includes(current)) timed.push(current);
+    for (const sec of [...timed.sort((a, b) => a - b), 0]) select.append(Object.assign(el('option', '', windowLabel(sec)), { value: String(sec), selected: sec === current }));
+    select.append(Object.assign(el('option', '', 'Custom…'), { value: 'custom' }));
+  };
+  fill(plot.windowSec);
+  select.addEventListener('change', () => {
+    if (select.value !== 'custom') {
+      const sec = Number(select.value);
+      fill(sec); // a preset replaces the custom entry
+      return onWindow(sec);
+    }
+    select.value = String(plot.windowSec); // until a window is applied
+    openWindowPicker(select, plot.windowSec, {
+      onApply: (sec) => {
+        fill(sec);
+        onWindow(sec);
+      },
+    });
+  });
   return select;
 }

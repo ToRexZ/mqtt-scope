@@ -6,6 +6,11 @@ import { pathFromSegments } from './jsonPath.js';
 
 export const LAYOUT_FORMAT = 'mqtt-scope-plot-layout';
 export const WINDOWS = [60, 300, 900, 3600, 0];
+export const MAX_WINDOW_SEC = 86400; // longest custom time window: 24 h
+
+// A time window in seconds: a preset, or a whole number of minutes from
+// 1 min to 24 h (set with the Custom… picker).
+export const isValidWindow = (sec) => WINDOWS.includes(sec) || (Number.isInteger(sec) && sec % 60 === 0 && sec >= 60 && sec <= MAX_WINDOW_SEC);
 // 'timeseries': numbers on a y-axis (state series as bars below);
 // 'states': every series as a full-width state-transition lane.
 export const PLOT_KINDS = ['timeseries', 'states'];
@@ -53,7 +58,7 @@ export function sanitizePlot(p) {
     id: typeof p.id === 'string' && p.id ? p.id : newId(),
     title: typeof p.title === 'string' && p.title.trim() ? p.title.trim().slice(0, 120) : series[0]?.topic || 'Plot',
     kind: PLOT_KINDS.includes(p.kind) ? p.kind : 'timeseries',
-    windowSec: WINDOWS.includes(p.windowSec) ? p.windowSec : 300,
+    windowSec: isValidWindow(p.windowSec) ? p.windowSec : 300,
     legend: p.legend !== false,
     legendValues: p.legendValues !== false,
     // Vertical lines at the time axis' timestamps (as in Lichtblick).
