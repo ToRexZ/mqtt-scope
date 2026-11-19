@@ -109,6 +109,8 @@ describe('adding series', () => {
     assert.equal(m.selected, plot);
     assert.equal(plot.kind, 'timeseries');
     assert.equal(changes, 1);
+    const byName = m.addSeries(null, { topic: 'diag', segs: ['status', { field: 'name', equals: 'MOTOR' }, 'level'] });
+    assert.equal(byName.plot.title, 'diag › MOTOR › level');
     const named = m.addSeries(null, { topic: 'a', alias: '  Speed  ' });
     assert.equal(named.plot.title, 'Speed');
     assert.equal(named.series.alias, 'Speed');

@@ -5,7 +5,7 @@
 import { decode, formatDateTime } from './payload.js';
 import { getAt } from './jsonPath.js';
 import { windowRange, nearest, isBinary, pointAtOrBefore, pointsBetween } from './plotMath.js';
-import { MAX_SERIES, sourceLabel } from './plotLayouts.js';
+import { MAX_SERIES, sourceLabel, seriesLabel } from './plotLayouts.js';
 
 export { sourceLabel };
 
@@ -41,8 +41,8 @@ export const seriesCss = (s) => s.color || `var(${paletteVar(s.slot)})`;
 export const MIN_PLOT_WIDTH = 220;
 export const MIN_PLOT_HEIGHT = 130;
 
-// A series shows its alias when it has one, else where its data comes from.
-export const labelOf = (series) => series.alias || sourceLabel(series.topic, series.segs);
+// A series shows its alias when it has one, else its default name (seriesLabel).
+export const labelOf = (series) => series.alias || seriesLabel(series.topic, series.segs);
 
 // A boolean value is shown as a state lane, anything else as a line.
 export function defaultDisplay(message, segs) {

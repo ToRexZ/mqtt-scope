@@ -17,7 +17,7 @@ import {
   MAX_SERIES,
   HEX_COLOR,
   PLOTS_DOC_VERSION,
-  sourceLabel,
+  seriesLabel,
   sanitizePlot,
   newTab,
   plotsDocFrom,
@@ -233,7 +233,7 @@ export class PlotModel {
     if (plot && plot.series.length >= MAX_SERIES) return { plot, series: null, full: true };
     const created = !plot;
     if (created) {
-      plot = sanitizePlot({ id: newId(), title: alias || sourceLabel(topic, segs), windowSec: 300, series: [] });
+      plot = sanitizePlot({ id: newId(), title: alias || seriesLabel(topic, segs), windowSec: 300, series: [] });
       this.plots.push(plot);
       this.selectedId = plot.id;
     }

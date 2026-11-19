@@ -142,6 +142,16 @@ describe('chart input', () => {
     assert.deepEqual(csvRange(plot({ windowSec: 0 }), [{ points: [] }], { frozenAt: 60_000 }), { t0: -Infinity, t1: 60_000 }, 'no data yet');
   });
 
+  test('labelOf and plotCsv with selector steps: names in the label, the full path in the CSV', () => {
+    const segs = ['status', { field: 'name', equals: 'A "B"' }, 'values', { field: 'key', equals: 'T' }, 'value'];
+    assert.equal(labelOf({ topic: 'diag', segs }), 'diag › A "B" › T');
+    assert.equal(labelOf({ topic: 'diag', segs, alias: 'Temp' }), 'Temp');
+    const rows = plotCsv(plot({}, [{ topic: 'diag', segs }]), () => [{ t: 0, v: 21.5 }]).split('\n');
+    const path = '$.status[?(@.name=="A \\"B\\"")].values[?(@.key=="T")].value';
+    const q = (v) => `"${v.replace(/"/g, '""')}"`;
+    assert.equal(rows[1], `1970-01-01T00:00:00.000Z,0,${q('diag › A "B" › T')},"diag",${q(path)},21.5`);
+  });
+
   test('plotCsv: a JSON path is written without the topic', () => {
     const p = plot({}, [{ topic: 'robot/state', segs: ['battery', 0] }]);
     const rows = plotCsv(p, () => [{ t: 0, v: 5 }]).split('\n');

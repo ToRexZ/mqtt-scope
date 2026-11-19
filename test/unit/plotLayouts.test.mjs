@@ -11,10 +11,20 @@ import {
   layoutFile,
   parseLayoutFile,
   isValidWindow,
+  seriesLabel,
+  sourceLabel,
 } from '../../renderer/plotLayouts.js';
 import { stateSegments, isBinary } from '../../renderer/plotMath.js';
 
 describe('sanitizeSeries', () => {
+  test('keeps selector steps (fresh, field first) and rejects broken ones', () => {
+    const s = sanitizeSeries({ topic: 'd', segs: ['status', { equals: 'A', field: 'name' }, 'values', { field: 'key', equals: 'T' }, 'value'] });
+    assert.deepEqual(s.segs, ['status', { field: 'name', equals: 'A' }, 'values', { field: 'key', equals: 'T' }, 'value']);
+    assert.equal(JSON.stringify(s.segs[1]), '{"field":"name","equals":"A"}');
+    for (const bad of [{ field: 'id', equals: 'A' }, { field: 'key', equals: '' }, { field: 'key' }, { field: 'key', equals: 'A', x: 1 }, { field: 'key', equals: 5 }, null, []]) {
+      assert.equal(sanitizeSeries({ topic: 'd', segs: ['status', bad] }), null, JSON.stringify(bad));
+    }
+  });
   test('fills in defaults for older saved series', () => {
     const s = sanitizeSeries({ id: 'a', topic: 't', segs: ['x', 0], slot: 2 });
     assert.deepEqual(s, { id: 'a', topic: 't', segs: ['x', 0], slot: 2, display: 'line', width: 2, visible: true });
@@ -155,5 +165,19 @@ describe('stateSegments', () => {
     assert.equal(isBinary(pts), true);
     assert.equal(isBinary([{ t: 0, v: 2 }]), false);
     assert.equal(isBinary([]), false);
+  });
+});
+
+describe('seriesLabel', () => {
+  const segs = ['status', { field: 'name', equals: 'BRAKE/FRONT' }, 'values', { field: 'key', equals: 'TEMP' }, 'value'];
+  test('topic and the names for a path with selectors', () => {
+    assert.equal(seriesLabel('diagnostics', segs), 'diagnostics › BRAKE/FRONT › TEMP');
+    assert.equal(seriesLabel('d', ['status', { field: 'name', equals: 'M' }, 'level']), 'd › M › level');
+  });
+  test('the full path otherwise', () => {
+    assert.equal(seriesLabel('d', ['status', 0, 'level']), 'd › $.status[0].level');
+    assert.equal(seriesLabel('d', ['status', 0, 'level']), sourceLabel('d', ['status', 0, 'level']));
+    assert.equal(seriesLabel('d', null), 'd');
+    assert.equal(sourceLabel('diagnostics', segs), 'diagnostics › $.status[?(@.name=="BRAKE/FRONT")].values[?(@.key=="TEMP")].value');
   });
 });

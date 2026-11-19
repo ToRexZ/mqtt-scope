@@ -2,7 +2,7 @@
 // migration of older saved data, the split layout and the file format used
 // to share a tab's plots. Pure (no DOM).
 
-import { pathFromSegments } from './jsonPath.js';
+import { pathFromSegments, isSelector, nameParts } from './jsonPath.js';
 
 export const LAYOUT_FORMAT = 'mqtt-scope-plot-layout';
 export const WINDOWS = [60, 300, 900, 3600, 0];
@@ -27,13 +27,21 @@ const newId = () => Math.random().toString(36).slice(2, 10);
 
 // Where a series' data comes from: the topic, plus the JSON path if any.
 export const sourceLabel = (topic, segs) => (segs && segs.length ? `${topic} › ${pathFromSegments(segs)}` : topic);
+// A series' default name: the topic and the names its path picks entries by
+// ("diagnostics › BRAKE/FRONT › TEMP"), else its full path.
+export function seriesLabel(topic, segs) {
+  const parts = nameParts(segs);
+  return parts ? [topic, ...parts].join(' › ') : sourceLabel(topic, segs);
+}
+// A saved path step: a key, an index or a selector (rebuilt); undefined if invalid.
+const savedStep = (x) => (typeof x === 'string' || (Number.isInteger(x) && x >= 0) ? x : isSelector(x) ? { field: x.field, equals: x.equals } : undefined);
 const finiteOrNull = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
 
 // A series with every field present and valid; null when unusable.
 export function sanitizeSeries(s, slotFallback = 0) {
   if (!s || typeof s !== 'object' || typeof s.topic !== 'string' || !s.topic) return null;
-  const segs = Array.isArray(s.segs) && s.segs.length ? s.segs.filter((x) => typeof x === 'string' || (Number.isInteger(x) && x >= 0)) : null;
-  if (Array.isArray(s.segs) && segs && segs.length !== s.segs.length) return null;
+  const segs = Array.isArray(s.segs) && s.segs.length ? s.segs.map(savedStep) : null;
+  if (segs && segs.includes(undefined)) return null;
   const out = {
     id: typeof s.id === 'string' && s.id ? s.id : newId(),
     topic: s.topic,
