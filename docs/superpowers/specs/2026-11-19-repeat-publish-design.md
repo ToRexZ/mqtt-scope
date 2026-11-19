@@ -14,13 +14,14 @@ keeps coming. Today each click of **Publish** sends once.
 
 1. **Repeat toggle** in the publisher's top row, next to **Publish**:
    ```
-   [topic…………]  QoS 0 ▾  ☐ Retain  ☐ Repeat every [ 1000 ] ms   [ Publish ]
+   [topic…………]  QoS 0 ▾  ☐ Retain  ☐ Repeat at [ 1 Hz ▾ ]   [ Publish ]
    ```
    - With Repeat ticked, **Publish** reads **Start**. Start sends the message
-     at once and then every interval until stopped; the button then reads
+     at once and then at the chosen rate until stopped; the button then reads
      **Stop** (highlighted) and shows how many were sent, e.g. `Stop (42)`.
-   - Interval: whole milliseconds, 10 ms to 3 600 000 ms (1 h); default 1000.
-     Start is disabled while the interval is invalid.
+   - Rate (chosen by the maintainer, 19 Nov: "make it Hz, selectable"): a
+     dropdown of 0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100 Hz; default 1 Hz.
+     Changing it while running applies from the next message.
 2. **What is sent** is the message as it was at Start (topic, payload, format,
    QoS, retain). Editing while it runs doesn't change what is sent; a note under
    the row says "Sending the message as it was at Start — Stop and Start again
@@ -32,7 +33,7 @@ keeps coming. Today each click of **Publish** sends once.
    validation, and the message goes into Recent once. No "Published to …" toast
    per message.
 5. The **Publish shortcut** starts and stops it the same way as the button.
-6. The Repeat setting and interval are remembered per connection tab like the
+6. The Repeat setting and rate are remembered per connection tab like the
    rest of the publisher; a running repeat is never restored after a restart.
 
 ## Non-goals
@@ -52,10 +53,10 @@ keeps coming. Today each click of **Publish** sends once.
 
 ## Testing
 
-- Unit: interval validation; the repeat loop (start, count, stop, stop on
+- Unit: rate list and saved-rate validation; the repeat loop (start, count, stop, stop on
   failure) with a fake clock and a fake publish.
-- E2E: Start with 100 ms → the broker receives several identical messages and
+- E2E: Start at 10 Hz → the broker receives several identical messages and
   the button counts them; Stop → no more arrive; editing while running sends
   the old payload and shows the note; disconnect stops it; retained asks once;
-  the shortcut toggles; Repeat and interval are kept after a restart, not
+  the shortcut toggles; Repeat and rate are kept after a restart, not
   running.
