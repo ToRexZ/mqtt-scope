@@ -98,6 +98,9 @@ describe('searchJson', () => {
     assert.deepEqual(sorted(searchJson(v, 'NAME').whole), []);
     assert.deepEqual(sorted(searchJson([[{ a: 'x' }]], 'x').whole), ['$[0][0]'], 'an entry of a nested list');
     assert.deepEqual(sorted(searchJson([{ a: [{ b: 'x' }] }], 'x').whole), ['$[0].a[0]'], 'innermost only');
+    assert.deepEqual(sorted(searchJson({ list: [{ level: 'level-high', x: 1 }] }, 'level').whole), ['$.list[0]'], 'a value match opens the entry, a key match alone does not');
+    assert.deepEqual(sorted(searchJson({ list: [{ level: 'level-high', x: 1 }] }, 'level').matches), ['$.list[0].level']);
+    assert.equal(searchJson({ list: [{ level: 'level-high', x: 1 }] }, 'level').count, 2, 'the key and its value');
   });
 
   test('array indices are not matched as keys', () => {

@@ -17,6 +17,9 @@ what you were looking for.
 - When a search matches a value inside an entry of an array (an object
   directly in an array), the innermost such entry is shown in full: all its
   fields, nested containers open or closed as they were (a click toggles).
+  The fields that lead to further matches stay filtered (a big entry such as
+  a payload wrapped in a one-item list still shows only the matching parts).
+  Sizes (`{ 2 keys }`) and list indices are not counted as hits.
   A matching key name shows its own value already, so it doesn't open its
   entry (searching `temp` across robots still shows just each robot's temp).
   - `BRAKE_MODE` → `{ "key": "BRAKE_MODE", "value": "3" }`.
@@ -46,5 +49,7 @@ what you were looking for.
 - Unit (`searchJson`): matches inside entries report the entry to show in full;
   innermost entry only; matches outside arrays unchanged; count unchanged.
 - E2E: diagnostics message, search `BRAKE_MODE` → its `value` line visible;
-  search the status name → the entry's `level` visible and `values` closed;
-  a plain object match still hides its siblings.
+  search the status name → the entry's `level` visible, `values` open in a
+  small message and closed in a large one (opening shows every entry); a
+  payload wrapped in a one-item list still filters inside; hits = matches; a
+  plain object match still hides its siblings.

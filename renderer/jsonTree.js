@@ -94,7 +94,7 @@ export class JsonTree {
 
     container.textContent = '';
     const root = el('div', 'jt');
-    root.append(this.buildNode(undefined, value, '$', [], true, false));
+    root.append(this.buildNode(undefined, value, '$', [], true, 'filtered'));
     container.append(root);
 
     root.addEventListener('click', (e) => {
@@ -118,14 +118,18 @@ export class JsonTree {
     return this.expanded.has(path) || this.forced.has(path);
   }
 
-  buildNode(key, value, path, segs, isLast, unfiltered) {
+  // While searching, what a node shows (`inherited` from its parent):
+  //   'filtered': only children on the way to a match;
+  //   'all': everything (below a matching key, or beside the matches in an entry);
+  //   'entry': a list entry with a matching value: all its fields, but the
+  //            ones leading to matches stay filtered.
+  buildNode(key, value, path, segs, isLast, inherited) {
     const isContainer = value !== null && typeof value === 'object';
     const wrap = el('div', 'jt-node');
     const line = el('div', 'jt-line');
     line.title = path;
-    // Below a matching key, and in a matching list entry, everything is shown,
-    // not just further matches.
-    this.info.set(line, { path, segs, value, container: isContainer, unfiltered: unfiltered || this.matches.has(path) || this.whole.has(path) });
+    const mode = inherited === 'all' || this.matches.has(path) ? 'all' : this.whole.has(path) ? 'entry' : 'filtered';
+    this.info.set(line, { path, segs, value, container: isContainer, mode });
     if (this.changed.has(path)) line.classList.add('jt-changed');
 
     const caret = el('span', 'jt-caret', isContainer ? '▸' : '');
@@ -169,12 +173,14 @@ export class JsonTree {
     line.querySelector('.jt-summary').hidden = true;
     const kids = el('div', 'jt-children');
     let entries = Array.isArray(value) ? value.map((v, i) => [i, v]) : Object.entries(value);
-    if (this.visible && !info.unfiltered) entries = entries.filter(([k]) => this.visible.has(childPath(path, k)));
+    if (this.visible && info.mode === 'filtered') entries = entries.filter(([k]) => this.visible.has(childPath(path, k)));
+    const modeOf = (p) => (info.mode === 'entry' ? (this.visible.has(p) ? 'filtered' : 'all') : info.mode);
     const renderFrom = (start) => {
       const end = Math.min(entries.length, start + CHUNK);
       for (let i = start; i < end; i++) {
         const [k, v] = entries[i];
-        kids.append(this.buildNode(k, v, childPath(path, k), [...segs, k], i === entries.length - 1, info.unfiltered));
+        const p = childPath(path, k);
+        kids.append(this.buildNode(k, v, p, [...segs, k], i === entries.length - 1, modeOf(p)));
       }
       if (end < entries.length) {
         const more = el('div', 'jt-more', `Show ${Math.min(CHUNK, entries.length - end)} more of ${entries.length - end} remaining…`);

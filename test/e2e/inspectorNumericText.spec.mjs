@@ -85,8 +85,6 @@ test('a search hit in a list entry shows the whole entry', async ({ env }) => {
   await search.fill('BRAKE');
   await expect(line(page, '$.status[0].level')).toBeVisible();
   await expect(line(page, '$.status[0].values')).toBeVisible();
-  const caret = line(page, '$.status[0].values').locator('.jt-caret');
-  if ((await caret.textContent()) === '▸') await caret.click();
   await expect(line(page, '$.status[0].values[3].value')).toBeVisible();
 
   // A key name still shows only itself (and its value), not its entry.
@@ -102,5 +100,61 @@ test('a search hit in a list entry shows the whole entry', async ({ env }) => {
   await search.fill('x-ray');
   await expect(line(page, '$.cfg.a')).toBeVisible();
   await expect(line(page, '$.cfg.b')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});
+
+test('search: an entry shows its other fields but keeps filtering what leads to a match', async ({ env }) => {
+  const broker = await env.broker();
+  const { page, errors } = await env.launch({ userData: makeUserData({ profiles: [profile(broker.port)] }) });
+  await connect(page);
+  const search = page.locator('#viewer-host input.search');
+  const hitCount = page.locator('#viewer-host .hit-count');
+
+  // A payload wrapped in a one-entry list: the entry is shown, but its robots
+  // are still filtered to the one that matches.
+  const robots = Object.fromEntries(Array.from({ length: 30 }, (_, i) => [`r${i}`, { state: i === 7 ? 'fault' : 'ok', x: i }]));
+  await broker.publish('fleet', JSON.stringify([{ robots, site: 'hall' }]));
+  await waitForTopic(page, 'fleet');
+  await selectTopic(page, 'fleet');
+  await viewerTab(page, 'tree').click();
+  await search.fill('fault');
+  await expect(line(page, '$[0].robots.r7.state')).toBeVisible();
+  await expect(line(page, '$[0].site')).toBeVisible();
+  await expect(line(page, '$[0].robots.r6')).toHaveCount(0);
+  await expect(line(page, '$[0].robots.r7.x')).toHaveCount(0);
+  await expect(hitCount).toHaveText('1/1');
+
+  // Small message (all expanded): a status's values list is shown open.
+  await search.fill('');
+  await broker.publish('diag', JSON.stringify(diag('21.5')));
+  await waitForTopic(page, 'diag');
+  await selectTopic(page, 'diag');
+  await search.fill('BRAKE');
+  await expect(line(page, '$.status[0].values').locator('.jt-caret')).toHaveText('▾');
+  await expect(line(page, '$.status[0].values[3].value')).toBeVisible();
+
+  // Hits are only the matches: not sizes ("{ 2 keys }") or list indices.
+  await search.fill('2');
+  await expect(viewerBody(page).locator('.search-note')).toContainText('match “2” (1 matches)'); // this search's render
+  await expect(hitCount).toHaveText('1/1');
+  await expect(viewerBody(page).locator('mark.hit')).toHaveText(['2']);
+
+  // Large message (not expanded): the values list starts closed and opens in full.
+  await search.fill('');
+  const many = { status: [{ name: 'BRAKE', level: 1, values: Array.from({ length: 150 }, (_, i) => ({ key: `K${i}`, value: String(i) })) }] };
+  await broker.publish('big', JSON.stringify(many));
+  await waitForTopic(page, 'big');
+  await selectTopic(page, 'big');
+  await search.fill('BRAKE');
+  const caret = line(page, '$.status[0].values').locator('.jt-caret');
+  await expect(caret).toHaveText('▸');
+  await expect(line(page, '$.status[0].level')).toBeVisible();
+  await caret.click();
+  // All 150 entries (closed, as in a large message), not just matching ones.
+  await expect(line(page, '$.status[0].values[149]')).toBeVisible();
+  const entries = () => viewerBody(page).locator('.jt-line').evaluateAll((ls) => ls.filter((l) => /^\$\.status\[0\]\.values\[\d+\]$/.test(l.title)).length);
+  expect(await entries()).toBe(150);
+  await line(page, '$.status[0].values[149]').locator('.jt-caret').click();
+  await expect(line(page, '$.status[0].values[149].value')).toBeVisible();
   expect(errors).toEqual([]);
 });
