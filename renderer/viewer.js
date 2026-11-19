@@ -20,7 +20,7 @@ import {
 } from './payload.js';
 import { JsonTree, countNodes, containerPaths, searchJson } from './jsonTree.js';
 import { diffJson, diffLines } from './jsonDiff.js';
-import { ancestorPaths, pathFromSegments } from './jsonPath.js';
+import { ancestorPaths, pathFromSegments, namedSegs, nameParts } from './jsonPath.js';
 import { LineChart } from './chart.js';
 
 const MODES = [
@@ -35,6 +35,9 @@ const DIFF_HIGHLIGHT_LIMIT = 512 * 1024;
 const DEFAULT_EXPAND_ALL_NODES = 400;
 const HISTORY_LIST_MAX = 300; // newest entries rendered in the history list
 const MAX_RENDER_BACKOFF_MS = 2000;
+
+// A charted field's name: the names it picks entries by, else its path.
+const fieldLabel = (segs) => nameParts(segs)?.join(' › ') ?? pathFromSegments(segs);
 
 function loadPref(key, fallback) {
   try {
@@ -519,12 +522,15 @@ export class MessageViewer {
       search,
       changed,
       changedAncestors,
-      onContextMenu: (e, info) => this.jsonMenu(e, info),
+      onContextMenu: (e, info) => this.jsonMenu(e, info, d.value),
     });
   }
 
-  jsonMenu(e, info) {
+  // `root` is the message shown: entries of named arrays (key/name) are
+  // charted and plotted by name, so they are followed when they move.
+  jsonMenu(e, info, root) {
     const json = info.container ? JSON.stringify(info.value, null, 2) : String(info.value);
+    const segs = namedSegs(root, info.segs);
     const numeric = typeof info.value === 'number' || typeof info.value === 'boolean';
     showMenu(e.clientX, e.clientY, [
       { label: 'Copy value', action: () => this.copy(json, 'Value copied') },
@@ -534,11 +540,11 @@ export class MessageViewer {
         label: 'Chart this field (kept history)',
         disabled: !numeric,
         action: () => {
-          this.plotByTopic.set(this.source.path, { segs: info.segs, label: info.path });
+          this.plotByTopic.set(this.source.path, { segs, label: fieldLabel(segs) });
           this.setMode('chart');
         },
       },
-      ...(numeric && this.opts.plotMenuItems ? this.opts.plotMenuItems(this.source.path, info.segs) : []),
+      ...(numeric && this.opts.plotMenuItems ? this.opts.plotMenuItems(this.source.path, segs) : []),
     ]);
   }
 
@@ -653,7 +659,7 @@ export class MessageViewer {
       this.body.append(el('div', 'placeholder', hint));
       return;
     }
-    const label = segs ? pathFromSegments(segs) : 'payload';
+    const label = segs ? fieldLabel(segs) : 'payload';
     const head = el('div', 'chart-head');
     head.append(el('span', 'chart-title', `${label} · ${points.length} points in kept history`));
     if (this.opts.plotMenuItems) {

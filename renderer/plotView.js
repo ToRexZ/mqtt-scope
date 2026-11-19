@@ -3,9 +3,9 @@
 // and the sizes plots need. Shared by the Plots tab and pop-out plot windows.
 
 import { decode, formatDateTime } from './payload.js';
-import { getAt } from './jsonPath.js';
+import { getAt, positionalSegs } from './jsonPath.js';
 import { windowRange, nearest, isBinary, pointAtOrBefore, pointsBetween } from './plotMath.js';
-import { MAX_SERIES, sourceLabel } from './plotLayouts.js';
+import { MAX_SERIES, sourceLabel, seriesLabel } from './plotLayouts.js';
 
 export { sourceLabel };
 
@@ -41,8 +41,8 @@ export const seriesCss = (s) => s.color || `var(${paletteVar(s.slot)})`;
 export const MIN_PLOT_WIDTH = 220;
 export const MIN_PLOT_HEIGHT = 130;
 
-// A series shows its alias when it has one, else where its data comes from.
-export const labelOf = (series) => series.alias || sourceLabel(series.topic, series.segs);
+// A series shows its alias when it has one, else its default name (seriesLabel).
+export const labelOf = (series) => series.alias || seriesLabel(series.topic, series.segs);
 
 // A boolean value is shown as a state lane, anything else as a line.
 export function defaultDisplay(message, segs) {
@@ -50,6 +50,28 @@ export function defaultDisplay(message, segs) {
   const d = decode(message);
   const v = segs && segs.length ? (d.kind === 'json' ? getAt(d.value, segs) : undefined) : d.value;
   return typeof v === 'boolean' ? 'state' : 'line';
+}
+
+// Where a by-name path is in the latest kept message that has its entries
+// (for "Follow by position"); null when none has them.
+export function positionIn(history, segs) {
+  for (let i = (history || []).length - 1; i >= 0; i--) {
+    const d = decode(history[i]);
+    const at = d.kind === 'json' ? positionalSegs(d.value, segs) : null;
+    if (at) return at;
+  }
+  return null;
+}
+
+// The default display for a field, judged by the latest message that has it
+// (on a topic several nodes share, the latest may be another node's).
+export function displayFromHistory(history, segs) {
+  const has = (m) => {
+    const d = decode(m);
+    return !(segs && segs.length) || (d.kind === 'json' && getAt(d.value, segs) !== undefined);
+  };
+  for (let i = (history || []).length - 1; i >= 0; i--) if (has(history[i])) return defaultDisplay(history[i], segs);
+  return 'line';
 }
 
 const visibleSeries = (plot) => plot.series.filter((s) => s.visible);

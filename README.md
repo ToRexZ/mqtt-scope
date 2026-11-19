@@ -117,6 +117,12 @@ saved messages. Runs on Linux, Windows and macOS.
   view, → *Add to new plot* / *Add to plot “…”*. Up to 8 series per plot,
   freeze (**Space**), CSV export (time, series alias, topic, path, value) of
   all collected points or only the visible range.
+- **Named entries**: a value inside a list of named entries, such as ROS
+  diagnostics (`status[].name`, `values[].key`), is plotted by name: the
+  legend reads `diagnostics › BRAKE_SYSTEM/FRONT_WHEEL › BRAKE_MODE`, and the
+  series follows that entry when entries change order or several nodes share
+  the topic. For names that change every message (event ids), **Follow by
+  position** in the series' settings follows the entry's place instead.
 
 ![Plots](docs/screenshots/plots.png)
 

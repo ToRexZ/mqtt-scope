@@ -3,9 +3,10 @@
 // the selection with optional aliases.
 
 import { el, button, overlayHost } from './ui.js';
-import { preview, topicMatches } from './payload.js';
+import { preview, topicMatches, decode } from './payload.js';
 import { messageFields, visibleFields, hasNumbers } from './fields.js';
-import { sourceLabel } from './plotView.js';
+import { seriesLabel } from './plotLayouts.js';
+import { namedSegs, positionalSegs } from './jsonPath.js';
 import { seriesKey } from './plotMath.js';
 
 const MAX_TOPIC_ROWS = 2000;
@@ -139,6 +140,17 @@ export function openPlotPicker(opts) {
       }
       fieldTitle.textContent = `Fields of ${current.path}`;
       const { rows, truncated } = messageFields(current.message);
+      // Entries of named arrays (key/name) are picked by name.
+      const d = decode(current.message);
+      const named = (segs) => (d.kind === 'json' ? namedSegs(d.value, segs) : segs);
+      // Rows picked already, also when picked by name in another message.
+      const picked = new Map();
+      if (d.kind === 'json') {
+        for (const [k, item] of selection) {
+          const at = item.topic === current.path && item.segs ? positionalSegs(d.value, item.segs) : null;
+          if (at) picked.set(JSON.stringify(at), k);
+        }
+      }
       if (!collapsedByTopic.has(current.path)) {
         collapsedByTopic.set(current.path, new Set(rows.filter((r) => r.kind === 'array' && r.size > COLLAPSE_ARRAYS_OVER).map((r) => r.path)));
       }
@@ -167,15 +179,20 @@ export function openPlotPicker(opts) {
             renderFields();
           });
         } else {
-          const key = seriesKey(current.path, r.segs);
-          const check = Object.assign(el('input'), { type: 'checkbox', checked: selection.has(key), disabled: !r.plottable });
+          const segs = named(r.segs);
+          const key = seriesKey(current.path, segs);
+          const pickedKey = picked.get(JSON.stringify(r.segs));
+          const check = Object.assign(el('input'), { type: 'checkbox', checked: selection.has(key) || selection.has(pickedKey), disabled: !r.plottable });
           row.classList.toggle('disabled', !r.plottable);
           row.append(check, el('span', 'picker-key', String(r.key)), el('span', `picker-value tk-${r.kind === 'string' ? 'str' : r.kind === 'boolean' ? 'bool' : r.kind === 'null' ? 'null' : 'num'}`, formatLeaf(r)));
           if (r.plottable) {
             row.addEventListener('click', (e) => {
               if (e.target !== check) check.checked = !check.checked;
-              if (check.checked) selection.set(key, { topic: current.path, segs: r.segs, alias: '' });
-              else selection.delete(key);
+              if (check.checked) selection.set(key, { topic: current.path, segs, alias: '' });
+              else {
+                selection.delete(key);
+                selection.delete(pickedKey);
+              }
               renderSelection();
               renderTopics();
             });
@@ -202,7 +219,7 @@ export function openPlotPicker(opts) {
         const alias = Object.assign(el('input', 'input picker-alias'), { placeholder: 'Alias (optional)', value: item.alias, spellcheck: false });
         alias.addEventListener('input', () => (item.alias = alias.value));
         row.append(
-          el('span', 'picker-sel-source', sourceLabel(item.topic, item.segs)),
+          el('span', 'picker-sel-source', seriesLabel(item.topic, item.segs)),
           alias,
           button('×', 'Remove from selection', () => {
             selection.delete(key);

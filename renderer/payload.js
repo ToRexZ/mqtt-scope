@@ -1,6 +1,8 @@
 // Payload decoding and formatting helpers. No DOM access, so these run in
 // Node for tests as well as in the renderer.
 
+import { getAt } from './jsonPath.js';
+
 const utf8 = new TextDecoder('utf-8', { fatal: true });
 const HIGHLIGHT_LIMIT = 1_500_000;
 
@@ -215,11 +217,7 @@ export function extractNumber(msg, segs) {
   let v;
   if (segs && segs.length) {
     if (d.kind !== 'json') return undefined;
-    v = d.value;
-    for (const s of segs) {
-      if (v === null || typeof v !== 'object') return undefined;
-      v = v[s];
-    }
+    v = getAt(d.value, segs);
   } else {
     v = d.kind === 'number' ? d.value : d.kind === 'json' ? d.value : undefined;
   }

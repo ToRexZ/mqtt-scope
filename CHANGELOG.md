@@ -14,6 +14,16 @@ All notable changes to MQTT Scope. The format follows
 - **CSV export of the visible range.** A plot's **CSV** button asks whether to
   save all collected points or only the visible range (the time window, zoom or
   freeze shown).
+- **Plots follow named entries.** A value picked from a list of named entries
+  (a `key` or `name` field, as in ROS diagnostics) is plotted by that name, not
+  by its position: the legend shows the names (e.g.
+  `diagnostics › BRAKE_SYSTEM/FRONT_WHEEL › BRAKE_MODE` instead of
+  `values[11]`), and the series keeps following the entry when entries change
+  order or several nodes publish to one topic. The same applies to *Chart this
+  field* in the inspector. For names that change every message (such as event
+  ids), **Follow by position** in the series' settings switches it to the
+  entry's place. 0.4.1 and older leave such series out, and drop them from the
+  saved plots if you change plots there.
 
 ## [0.4.1] - 2026-11-06
 

@@ -109,6 +109,8 @@ describe('adding series', () => {
     assert.equal(m.selected, plot);
     assert.equal(plot.kind, 'timeseries');
     assert.equal(changes, 1);
+    const byName = m.addSeries(null, { topic: 'diag', segs: ['status', { field: 'name', equals: 'MOTOR' }, 'level'] });
+    assert.equal(byName.plot.title, 'diag › MOTOR › level');
     const named = m.addSeries(null, { topic: 'a', alias: '  Speed  ' });
     assert.equal(named.plot.title, 'Speed');
     assert.equal(named.series.alias, 'Speed');
@@ -176,6 +178,22 @@ describe('changing plots and series', () => {
     assert.equal(p.windowSec, 7200);
     assert.equal(m.updatePlot(p.id, { windowSec: 90 }), false, 'not whole minutes');
     assert.equal(m.updatePlot('nope', { title: 'X' }), false);
+  });
+
+  test('updateSeries: its path (Follow by position), unless invalid or already in the plot', () => {
+    const m = model();
+    const named = ['events', { field: 'name', equals: 'evt-2' }, 'v'];
+    const { plot: p, series: s } = m.addSeries(null, { topic: 'ev', segs: named });
+    m.addSeries(p.id, { topic: 'ev', segs: ['events', 1, 'v'] });
+    assert.equal(m.updateSeries(p.id, s.id, { segs: ['events', 0, 'v'] }), true);
+    assert.deepEqual(s.segs, ['events', 0, 'v']);
+    assert.equal(m.updateSeries(p.id, s.id, { segs: ['events', 1, 'v'] }), false, 'the plot has that one');
+    assert.equal(m.updateSeries(p.id, s.id, { segs: ['events', -1] }), false);
+    assert.equal(m.updateSeries(p.id, s.id, { segs: ['events', { field: 'id', equals: 'x' }] }), false);
+    assert.equal(m.updateSeries(p.id, s.id, { segs: 'events' }), false);
+    assert.deepEqual(s.segs, ['events', 0, 'v']);
+    assert.equal(m.updateSeries(p.id, s.id, { segs: [] }), true, 'the whole payload');
+    assert.equal(s.segs, null);
   });
 
   test('updateSeries: alias, colour, palette slot, display, width, visibility', () => {
