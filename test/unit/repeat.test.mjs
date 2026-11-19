@@ -53,8 +53,8 @@ describe('rates', () => {
     assert.deepEqual(RATES, [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100]);
   });
   test('parseRate: a plain number of Hz from 0.01 to 100', () => {
-    for (const [text, hz] of [['1', 1], [' 2 ', 2], ['.5', 0.5], ['0.01', 0.01], ['100', 100], ['12.5', 12.5], ['3.', 3]]) assert.equal(parseRate(text), hz, text);
-    for (const text of ['0', '-1', 'abc', '', '  ', '1e3', '100.5', '0.001', '0x10', '1,5', 'Infinity', null, undefined]) assert.equal(parseRate(text), null, String(text));
+    for (const [text, hz] of [['1', 1], [' 2 ', 2], ['.5', 0.5], ['0.01', 0.01], ['100', 100], ['12.5', 12.5], ['3.', 3], ['0,5', 0.5], ['1,5', 1.5]]) assert.equal(parseRate(text), hz, text);
+    for (const text of ['0', '-1', 'abc', '', '  ', '1e3', '100.5', '0.001', '0x10', '1,5,0', '1.5,0', 'Infinity', null, undefined]) assert.equal(parseRate(text), null, String(text));
   });
   test('formatRate', () => {
     assert.equal(formatRate(0.5), '0.5');
@@ -150,17 +150,59 @@ describe('Repeater', () => {
     r.stop();
   });
 
-  test('a new rate applies from the next message', async () => {
+  test('a new rate applies at once, counted from the last send', async () => {
     const { r, timers, log } = setup();
     r.start(10);
     await timers.advance(0);
     r.setRate(1);
     await timers.advance(100);
-    assert.equal(log.sent, 2, 'the wait already set still runs out');
-    await timers.advance(500);
+    assert.equal(log.sent, 1, 'the 100 ms wait is re-timed to 1000 ms');
+    await timers.advance(900);
     assert.equal(log.sent, 2);
-    await timers.advance(500);
+    r.setRate(0.01); // 100 s
+    await timers.advance(50);
+    r.setRate(10); // faster again: due 100 ms after the last send
+    await timers.advance(49);
+    assert.equal(log.sent, 2);
+    await timers.advance(1);
     assert.equal(log.sent, 3);
+    r.stop();
+  });
+
+  test('a slow rate sped up sends right away when the new interval has passed', async () => {
+    const { r, timers, log } = setup();
+    r.start(0.01);
+    await timers.advance(0);
+    await timers.advance(5000);
+    assert.equal(log.sent, 1);
+    r.setRate(10);
+    await timers.advance(0);
+    assert.equal(log.sent, 2);
+    r.stop();
+  });
+
+  test('a new rate while a send is out applies after its reply', async () => {
+    const replies = [];
+    const { r, timers, log } = setup({ send: () => new Promise((res) => replies.push(res)) });
+    r.start(1);
+    await timers.advance(0);
+    r.setRate(10);
+    assert.equal(timers.pending(), 0, 'nothing to re-time yet');
+    replies[0]({ ok: true });
+    await timers.advance(100);
+    assert.equal(log.sent, 2);
+    r.stop();
+  });
+
+  test('start while running restarts quietly (no stop reported)', async () => {
+    const { r, timers, log } = setup();
+    r.start(10);
+    await timers.advance(250);
+    r.start(1);
+    await timers.advance(0);
+    assert.deepEqual(log.stops, []);
+    assert.equal(r.count, 1);
+    assert.equal(timers.pending(), 1);
     r.stop();
   });
 

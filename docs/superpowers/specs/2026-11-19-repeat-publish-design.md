@@ -22,9 +22,10 @@ keeps coming. Today each click of **Publish** sends once.
    - Rate in Hz (maintainer, 19 Nov: "make it Hz, selectable", "also allow to
      type the number in"): a field you type a rate into, with a dropdown of
      0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100 Hz; default 1 Hz. Any rate from
-     0.01 to 100 Hz (decimals allowed); outside that, or not a number, the
-     field is marked and Start is disabled. Changing it while running applies
-     from the next message.
+     0.01 to 100 Hz (decimals allowed, with a point or a comma: `0.5`, `0,5`);
+     outside that, or not a number, the field is marked and Start is disabled.
+     Changing it while running takes effect at once, counted from the last
+     message (review, 19 Nov).
 2. **What is sent** is the message as it was at Start (topic, payload, format,
    QoS, retain). Editing while it runs doesn't change what is sent; a note under
    the row says "Sending the message as it was at Start — Stop and Start again
@@ -36,6 +37,12 @@ keeps coming. Today each click of **Publish** sends once.
    validation, and the message goes into Recent once. No "Published to …" toast
    per message.
 5. The **Publish shortcut** starts and stops it the same way as the button.
+5a. **Always visible while running** (review, 19 Nov): the publisher's header
+   shows "Repeating <topic> · n sent" with a Stop button (also when the
+   publisher is collapsed), the connection tab is marked ↻, and the stop
+   toasts name the topic. A hidden or minimized window keeps the rate (the
+   window's background timer throttling is off while any repeat runs in it).
+   In a narrow window the first row wraps instead of squeezing the topic.
 6. The Repeat setting and rate are part of the publisher's draft, like the
    topic and payload: they move with the tab to another window. Moving the tab
    stops a running repeat; nothing runs on its own after a move or a restart.

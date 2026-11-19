@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld('api', {
   onWarning: (cb) => ipcRenderer.on('mqtt:warning', (_e, data) => cb(data)),
   onMenu: (cb) => ipcRenderer.on('menu', (_e, action) => cb(action)),
   onFlush: (cb) => ipcRenderer.on('app:flush', () => cb()),
+  // Off while a publisher repeats a message: a hidden or minimized window
+  // would otherwise slow its timers to about once a second.
+  setBackgroundThrottling: (on) => ipcRenderer.send('app:backgroundThrottling', on !== false),
   newWindow: () => ipcRenderer.invoke('app:newWindow'),
   // What to open the window with, asked once, with the window's id: the tabs
   // of the last run { windowId, tabs: [{ profileId, connected }], active },

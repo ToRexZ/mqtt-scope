@@ -355,7 +355,7 @@ function activate(id) {
 // follow the active one.
 function refresh() {
   const current = activeTab();
-  strip.render(stripTabs().map((t) => ({ id: t.connId, label: t.label, state: dotState(t.status, t.everConnected), active: t === current })));
+  strip.render(stripTabs().map((t) => ({ id: t.connId, label: t.label, state: dotState(t.status, t.everConnected), active: t === current, repeating: t.repeating })));
   if (current) {
     document.title = `MQTT Scope — ${current.label}`;
     if (current.status !== dialogStatus) {

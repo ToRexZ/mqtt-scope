@@ -247,7 +247,7 @@ export class TabStrip {
     e.preventDefault();
   }
 
-  // tabs: [{ id, label, state (see dotState), active }] in strip order. Tabs
+  // tabs: [{ id, label, state (see dotState), active, repeating }] in strip order. Tabs
   // are updated in place, so a tab keeps its element while it stays open.
   render(tabs) {
     const ids = new Set(tabs.map((t) => t.id));
@@ -262,7 +262,8 @@ export class TabStrip {
       item.classList.toggle('active', t.active);
       item.setAttribute('aria-selected', String(t.active));
       item.tabIndex = t.active ? 0 : -1; // roving: one tab stop for the strip
-      item.title = t.label;
+      item.classList.toggle('repeating', !!t.repeating);
+      item.title = t.repeating ? `${t.label} — repeating a publish` : t.label;
       const label = item.querySelector('.conn-tab-label');
       if (label.textContent !== t.label) label.textContent = t.label;
       if (this.list.children[i] !== item) this.list.insertBefore(item, this.list.children[i] ?? null);

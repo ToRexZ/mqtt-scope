@@ -1793,8 +1793,14 @@ body.moving-plot * {
   gap: 6px;
   padding: 6px 8px 0;
 }
+/* The first row wraps in a narrow window rather than squeezing the topic. */
+.pub-row-main {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
 .topic-input {
-  flex: 1;
+  flex: 1 1 220px;
+  min-width: 160px;
   font-family: var(--mono);
 }
 .validity {
@@ -1817,6 +1823,21 @@ body.moving-plot * {
 }
 .btn.rate-menu {
   padding: 0 6px;
+}
+.repeat-head {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 6px;
+  color: var(--warn);
+  font-size: 12px;
+}
+.repeat-head[hidden] {
+  display: none;
+}
+.conn-tab.repeating .conn-tab-name::after {
+  content: ' ↻';
+  color: var(--warn);
 }
 .repeat-note {
   padding: 0 8px 4px;

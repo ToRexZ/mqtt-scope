@@ -7,10 +7,11 @@ export const MAX_RATE = 100; // Hz: every 10 ms
 
 const PLAIN = /^(\d+\.?\d*|\.\d+)$/;
 
-// A typed rate in Hz ("2", "0.5", ".5"), or null when it isn't a plain number
-// from MIN_RATE to MAX_RATE.
+// A typed rate in Hz ("2", "0.5", ".5", or "0,5" with a decimal comma), or
+// null when it isn't a plain number from MIN_RATE to MAX_RATE.
 export function parseRate(text) {
-  const t = typeof text === 'string' ? text.trim() : '';
+  let t = typeof text === 'string' ? text.trim() : '';
+  if (/^[^.,]*,[^.,]*$/.test(t)) t = t.replace(',', '.');
   if (!PLAIN.test(t)) return null;
   const hz = Number(t);
   return hz >= MIN_RATE && hz <= MAX_RATE ? hz : null;
@@ -35,30 +36,41 @@ export class Repeater {
     this.timer = null;
   }
 
+  // Starting again while running restarts it (no stop is reported).
   start(rate) {
-    if (this.running) this.stop();
+    this.halt();
     this.running = true;
     this.count = 0;
     this.rate = rate;
     this.tick(++this.run);
   }
 
+  // Takes effect at once: a send waiting to go is re-timed to the new rate,
+  // counted from the last send's start.
   setRate(rate) {
     this.rate = rate;
+    if (!this.running || this.timer === null) return;
+    this.timers.clear(this.timer);
+    const run = this.run;
+    this.timer = this.timers.set(() => this.tick(run), Math.max(0, this.lastStart + 1000 / rate - this.timers.now()));
   }
 
   stop(reason = 'stopped', error) {
     if (!this.running) return;
+    this.halt();
+    this.onStop(reason, error);
+  }
+
+  halt() {
     this.running = false;
     this.run++;
     if (this.timer !== null) this.timers.clear(this.timer);
     this.timer = null;
-    this.onStop(reason, error);
   }
 
   async tick(run) {
     this.timer = null;
-    const started = this.timers.now();
+    const started = (this.lastStart = this.timers.now());
     let res;
     try {
       res = await this.send();

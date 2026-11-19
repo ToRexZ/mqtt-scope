@@ -35,7 +35,9 @@ All notable changes to MQTT Scope. The format follows
   pick one (0.1–100 Hz), and **Start** sends the message over and over until
   **Stop**, counting on the button. What is sent is the message as it was at
   Start; the retained-message confirmation is asked once; a disconnect or a
-  failed publish stops it. Ctrl+Enter starts and stops it too.
+  failed publish stops it. Ctrl+Enter starts and stops it too. While it runs,
+  the publisher's header (also when collapsed) and the tab (↻) show it, and a
+  hidden or minimized window keeps the rate.
 
 ## [0.4.1] - 2026-11-06
 
