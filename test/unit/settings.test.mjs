@@ -11,10 +11,17 @@ const NUMERIC_DEFAULTS = { historyLimit: DEFAULT_SETTINGS.historyLimit, historyM
 
 describe('normalizeSettings', () => {
   test('defaults', () => {
-    assert.deepEqual(DEFAULT_SETTINGS, { historyLimit: 100, historyMB: 64, autoExpand: true, checkForUpdates: true, restoreTabs: true, keys: {} });
+    assert.deepEqual(DEFAULT_SETTINGS, { historyLimit: 100, historyMB: 64, autoExpand: true, checkForUpdates: true, restoreTabs: true, keys: {}, mouse: { pan: 'left', box: 'right' } });
     assert.deepEqual(normalizeAll(undefined), DEFAULT_SETTINGS);
     assert.deepEqual(normalizeAll(null), DEFAULT_SETTINGS);
     assert.deepEqual(normalizeAll({}), DEFAULT_SETTINGS);
+  });
+
+  test('plot mouse bindings: kept when valid and different, else the defaults', () => {
+    assert.deepEqual(normalizeAll({ mouse: { pan: 'right', box: 'left' } }).mouse, { pan: 'right', box: 'left' });
+    assert.deepEqual(normalizeAll({ mouse: { pan: 'right', box: 'right' } }).mouse, { pan: 'left', box: 'right' });
+    assert.deepEqual(normalizeAll({ mouse: 'left' }).mouse, { pan: 'left', box: 'right' });
+    assert.notEqual(normalizeAll({}).mouse, DEFAULT_SETTINGS.mouse, 'a fresh object');
   });
 
   test('returns a fresh object, never DEFAULT_SETTINGS itself', () => {

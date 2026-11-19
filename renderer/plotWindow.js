@@ -5,7 +5,7 @@
 // in the main window starts it over.
 
 import { el, button } from './ui.js';
-import { LineChart } from './chart.js';
+import { LineChart, setPlotMouse } from './chart.js';
 import { sanitizePlot } from './plotLayouts.js';
 import { PlotData } from './plotData.js';
 import { seriesKey } from './plotMath.js';
@@ -18,7 +18,9 @@ const REDRAW_MS = 500;
 const api = window.api;
 
 const opened = await api.plotWindowInit();
-if (opened?.plot) start(opened, resolveBindings(normalizeSettings(await api.storeGet('settings').catch(() => null)).keys));
+const settings = normalizeSettings(await api.storeGet('settings').catch(() => null));
+setPlotMouse(settings.mouse);
+if (opened?.plot) start(opened, resolveBindings(settings.keys));
 
 function start(init, keys) {
   const plot = sanitizePlot(init.plot);

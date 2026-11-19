@@ -38,6 +38,17 @@ All notable changes to MQTT Scope. The format follows
   failed publish stops it. Ctrl+Enter starts and stops it too. While it runs,
   the publisher's header (also when collapsed) and the tab (↻) show it, and a
   hidden or minimized window keeps the rate.
+- **Plot zoom with the wheel, pan by dragging.** The mouse wheel zooms a plot's
+  timeline around the pointer; the sideways wheel or Shift+wheel and a left
+  drag move along it (and the values too in a value zoom); a right drag draws
+  the zoom box. Zooming out stops at the data collected. Settings → Keyboard →
+  *Plot mouse* sets which drag pans and which zooms (left, right, middle,
+  Shift+left or Ctrl/Cmd+left).
+
+### Changed
+
+- **Box zoom is a right drag** by default (the left drag pans now); switch them
+  back in Settings → Keyboard → Plot mouse.
 
 ## [0.4.1] - 2026-11-06
 

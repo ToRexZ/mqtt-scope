@@ -5,6 +5,7 @@ import { el, button, toast, overlayHost } from './ui.js';
 import { iconButton } from './icons.js';
 import { checkedView } from './updateView.js';
 import { ACTIONS, comboFromEvent, conflicts, displayCombo, fixedShortcuts, normalizeOverrides, resolveBindings } from './keys.js';
+import { MOUSE_CHOICES, DEFAULT_MOUSE, normalizeMouse } from './mouseBindings.js';
 
 export const DEFAULT_SETTINGS = {
   historyLimit: 100, // messages kept per topic
@@ -13,6 +14,7 @@ export const DEFAULT_SETTINGS = {
   checkForUpdates: true, // automatic update checks (main reads it from settings.json)
   restoreTabs: true, // reopen the windows and tabs of the last run at launch (main reads it too)
   keys: {}, // keyboard shortcut overrides: action id -> combo
+  mouse: { ...DEFAULT_MOUSE }, // plot drags: { pan, box } (see mouseBindings.js)
 };
 
 const LIMITS = {
@@ -32,6 +34,7 @@ export function normalizeSettings(raw) {
   if (typeof raw?.checkForUpdates === 'boolean') out.checkForUpdates = raw.checkForUpdates;
   if (typeof raw?.restoreTabs === 'boolean') out.restoreTabs = raw.restoreTabs;
   out.keys = normalizeOverrides(raw?.keys);
+  out.mouse = normalizeMouse(raw?.mouse);
   return out;
 }
 
@@ -41,6 +44,7 @@ export function openSettings(api, current, { tab = 'general', openUpdatePanel = 
     const overlay = el('div', 'modal-overlay');
     const form = el('form', 'modal prompt settings');
     const bindings = resolveBindings(current.keys);
+    const mouse = { ...normalizeMouse(current.mouse) };
     let recording = null; // action id waiting for a key press
 
     // ---- General
@@ -99,12 +103,44 @@ export function openSettings(api, current, { tab = 'general', openUpdatePanel = 
       conflictNote.textContent = clash.size
         ? `Used twice: ${[...clash.keys()].map((c) => displayCombo(c)).join(', ')}. Change one of them to save.`
         : '';
-      saveBtn.disabled = clash.size > 0;
+      updateSave();
     };
+    const blocked = () => conflicts(bindings).size > 0 || mouse.pan === mouse.box;
+    const updateSave = () => (saveBtn.disabled = blocked());
+
+    // Plot mouse: which drag pans the timeline and which draws a zoom box.
+    const mouseGroup = el('div', 'keys-mouse');
+    const mouseNote = el('div', 'field-hint bad');
+    const mouseSelects = {};
+    const renderMouse = () => {
+      for (const [k, s] of Object.entries(mouseSelects)) s.value = mouse[k];
+      mouseNote.textContent = mouse.pan === mouse.box ? 'Pan and Box zoom use the same drag. Change one of them to save.' : '';
+      updateSave();
+    };
+    mouseGroup.append(el('div', 'field-hint', 'Plot mouse — the wheel zooms the timeline; the sideways wheel or Shift+wheel moves along it.'));
+    for (const [key, label] of [
+      ['pan', 'Pan (move along the timeline)'],
+      ['box', 'Box zoom (drag a box to zoom into)'],
+    ]) {
+      const select = el('select', 'select');
+      select.name = `mouse-${key}`;
+      for (const [id, text] of MOUSE_CHOICES) select.append(Object.assign(el('option', '', text), { value: id }));
+      select.addEventListener('change', () => {
+        mouse[key] = select.value;
+        renderMouse();
+      });
+      mouseSelects[key] = select;
+      const row = el('label', 'keys-row');
+      row.append(el('span', 'keys-label', label), select);
+      mouseGroup.append(row);
+    }
+    mouseGroup.append(mouseNote);
     const resetAll = button('Reset all to defaults', '', () => {
       for (const a of ACTIONS) bindings[a.id] = a.default;
+      Object.assign(mouse, DEFAULT_MOUSE);
       recording = null;
       renderKeys();
+      renderMouse();
     });
     // What the menu bar used to show: fixed by the app, not part of the table above.
     const fixed = el('div', 'keys-fixed');
@@ -115,7 +151,7 @@ export function openSettings(api, current, { tab = 'general', openUpdatePanel = 
       row.title = 'Fixed: this shortcut cannot be changed';
       fixed.append(row);
     }
-    keyboard.append(el('div', 'field-hint', 'Click a shortcut, then press the keys you want.'), table, conflictNote, resetAll, fixed);
+    keyboard.append(el('div', 'field-hint', 'Click a shortcut, then press the keys you want.'), table, conflictNote, mouseGroup, resetAll, fixed);
 
     // Records the next key press for the selected action.
     const onRecord = (e) => {
@@ -219,12 +255,13 @@ export function openSettings(api, current, { tab = 'general', openUpdatePanel = 
         checkForUpdates: checkUpdates.input.checked,
         restoreTabs: restoreTabs.input.checked,
         keys: bindings,
+        mouse,
       });
     };
     const unsaved = () => JSON.stringify(formValues()) !== JSON.stringify(normalizeSettings(current));
     form.addEventListener('submit', async (e) => {
       e.preventDefault();
-      if (conflicts(bindings).size) return showTab('keyboard');
+      if (blocked()) return showTab('keyboard');
       const next = formValues();
       try {
         await api.storeSet('settings', next);
@@ -238,6 +275,7 @@ export function openSettings(api, current, { tab = 'general', openUpdatePanel = 
     overlay.append(form);
     overlayHost().append(overlay);
     renderKeys();
+    renderMouse();
     showTab(tab);
     if (tab === 'general') fields.historyLimit.focus();
   });

@@ -20,7 +20,8 @@ async function setup(env) {
   const broker = await env.broker();
   await broker.publish('hall/temp', '20', { retain: true });
   await broker.publish('robot/state', JSON.stringify({ battery: 80 }), { retain: true });
-  const ctx = await env.launch({ userData: makeUserData({ profiles: [profile(broker.port)] }) });
+  const userData = makeUserData({ profiles: [profile(broker.port)] });
+  const ctx = await env.launch({ userData });
   await ctx.page.setViewportSize({ width: 1600, height: 1000 });
   await connect(ctx.page);
   await waitForTopic(ctx.page, 'hall/temp');
@@ -38,7 +39,7 @@ async function setup(env) {
     await new Promise((r) => setTimeout(r, 50));
   }
   await until(() => ctx.page.evaluate(() => window.__mqttscope.plots.points('hall/temp', null).length >= 31), { message: 'points' });
-  return { broker, ...ctx };
+  return { broker, userData, ...ctx };
 }
 
 // A wheel event over the plotting area of plot `i`, at fraction `fx` across
@@ -242,5 +243,104 @@ test('live plots: the first wheel fixes the range; the pop-out zooms and pans on
   const panned = await win.evaluate(() => window.__plotWindow.chart.range);
   expect(panned.t0).toBeLessThan(prePan.t0);
   expect(close(width(panned), width(prePan), 1)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+// Drags across plot `i` (time only) with `button`; returns the range before.
+async function dragAcross(page, i, button, from = 0.3, to = 0.6) {
+  const r = (await charts(page))[i];
+  const c = await cards(page).nth(i).locator('canvas').boundingBox();
+  const y = c.y + (r.geom.top + r.geom.bottom) / 2;
+  const px = r.geom.right - r.geom.left;
+  await page.mouse.move(c.x + r.geom.left + px * from, y);
+  await page.mouse.down({ button });
+  await page.mouse.move(c.x + r.geom.left + px * to, y, { steps: 6 });
+  const boxed = await page.locator('.chart-sel').isVisible();
+  await page.mouse.up({ button });
+  return { before: r.range, after: (await charts(page))[i].range, boxed };
+}
+
+test('Settings → Keyboard → Plot mouse: swap the drags; equal is refused; kept after a restart and in a pop-out', async ({ env }) => {
+  const { app, page, userData, broker, errors } = await setup(env);
+  const dlg = page.locator('.modal.settings');
+  const pan = dlg.locator('select[name="mouse-pan"]');
+  const box = dlg.locator('select[name="mouse-box"]');
+  const save = dlg.getByRole('button', { name: 'Save' });
+  await page.locator('#btn-settings').click();
+  await dlg.locator('.tab[data-tab="keyboard"]').click();
+  await expect(dlg.locator('.keys-mouse')).toContainText('Plot mouse');
+  await expect(dlg.locator('.keys-mouse')).toContainText('wheel');
+  await expect(pan).toHaveValue('left');
+  await expect(box).toHaveValue('right');
+  expect(await pan.locator('option').allTextContents()).toEqual(['Left drag', 'Right drag', 'Middle drag', 'Shift + left drag', 'Ctrl/Cmd + left drag']);
+
+  // The same drag for both: said, and Save is off.
+  await pan.selectOption('right');
+  await expect(dlg.locator('.keys-mouse .field-hint.bad')).toHaveText('Pan and Box zoom use the same drag. Change one of them to save.');
+  await expect(save).toBeDisabled();
+  await box.selectOption('left');
+  await expect(dlg.locator('.keys-mouse .field-hint.bad')).toHaveText('');
+  await expect(save).toBeEnabled();
+  await save.click();
+  await expect(dlg).toHaveCount(0);
+
+  // Now a right drag pans and a left drag box-zooms.
+  await page.locator('.plots-toolbar').getByRole('button', { name: 'Freeze' }).click();
+  await page.evaluate(() => {
+    const { plots } = window.__mqttscope;
+    const ts = plots.points('hall/temp', null).map((p) => p.t);
+    const [a, b] = [ts[0], ts[ts.length - 1]];
+    plots.zoom(plots.plots[0], { t0: a + (b - a) * 0.4, t1: a + (b - a) * 0.8 }); // inside the data, room on both sides
+  });
+  let d = await dragAcross(page, 0, 'right');
+  expect(d.boxed).toBe(false);
+  expect(d.after.t0).toBeLessThan(d.before.t0);
+  expect(close(width(d.after), width(d.before), 1)).toBe(true);
+  d = await dragAcross(page, 0, 'left');
+  expect(d.boxed).toBe(true);
+  expect(close(width(d.after), width(d.before) * 0.3, width(d.before) * 0.02)).toBe(true);
+  await expect(page.locator('.ctx-menu')).toHaveCount(0);
+
+  // Reset all restores the defaults in the form.
+  await page.locator('#btn-settings').click();
+  await dlg.locator('.tab[data-tab="keyboard"]').click();
+  await expect(pan).toHaveValue('right');
+  await dlg.getByRole('button', { name: 'Reset all to defaults' }).click();
+  await expect(pan).toHaveValue('left');
+  await expect(box).toHaveValue('right');
+  await page.keyboard.press('Escape'); // not saved
+
+  // Kept after a restart, and a pop-out opened then uses them.
+  await env.closeApp({ app });
+  const again = await env.launch({ userData });
+  await again.page.setViewportSize({ width: 1600, height: 1000 });
+  await plotsTab(again.page).click();
+  for (let i = 0; i < 20; i++) {
+    await broker.publish('hall/temp', String(20 + (i % 4)));
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  await until(() => again.page.evaluate(() => window.__mqttscope.plots.points('hall/temp', null).length >= 20), { message: 'points after the restart' });
+  const opened = again.app.waitForEvent('window');
+  await cards(again.page).first().locator('.popout-btn').click();
+  const win = await opened;
+  await win.setViewportSize({ width: 1100, height: 650 });
+  await win.waitForFunction(() => !!window.__plotWindow?.chart.geom);
+  await win.evaluate(() => {
+    const ts = window.__plotWindow.data.points('hall/temp', null).map((p) => p.t);
+    const [a, b] = [ts[0], ts[ts.length - 1]];
+    window.__plotWindow.chart.opts.onZoom({ t0: a + (b - a) * 0.4, t1: a + (b - a) * 0.8 });
+  });
+  const wc = await win.locator('canvas').boundingBox();
+  const g = await win.evaluate(() => ({ ...window.__plotWindow.chart.geom }));
+  const y = wc.y + (g.top + g.bottom) / 2;
+  const before = await win.evaluate(() => window.__plotWindow.chart.range);
+  await win.mouse.move(wc.x + g.left + (g.right - g.left) * 0.3, y);
+  await win.mouse.down({ button: 'right' });
+  await win.mouse.move(wc.x + g.left + (g.right - g.left) * 0.6, y, { steps: 5 });
+  await expect(win.locator('.chart-sel')).toHaveCount(0);
+  await win.mouse.up({ button: 'right' });
+  const after = await win.evaluate(() => window.__plotWindow.chart.range);
+  expect(after.t0).toBeLessThan(before.t0);
+  expect(close(width(after), width(before), 1)).toBe(true);
   expect(errors).toEqual([]);
 });
