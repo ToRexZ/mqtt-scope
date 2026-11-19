@@ -134,7 +134,7 @@ describe('Repeater', () => {
 
   test('start, stop, start: the first run has no effect on the second', async () => {
     const replies = [];
-    const { r, timers, log } = setup({ send: () => new Promise((res) => replies.push(res)) });
+    const { r, timers } = setup({ send: () => new Promise((res) => replies.push(res)) });
     r.start(10);
     await timers.advance(0);
     r.stop();

@@ -137,6 +137,11 @@ saved messages. Runs on Linux, Windows and macOS.
 **Publisher**
 - JSON (validated, format/minify), text or hex-byte payloads; QoS; retain;
   Ctrl+Enter to send; load a payload from a file.
+- **Repeat**: tick *Repeat at*, type a rate in Hz (0.01–100) or pick one from
+  ▾, and **Start** sends the message again and again (a heartbeat, a command
+  that must keep arriving) until **Stop**. The button counts what was sent; the
+  message is the one at Start (edits wait for the next Start); a disconnect or
+  a failed publish stops it.
 - **Saved messages**: store frequently sent messages (name + topic + payload +
   options). Messages for the selected topic are listed first; ▶ sends one with a
   single click. A **Recent** list keeps the last 50 publishes.

@@ -1,9 +1,10 @@
 // Publisher: compose and send messages, plus a library of saved messages
 // (named topic + payload + options) and a list of recent publishes.
 
-import { el, button, toast, promptText } from './ui.js';
+import { el, button, toast, promptText, showMenu } from './ui.js';
 import { iconButton, setIcon } from './icons.js';
 import { decode, parseHex, formatTime, unsafeJson, hasUnsafeIntegers } from './payload.js';
+import { RATES, MIN_RATE, MAX_RATE, parseRate, formatRate, Repeater } from './repeat.js';
 
 const RECENT_LIMIT = 50;
 const newId = () => Math.random().toString(36).slice(2, 10);
@@ -22,6 +23,12 @@ export class Publisher {
     this.thisTopicOnly = false;
     this.follow = true; // topic follows the tree selection until the message is edited
     this.busy = false;
+    this.repeating = null; // { entry, msg }: what a running repeat sends
+    this.repeater = new Repeater({
+      send: () => this.api.publish(this.repeating.msg),
+      onTick: () => this.updateSendBtn(),
+      onStop: (reason, error) => this.repeatStopped(reason, error),
+    });
     this.build(host);
   }
 
@@ -56,8 +63,37 @@ export class Publisher {
     this.retain = el('input');
     this.retain.type = 'checkbox';
     retainLabel.append(this.retain, document.createTextNode(' Retain'));
+    // Repeat: send the message again and again at a rate in Hz until stopped.
+    const repeatLabel = el('label', 'check');
+    this.repeatBox = Object.assign(el('input'), { type: 'checkbox' });
+    repeatLabel.append(this.repeatBox, document.createTextNode(' Repeat at'));
+    this.repeatBox.addEventListener('change', () => {
+      if (!this.repeatBox.checked) this.stopRepeat();
+      this.updateSendBtn();
+    });
+    this.rateInput = Object.assign(el('input', 'input rate-input'), { name: 'repeat-rate', value: '1', inputMode: 'decimal', spellcheck: false });
+    this.rateInput.title = `Messages per second: ${MIN_RATE} to ${MAX_RATE}`;
+    this.rateInput.addEventListener('input', () => this.rateChanged());
+    const ratesBtn = button(
+      '▾',
+      'Common rates',
+      (e) => {
+        const r = e.currentTarget.getBoundingClientRect();
+        const pick = (hz) => {
+          this.rateInput.value = formatRate(hz);
+          this.rateChanged();
+        };
+        showMenu(r.left, r.bottom + 4, RATES.map((hz) => ({ label: `${formatRate(hz)} Hz`, action: () => pick(hz) })));
+      },
+      'btn rate-menu',
+    );
+    ratesBtn.setAttribute('aria-label', 'Common rates');
+    const rateBox = el('span', 'rate-box');
+    rateBox.append(this.rateInput, ratesBtn, el('span', 'muted', 'Hz'));
     this.sendBtn = button('Publish', 'Publish', () => this.publish(), 'btn primary');
-    row1.append(this.topic, this.topicList, this.followBtn, this.qos, retainLabel, this.sendBtn);
+    row1.append(this.topic, this.topicList, this.followBtn, this.qos, retainLabel, repeatLabel, rateBox, this.sendBtn);
+    this.repeatNote = el('div', 'repeat-note', 'Sending the message as it was at Start — Stop and Start again to send your changes');
+    this.repeatNote.hidden = true;
 
     const row2 = el('div', 'pub-row');
     this.format = el('select', 'select');
@@ -116,7 +152,9 @@ export class Publisher {
     // Everything below the header scrolls when the publisher is made too
     // short for it, so the editor and library keep a usable height.
     const scroll = el('div', 'pub-scroll');
-    scroll.append(row1, row2, body);
+    scroll.append(row1, this.repeatNote, row2, body);
+    // Edits while repeating: say they aren't sent yet.
+    for (const type of ['input', 'change']) scroll.addEventListener(type, () => this.updateRepeatNote());
     this.root.append(head, scroll);
     host.append(this.root);
     this.validate();
@@ -126,6 +164,7 @@ export class Publisher {
 
   // The tab closed: nothing of it may run later.
   dispose() {
+    this.stopRepeat('closed');
     clearTimeout(this.validateTimer);
     this.root.remove();
   }
@@ -245,6 +284,8 @@ export class Publisher {
       qos: Number(this.qos.value),
       retain: this.retain.checked,
       follow: this.follow,
+      repeat: this.repeatBox.checked,
+      rate: this.rateInput.value,
     };
   }
 
@@ -255,6 +296,9 @@ export class Publisher {
     this.qos.value = String(d.qos);
     this.retain.checked = d.retain;
     this.setFollow(d.follow);
+    this.repeatBox.checked = !!d.repeat;
+    this.rateInput.value = typeof d.rate === 'string' ? d.rate : '1';
+    this.rateChanged();
     this.validate();
     this.renderList();
   }
@@ -330,23 +374,38 @@ export class Publisher {
   async send(entry) {
     if (this.busy) return false;
     this.busy = true;
-    this.sendBtn.disabled = true;
+    this.updateSendBtn();
     try {
       return await this.sendNow(entry);
     } finally {
       this.busy = false;
-      this.sendBtn.disabled = false;
+      this.updateSendBtn();
     }
   }
 
   async sendNow(entry) {
+    const body = await this.prepare(entry);
+    if (body === null) return false;
+    const res = await this.api.publish({ topic: entry.topic, payload: body, qos: entry.qos, retain: entry.retain });
+    if (!res.ok) {
+      toast(`Publish failed: ${res.error}`, 'error');
+      return false;
+    }
+    this.addRecent(entry);
+    toast(`Published to ${entry.topic}`);
+    return true;
+  }
+
+  // The checks before sending (retained confirmation, hex and JSON): the
+  // payload to send, or null when it must not be sent.
+  async prepare(entry) {
     if (entry.retain) {
       const ok = await this.api.confirm({
         message: `Publish a retained message to ${entry.topic}?`,
         detail: 'The broker keeps it and delivers it to every client that subscribes later, including after reconnects.',
         okLabel: 'Publish retained',
       });
-      if (!ok) return false;
+      if (!ok) return null;
     }
     let body = entry.payload;
     if (entry.format === 'hex') {
@@ -354,30 +413,90 @@ export class Publisher {
         body = parseHex(entry.payload);
       } catch (err) {
         toast(err.message, 'error');
-        return false;
+        return null;
       }
     } else if (entry.format === 'json' && entry.payload.trim()) {
       try {
         JSON.parse(entry.payload);
       } catch (err) {
         toast(`Invalid JSON — fix it or switch the format to Text: ${err.message}`, 'error');
-        return false;
+        return null;
       }
     }
-    const res = await this.api.publish({ topic: entry.topic, payload: body, qos: entry.qos, retain: entry.retain });
-    if (!res.ok) {
-      toast(`Publish failed: ${res.error}`, 'error');
-      return false;
-    }
+    return body;
+  }
+
+  addRecent(entry) {
     this.recent = [{ ...entry, ts: Date.now() }, ...this.recent.filter((r) => !sameMessage(r, entry))].slice(0, RECENT_LIMIT);
     this.persist();
     if (this.listMode === 'recent') this.renderList();
-    toast(`Published to ${entry.topic}`);
-    return true;
   }
 
+  // The send button and the Publish shortcut: publish once, or with Repeat
+  // ticked start or stop repeating.
   publish() {
+    if (this.repeatBox.checked) return this.toggleRepeat();
     return this.send(this.current());
+  }
+
+  // ------------------------------------------------------------ repeat
+
+  // Starts repeating the message as it is now (checked once), or stops.
+  async toggleRepeat() {
+    if (this.repeater.running) {
+      this.stopRepeat();
+      return false;
+    }
+    const hz = parseRate(this.rateInput.value);
+    if (hz === null || this.busy) return false;
+    this.busy = true;
+    this.updateSendBtn();
+    try {
+      const entry = this.current();
+      const payload = await this.prepare(entry);
+      if (payload === null || !this.repeatBox.checked || !this.root.isConnected) return false;
+      this.addRecent(entry);
+      this.repeating = { entry, msg: { topic: entry.topic, payload, qos: entry.qos, retain: entry.retain } };
+      this.repeater.start(hz);
+      return true;
+    } finally {
+      this.busy = false;
+      this.updateSendBtn();
+      this.updateRepeatNote();
+    }
+  }
+
+  // reason: 'stopped' (by the user), 'disconnected' or 'closed' (the tab).
+  stopRepeat(reason = 'stopped') {
+    this.repeater.stop(reason);
+  }
+
+  repeatStopped(reason, error) {
+    this.repeating = null;
+    this.updateSendBtn();
+    this.updateRepeatNote();
+    if (reason === 'failed') toast(`Repeat stopped — publish failed: ${error}`, 'error');
+    else if (reason === 'disconnected') toast('Repeat stopped: disconnected');
+  }
+
+  rateChanged() {
+    const hz = parseRate(this.rateInput.value);
+    this.rateInput.classList.toggle('bad', hz === null);
+    if (hz !== null && this.repeater.running) this.repeater.setRate(hz);
+    this.updateSendBtn();
+  }
+
+  updateSendBtn() {
+    const running = this.repeater.running;
+    const repeat = this.repeatBox.checked;
+    this.sendBtn.textContent = running ? `Stop (${this.repeater.count})` : repeat ? 'Start' : 'Publish';
+    this.sendBtn.title = running ? 'Stop repeating' : repeat ? 'Send this message at the rate until stopped' : 'Publish';
+    this.sendBtn.classList.toggle('on', running);
+    this.sendBtn.disabled = this.busy || (repeat && !running && parseRate(this.rateInput.value) === null);
+  }
+
+  updateRepeatNote() {
+    this.repeatNote.hidden = !(this.repeating && !sameMessage(this.repeating.entry, this.current()));
   }
 
   async saveCurrent() {

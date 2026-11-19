@@ -490,6 +490,7 @@ export class ConnectionTab {
   }
 
   onStatus(s) {
+    if (s.state !== 'connected') this.publisher.stopRepeat('disconnected');
     this.status = s;
     if (s.state === 'connected') this.everConnected = true;
     // The client's own retries keep a failure; a new attempt, a connection or

@@ -1804,6 +1804,29 @@ body.moving-plot * {
 .validity.bad {
   color: var(--err);
 }
+.rate-box {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+}
+.rate-input {
+  width: 52px;
+}
+.rate-input.bad {
+  border-color: var(--err);
+}
+.btn.rate-menu {
+  padding: 0 6px;
+}
+.repeat-note {
+  padding: 0 8px 4px;
+  color: var(--warn);
+  font-size: 12px;
+}
+.btn.primary.on {
+  background: var(--err);
+  border-color: var(--err);
+}
 .pub-body {
   flex: 1;
   /* A few lines of payload, and the library's tabs with an item under them. */

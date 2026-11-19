@@ -31,6 +31,11 @@ All notable changes to MQTT Scope. The format follows
 - **Search shows the whole entry.** A search hit on a value inside a list entry
   shows that entry in full: searching a diagnostics key such as `BRAKE_MODE`
   shows its value, and searching a value shows which key it belongs to.
+- **Repeat publish.** Tick *Repeat at* in the publisher, type a rate in Hz or
+  pick one (0.1–100 Hz), and **Start** sends the message over and over until
+  **Stop**, counting on the button. What is sent is the message as it was at
+  Start; the retained-message confirmation is asked once; a disconnect or a
+  failed publish stops it. Ctrl+Enter starts and stops it too.
 
 ## [0.4.1] - 2026-11-06
 
