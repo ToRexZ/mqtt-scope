@@ -51,7 +51,7 @@ test('plottable: numbers, booleans and decimal strings only', () => {
   assert.equal(by['$.s'], false);
   assert.equal(by['$.n'], false);
   assert.equal(by['$.agvPosition'], false);
-  assert.equal(flattenFields({ h: '0x10', i: 'Infinity' }).rows.every((r) => !r.plottable), true);
+  assert.equal(flattenFields({ h: '0x10', i: 'Infinity', j: '1e400', k: '-1e400' }).rows.every((r) => !r.plottable), true, 'too big for a number');
 });
 
 test('container sizes and the row limit', () => {

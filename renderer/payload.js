@@ -9,7 +9,8 @@ const HIGHLIGHT_LIMIT = 1_500_000;
 // Plain decimal numbers only; Number() would also accept 0x10, 0b1, Infinity.
 const DECIMAL = /^[+-]?(\d+\.?\d*|\.\d+)([eE][+-]?\d+)?$/;
 
-export const isDecimal = (s) => typeof s === 'string' && DECIMAL.test(s.trim());
+// (and not too big for a number: "1e400" is not one)
+export const isDecimal = (s) => typeof s === 'string' && DECIMAL.test(s.trim()) && Number.isFinite(Number(s));
 
 // Control characters other than tab/newline/carriage return mark binary data.
 // eslint-disable-next-line no-control-regex -- matching control characters is the point
