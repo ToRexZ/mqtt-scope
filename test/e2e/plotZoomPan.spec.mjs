@@ -129,8 +129,8 @@ test('wheel zooms around the pointer, sideways wheel and drags pan, right drag b
   // menu and start no autoscroll there.
   const prevented = await page.evaluate(() => {
     const cv = document.querySelector('.plot-card canvas');
-    const b = cv.getBoundingClientRect();
-    const at = { clientX: b.left + b.width / 2, clientY: b.top + b.height / 2, bubbles: true, cancelable: true };
+    const rect = cv.getBoundingClientRect();
+    const at = { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2, bubbles: true, cancelable: true };
     const fire = (e) => (cv.dispatchEvent(e), e.defaultPrevented);
     const legend = document.querySelector('.plot-card .plot-legend');
     const legendWheel = new WheelEvent('wheel', { ...at, deltaY: 50 });
