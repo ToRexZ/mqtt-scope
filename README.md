@@ -64,6 +64,9 @@ saved messages. Runs on Linux, Windows and macOS.
   that it rounds them.
 - Search: in the Tree view it filters a large JSON document down to the
   matching branches.
+- Right-click a value in the Tree view to chart it (*Chart this field*) or add
+  it to a plot; numbers written as text (`"21.5"`, as ROS diagnostics send
+  them) count as numbers.
 - Big messages: multi-megabyte JSON opens instantly (children are rendered on
   demand). **Maximize** (F11) gives the inspector the whole window; **Pop out**
   opens a topic in a separate live window.

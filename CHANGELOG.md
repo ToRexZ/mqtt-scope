@@ -24,6 +24,10 @@ All notable changes to MQTT Scope. The format follows
   ids), **Follow by position** in the series' settings switches it to the
   entry's place. 0.4.1 and older leave such series out, and drop them from the
   saved plots if you change plots there.
+- **Chart numbers written as text.** In the inspector's Tree view, values such
+  as `"21.5"` (ROS diagnostics send every value as text) can now be charted
+  with *Chart this field* and added to plots from the right-click menu, like
+  numbers.
 
 ## [0.4.1] - 2026-11-06
 
