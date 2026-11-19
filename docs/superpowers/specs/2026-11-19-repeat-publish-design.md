@@ -36,8 +36,9 @@ keeps coming. Today each click of **Publish** sends once.
    validation, and the message goes into Recent once. No "Published to …" toast
    per message.
 5. The **Publish shortcut** starts and stops it the same way as the button.
-6. The Repeat setting and rate are remembered per connection tab like the
-   rest of the publisher; a running repeat is never restored after a restart.
+6. The Repeat setting and rate are part of the publisher's draft, like the
+   topic and payload: they move with the tab to another window. Moving the tab
+   stops a running repeat; nothing runs on its own after a move or a restart.
 
 ## Non-goals
 
@@ -61,5 +62,4 @@ keeps coming. Today each click of **Publish** sends once.
 - E2E: Start at 10 Hz → the broker receives several identical messages and
   the button counts them; Stop → no more arrive; editing while running sends
   the old payload and shows the note; disconnect stops it; retained asks once;
-  the shortcut toggles; Repeat and rate are kept after a restart, not
-  running.
+  the shortcut toggles; Repeat and rate move with the tab, not running.
