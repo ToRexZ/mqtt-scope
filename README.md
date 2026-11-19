@@ -121,7 +121,8 @@ saved messages. Runs on Linux, Windows and macOS.
   diagnostics (`status[].name`, `values[].key`), is plotted by name: the
   legend reads `diagnostics › BRAKE_SYSTEM/FRONT_WHEEL › BRAKE_MODE`, and the
   series follows that entry when entries change order or several nodes share
-  the topic.
+  the topic. For names that change every message (event ids), **Follow by
+  position** in the series' settings follows the entry's place instead.
 
 ![Plots](docs/screenshots/plots.png)
 

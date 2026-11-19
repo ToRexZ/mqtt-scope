@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
 import { niceTicks, formatValue, nearest, windowRange, seriesKey } from '../../renderer/plotMath.js';
 import { prng } from './_util.mjs';
+import { sanitizeSeries } from '../../renderer/plotLayouts.js';
 
 const PLOTMATH_URL = new URL('../../renderer/plotMath.js', import.meta.url).href;
 
@@ -237,6 +238,14 @@ describe('windowRange', () => {
 });
 
 describe('seriesKey', () => {
+
+  test('selector steps: one key whatever order the selector was written in', () => {
+    const a = seriesKey('d', ['status', { field: 'name', equals: 'A' }, 'level']);
+    assert.equal(a, seriesKey('d', ['status', { field: 'name', equals: 'A' }, 'level']));
+    assert.notEqual(a, seriesKey('d', ['status', { field: 'key', equals: 'A' }, 'level']));
+    assert.notEqual(a, seriesKey('d', ['status', 0, 'level']));
+    assert.equal(seriesKey('d', ['s', sanitizeSeries({ topic: 'd', segs: ['s', { equals: 'A', field: 'name' }] }).segs[1]]), seriesKey('d', ['s', { field: 'name', equals: 'A' }]));
+  });
   test('null/undefined segs equal empty segs (whole payload)', () => {
     assert.equal(seriesKey('a', null), seriesKey('a', []));
     assert.equal(seriesKey('a', undefined), seriesKey('a', []));

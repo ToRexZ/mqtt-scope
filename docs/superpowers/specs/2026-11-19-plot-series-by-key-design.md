@@ -39,12 +39,19 @@ instead of the name, "lidt frem og tilbage".
    row and the CSV `path` column show the full path in JSONPath filter syntax:
    `$.status[?(@.name=="BRAKE_SYSTEM/FRONT_WHEEL")].values[?(@.key=="BRAKE_MODE")].value`.
 
+5. **Follow by position** (added after review, 19 Nov): a series picked by
+   name shows a *Follow by position* button in its settings (Source row). It
+   switches the series to the entry's place in the latest kept message that
+   has it, for names that change every message (event ids, timestamps), where
+   by name the series would get one point. Disabled when no kept message has
+   the entry.
+
 ## Non-goals
 
 - No migration: series saved by position keep working as before; re-add one to
   get the by-name form.
-- No editing of selectors by hand, and no matching on non-string fields or on
-  fields other than `key`/`name`.
+- No editing of selectors by hand (beyond Follow by position), and no matching
+  on non-string fields or on fields other than `key`/`name`.
 - The inspector's *Copy path* keeps the exact (positional) path of that node.
 
 ## Constraints

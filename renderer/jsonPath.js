@@ -39,6 +39,29 @@ export function getAt(value, segs) {
   return v;
 }
 
+// The names in an array, per field: name -> { count, index of the first },
+// built once per array (picking among thousands of rows stays fast).
+const nameIndexes = new WeakMap();
+function namesIn(arr, field) {
+  let byField = nameIndexes.get(arr);
+  if (!byField) nameIndexes.set(arr, (byField = {}));
+  if (!byField[field]) {
+    const names = new Map();
+    arr.forEach((e, index) => {
+      const name = isEntry(e) ? e[field] : undefined;
+      if (typeof name !== 'string') return;
+      const seen = names.get(name);
+      if (seen) seen.count++;
+      else names.set(name, { count: 1, index });
+    });
+    byField[field] = names;
+  }
+  return byField[field];
+}
+
+// The index of a selector's entry in v; -1 when v isn't an array or has none.
+const indexOf = (v, sel) => (Array.isArray(v) ? (namesIn(v, sel.field).get(sel.equals)?.index ?? -1) : -1);
+
 // The selector for arr[i]: its `key` (else `name`) when that is a non-empty
 // text no other entry of the array has; null otherwise.
 function selectorFor(arr, i) {
@@ -46,10 +69,11 @@ function selectorFor(arr, i) {
   if (!isEntry(e)) return null;
   for (const field of NAME_FIELDS) {
     const name = e[field];
-    if (typeof name === 'string' && name && arr.filter((x) => isEntry(x) && x[field] === name).length === 1) return { field, equals: name };
+    if (typeof name === 'string' && name && namesIn(arr, field).get(name).count === 1) return { field, equals: name };
   }
   return null;
 }
+
 
 // `segs` as picked in `value`, with every array index that has a name turned
 // into a selector, so the path keeps following that entry when it moves.
@@ -60,6 +84,20 @@ export function namedSegs(value, segs) {
   for (const s of segs) {
     out.push((Number.isInteger(s) && Array.isArray(v) && selectorFor(v, s)) || s);
     v = step(v, s);
+  }
+  return out;
+}
+
+// Where `segs` points in `value`: every selector replaced by the index of its
+// entry there; null when an entry is missing.
+export function positionalSegs(value, segs) {
+  const out = [];
+  let v = value;
+  for (const s of segs) {
+    const i = isSelector(s) ? indexOf(v, s) : s;
+    if (i === -1) return null;
+    out.push(i);
+    v = step(v, i);
   }
   return out;
 }

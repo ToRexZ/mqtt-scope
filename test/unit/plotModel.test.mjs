@@ -180,6 +180,22 @@ describe('changing plots and series', () => {
     assert.equal(m.updatePlot('nope', { title: 'X' }), false);
   });
 
+  test('updateSeries: its path (Follow by position), unless invalid or already in the plot', () => {
+    const m = model();
+    const named = ['events', { field: 'name', equals: 'evt-2' }, 'v'];
+    const { plot: p, series: s } = m.addSeries(null, { topic: 'ev', segs: named });
+    m.addSeries(p.id, { topic: 'ev', segs: ['events', 1, 'v'] });
+    assert.equal(m.updateSeries(p.id, s.id, { segs: ['events', 0, 'v'] }), true);
+    assert.deepEqual(s.segs, ['events', 0, 'v']);
+    assert.equal(m.updateSeries(p.id, s.id, { segs: ['events', 1, 'v'] }), false, 'the plot has that one');
+    assert.equal(m.updateSeries(p.id, s.id, { segs: ['events', -1] }), false);
+    assert.equal(m.updateSeries(p.id, s.id, { segs: ['events', { field: 'id', equals: 'x' }] }), false);
+    assert.equal(m.updateSeries(p.id, s.id, { segs: 'events' }), false);
+    assert.deepEqual(s.segs, ['events', 0, 'v']);
+    assert.equal(m.updateSeries(p.id, s.id, { segs: [] }), true, 'the whole payload');
+    assert.equal(s.segs, null);
+  });
+
   test('updateSeries: alias, colour, palette slot, display, width, visibility', () => {
     const m = withPlots('A');
     const p = m.plots[0];

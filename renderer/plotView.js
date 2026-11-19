@@ -3,7 +3,7 @@
 // and the sizes plots need. Shared by the Plots tab and pop-out plot windows.
 
 import { decode, formatDateTime } from './payload.js';
-import { getAt } from './jsonPath.js';
+import { getAt, positionalSegs } from './jsonPath.js';
 import { windowRange, nearest, isBinary, pointAtOrBefore, pointsBetween } from './plotMath.js';
 import { MAX_SERIES, sourceLabel, seriesLabel } from './plotLayouts.js';
 
@@ -50,6 +50,28 @@ export function defaultDisplay(message, segs) {
   const d = decode(message);
   const v = segs && segs.length ? (d.kind === 'json' ? getAt(d.value, segs) : undefined) : d.value;
   return typeof v === 'boolean' ? 'state' : 'line';
+}
+
+// Where a by-name path is in the latest kept message that has its entries
+// (for "Follow by position"); null when none has them.
+export function positionIn(history, segs) {
+  for (let i = (history || []).length - 1; i >= 0; i--) {
+    const d = decode(history[i]);
+    const at = d.kind === 'json' ? positionalSegs(d.value, segs) : null;
+    if (at) return at;
+  }
+  return null;
+}
+
+// The default display for a field, judged by the latest message that has it
+// (on a topic several nodes share, the latest may be another node's).
+export function displayFromHistory(history, segs) {
+  const has = (m) => {
+    const d = decode(m);
+    return !(segs && segs.length) || (d.kind === 'json' && getAt(d.value, segs) !== undefined);
+  };
+  for (let i = (history || []).length - 1; i >= 0; i--) if (has(history[i])) return defaultDisplay(history[i], segs);
+  return 'line';
 }
 
 const visibleSeries = (plot) => plot.series.filter((s) => s.visible);

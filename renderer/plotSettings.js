@@ -8,18 +8,20 @@
 //     openSeries,            // Set of series ids whose details are open (kept across renders)
 //     onChanged(what),       // what the plot needs: 'title' (its title text), 'redraw',
 //                            // 'card' (draw its card again) or 'all' (everything)
+//     positionOf(series),    // a by-name series' path by position in the latest message, or null
 //     onAddSeries(), onHide(),
 //   });
 
 import { el, button } from './ui.js';
 import { iconButton, setIcon } from './icons.js';
-import { MAX_SERIES } from './plotLayouts.js';
+import { MAX_SERIES, seriesLabel } from './plotLayouts.js';
 import { KIND_LABELS, DISPLAY_LABELS, labelOf, sourceLabel, paletteVar } from './plotView.js';
 import { resolvedColor, windowSelect } from './plotCard.js';
+import { nameParts, pathFromSegments } from './jsonPath.js';
 
 const LINE_WIDTHS = [1, 2, 3, 4, 5, 6];
 
-export function renderPlotSettings(container, { model, plot, openSeries, onChanged, onAddSeries, onHide }) {
+export function renderPlotSettings(container, { model, plot, openSeries, onChanged, onAddSeries, onHide, positionOf = () => null }) {
   container.textContent = '';
   const heading = el('div', 'ps-heading');
   heading.append(el('span', '', 'Plot settings'), iconButton('chevrons-left', 'Hide the settings panel', onHide, 'btn icon small ps-hide'));
@@ -63,7 +65,7 @@ export function renderPlotSettings(container, { model, plot, openSeries, onChang
   add.disabled = plot.series.length >= MAX_SERIES;
   seriesHead.append(el('span', 'muted small', `${plot.series.length} of ${MAX_SERIES}`), add);
   const list = el('div', 'ps-series');
-  for (const s of plot.series) list.append(seriesSettings(model, plot, s, { openSeries, onChanged }));
+  for (const s of plot.series) list.append(seriesSettings(model, plot, s, { openSeries, onChanged, positionOf }));
 
   // A State transitions plot labels its lanes and has no y axis.
   const legend = section('Legend', check('Show legend', 'legend'), check('Show values', 'legendValues'));
@@ -74,7 +76,7 @@ export function renderPlotSettings(container, { model, plot, openSeries, onChang
   container.append(section('General', row('Title', title), row('Plot type', kind), row('Time window', win)), legend, xAxis, yAxis, section('Series', seriesHead, list));
 }
 
-function seriesSettings(model, plot, s, { openSeries, onChanged }) {
+function seriesSettings(model, plot, s, { openSeries, onChanged, positionOf }) {
   const item = el('details', 'ps-series-item' + (s.visible ? '' : ' off'));
   item.dataset.seriesId = s.id;
   item.open = openSeries.has(s.id);
@@ -101,9 +103,26 @@ function seriesSettings(model, plot, s, { openSeries, onChanged }) {
   summary.append(eye, sw, name, remove);
 
   const body = el('div', 'ps-series-body');
-  body.append(row('Source', el('code', 'ps-source', sourceLabel(s.topic, s.segs))));
+  const source = el('div', 'ps-source-row');
+  source.append(el('code', 'ps-source', sourceLabel(s.topic, s.segs)));
+  if (nameParts(s.segs)) {
+    // For names that change every message (event ids): follow the place instead.
+    const at = positionOf(s);
+    const byPlace = button(
+      'Follow by position',
+      at ? `Follow ${pathFromSegments(at)} (its place in the latest message) instead of the name — for names that change every message, like event ids` : 'No kept message has this entry',
+      () => at && update({ segs: at }, 'all'),
+      'btn small',
+    );
+    byPlace.disabled = !at;
+    source.append(byPlace);
+  }
+  // A div, not row()'s label: a click on the path must not press the button.
+  const sourceRow = el('div', 'ps-row');
+  sourceRow.append(el('span', 'ps-label', 'Source'), source);
+  body.append(sourceRow);
 
-  const alias = Object.assign(el('input', 'input'), { value: s.alias || '', placeholder: sourceLabel(s.topic, s.segs), name: 'series-alias', spellcheck: false });
+  const alias = Object.assign(el('input', 'input'), { value: s.alias || '', placeholder: seriesLabel(s.topic, s.segs), name: 'series-alias', spellcheck: false });
   alias.addEventListener('input', () => {
     update({ alias: alias.value });
     name.textContent = labelOf(s);

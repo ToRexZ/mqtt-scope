@@ -10,6 +10,8 @@ import {
   DISPLAY_LABELS,
   labelOf,
   defaultDisplay,
+  displayFromHistory,
+  positionIn,
   showsLegend,
   minPlotHeight,
   layoutWeight,
@@ -49,6 +51,24 @@ describe('labels', () => {
 });
 
 describe('defaults', () => {
+  test('positionIn: where a by-name path is in the latest message that has the entry', () => {
+    const m = (v) => ({ payload: enc(JSON.stringify(v)) });
+    const segs = ['events', { field: 'name', equals: 'evt-1' }, 'v'];
+    const history = [m({ events: [{ name: 'x' }, { name: 'evt-1', v: 1 }] }), m({ events: [{ name: 'evt-2', v: 2 }] })];
+    assert.deepEqual(positionIn(history, segs), ['events', 1, 'v']);
+    assert.equal(positionIn([history[1]], segs), null, 'no message has it');
+    assert.equal(positionIn([], segs), null);
+  });
+
+  test('the display style comes from the latest message that has the field', () => {
+    const m = (v) => ({ payload: enc(JSON.stringify(v)) });
+    const segs = ['status', { field: 'name', equals: 'A' }, 'ok'];
+    const history = [m({ status: [{ name: 'A', ok: true }] }), m({ status: [{ name: 'B', ok: 1 }] })];
+    assert.equal(displayFromHistory(history, segs), 'state', 'the latest message has no A');
+    assert.equal(displayFromHistory([m({ status: [{ name: 'A', ok: 2 }] })], segs), 'line');
+    assert.equal(displayFromHistory([], segs), 'line');
+    assert.equal(displayFromHistory([m({ ok: true })], ['ok']), 'state');
+  });
   test('booleans are state lanes, everything else lines', () => {
     const m = (v) => ({ payload: enc(JSON.stringify(v)) });
     assert.equal(defaultDisplay(m({ ok: true }), ['ok']), 'state');

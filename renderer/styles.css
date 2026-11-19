@@ -1725,6 +1725,13 @@ body.moving-plot * {
 .ps-series-body {
   padding: 2px 8px 8px;
 }
+.ps-source-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
 .ps-source {
   font-family: var(--mono);
   font-size: 11px;

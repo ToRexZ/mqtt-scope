@@ -15,7 +15,7 @@
 import { el, button, toast, promptText, showMenu, splitter } from './ui.js';
 import { icon, iconButton } from './icons.js';
 import { LineChart } from './chart.js';
-import { MAX_SERIES } from './plotLayouts.js';
+import { MAX_SERIES, seriesLabel } from './plotLayouts.js';
 import { PlotModel } from './plotModel.js';
 import { PlotData, pointsFromMessages } from './plotData.js';
 import { renderMosaic } from './mosaic.js';
@@ -23,7 +23,7 @@ import { renderPlotSettings } from './plotSettings.js';
 import { renderLegend, updateLegend, kindToggle, windowSelect, resetViewButton } from './plotCard.js';
 import { openPlotPicker } from './plotPicker.js';
 import { seriesKey } from './plotMath.js';
-import { MIN_PLOT_WIDTH, labelOf, sourceLabel, defaultDisplay, layoutWeight, minPlotHeight, chartSeries, chartRange, chartAxis, plotCsv, csvRange } from './plotView.js';
+import { MIN_PLOT_WIDTH, labelOf, sourceLabel, displayFromHistory, layoutWeight, minPlotHeight, chartSeries, chartRange, chartAxis, plotCsv, csvRange, positionIn } from './plotView.js';
 
 const SAVE_DELAY_MS = 300;
 const REDRAW_MS = 500;
@@ -245,10 +245,10 @@ export class PlotsPanel {
     return items;
   }
 
-  // The model's addSeries, with the display style the latest message suggests.
+  // The model's addSeries, with the display style the latest message with that field suggests.
   add(plotId, topic, segs, alias = '') {
     const history = this.opts.getHistory(topic) || [];
-    return this.model.addSeries(plotId, { topic, segs, alias, display: defaultDisplay(history[history.length - 1], segs) });
+    return this.model.addSeries(plotId, { topic, segs, alias, display: displayFromHistory(history, segs) });
   }
 
   // Adds one series; creates the plot (in the tab on screen) when plotId is
@@ -295,7 +295,7 @@ export class PlotsPanel {
   async renameSeries(plot, series) {
     const alias = await promptText({
       title: 'Series alias',
-      label: `Name shown in the legend for ${sourceLabel(series.topic, series.segs)} (leave empty to use the topic)`,
+      label: `Name shown in the legend for ${sourceLabel(series.topic, series.segs)} (leave empty for “${seriesLabel(series.topic, series.segs)}”)`,
       value: series.alias || '',
       allowEmpty: true,
     });
@@ -760,6 +760,7 @@ export class PlotsPanel {
       plot: this.model.selected,
       openSeries: this.openSeries,
       onAddSeries: () => this.openPicker(this.model.selectedId),
+      positionOf: (s) => positionIn(this.opts.getHistory(s.topic) || [], s.segs),
       onHide: () => this.toggleSettings(false),
       onChanged: (what) => {
         const plot = this.model.selected;

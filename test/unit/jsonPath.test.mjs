@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { childPath, pathFromSegments, getAt, ancestorPaths, parsePath, isSelector, namedSegs, nameParts } from '../../renderer/jsonPath.js';
+import { childPath, pathFromSegments, getAt, ancestorPaths, parsePath, isSelector, namedSegs, nameParts, positionalSegs } from '../../renderer/jsonPath.js';
 import { prng } from './_util.mjs';
 
 describe('childPath', () => {
@@ -241,5 +241,26 @@ describe('selectors (array entries picked by name)', () => {
     assert.deepEqual(nameParts([sel('key', 'K'), 'value']), ['K'], 'payload is the array');
     assert.equal(nameParts(['a', 0, 'value']), null);
     assert.equal(nameParts(null), null);
+  });
+});
+
+describe('selectors: following other messages and finding rows', () => {
+  const sel = (field, equals) => ({ field, equals });
+
+  test('namedSegs on a large named array stays fast', () => {
+    const big = { list: Array.from({ length: 20000 }, (_, i) => ({ key: `k${i}`, v: i })) };
+    const t0 = performance.now();
+    for (let i = 0; i < 3000; i++) namedSegs(big, ['list', i, 'v']);
+    assert.ok(performance.now() - t0 < 250, `took ${Math.round(performance.now() - t0)} ms`);
+    assert.deepEqual(namedSegs(big, ['list', 19999, 'v']), ['list', sel('key', 'k19999'), 'v']);
+  });
+
+  test('positionalSegs: where a path points in this message (null when an entry is missing)', () => {
+    const v = { status: [{ name: 'B' }, { name: 'A', values: [{ key: 'T', value: '1' }] }] };
+    assert.deepEqual(positionalSegs(v, ['status', sel('name', 'A'), 'values', sel('key', 'T'), 'value']), ['status', 1, 'values', 0, 'value']);
+    assert.deepEqual(positionalSegs(v, ['status', 0, 'name']), ['status', 0, 'name']);
+    assert.equal(positionalSegs(v, ['status', sel('name', 'GONE'), 'level']), null);
+    assert.equal(positionalSegs({ status: { name: 'A' } }, ['status', sel('name', 'A')]), null);
+    assert.deepEqual(positionalSegs({ a: [{ key: 'K' }, { key: 'K' }] }, ['a', sel('key', 'K')]), ['a', 0], 'first match');
   });
 });

@@ -19,6 +19,7 @@ import {
   PLOTS_DOC_VERSION,
   seriesLabel,
   sanitizePlot,
+  sanitizeSeries,
   newTab,
   plotsDocFrom,
   layoutFile,
@@ -318,6 +319,12 @@ export class PlotModel {
       } else if (key === 'display' && DISPLAYS.includes(value)) s.display = value;
       else if (key === 'width' && Number.isInteger(value) && value >= 1 && value <= 6) s.width = value;
       else if (key === 'visible' && typeof value === 'boolean') s.visible = value;
+      else if (key === 'segs' && Array.isArray(value)) {
+        // A new path (e.g. Follow by position), unless the plot has that series.
+        const clean = sanitizeSeries({ topic: s.topic, segs: value });
+        const taken = (segs) => this.plot(plotId).series.some((o) => o !== s && seriesKey(o.topic, o.segs) === seriesKey(s.topic, segs));
+        if (clean && !taken(clean.segs)) s.segs = clean.segs;
+      }
     }
     const changed = JSON.stringify(s) !== before;
     if (changed) this.changed();

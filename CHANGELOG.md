@@ -20,7 +20,10 @@ All notable changes to MQTT Scope. The format follows
   `diagnostics › BRAKE_SYSTEM/FRONT_WHEEL › BRAKE_MODE` instead of
   `values[11]`), and the series keeps following the entry when entries change
   order or several nodes publish to one topic. The same applies to *Chart this
-  field* in the inspector. Plots saved this way are skipped by 0.4.1 and older.
+  field* in the inspector. For names that change every message (such as event
+  ids), **Follow by position** in the series' settings switches it to the
+  entry's place. 0.4.1 and older leave such series out, and drop them from the
+  saved plots if you change plots there.
 
 ## [0.4.1] - 2026-11-06
 
