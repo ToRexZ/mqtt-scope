@@ -61,3 +61,46 @@ test('numbers written as text can be charted and plotted from the Tree', async (
   await page.keyboard.press('Escape');
   expect(errors).toEqual([]);
 });
+
+test('a search hit in a list entry shows the whole entry', async ({ env }) => {
+  const { broker, page, errors } = await open(env, diag('21.5'));
+  const search = page.locator('#viewer-host input.search');
+  const note = viewerBody(page).locator('.search-note');
+
+  // A key's name (the value of "key") shows that key's value.
+  await search.fill('MODE');
+  await expect(note).toContainText('(1 matches)');
+  await expect(line(page, '$.status[0].values[0].key')).toBeVisible();
+  await expect(line(page, '$.status[0].values[0].value')).toBeVisible();
+  await expect(line(page, '$.status[0].values[1]')).toHaveCount(0);
+  await expect(line(page, '$.status[0].level')).toHaveCount(0);
+  await expect(viewerBody(page).locator('mark.hit')).toHaveCount(1);
+
+  // A value shows which key it belongs to.
+  await search.fill('21.5');
+  await expect(line(page, '$.status[0].values[1].key')).toBeVisible();
+  await expect(line(page, '$.status[0].values[0]')).toHaveCount(0);
+
+  // A status name shows that status: its level and its list of values.
+  await search.fill('BRAKE');
+  await expect(line(page, '$.status[0].level')).toBeVisible();
+  await expect(line(page, '$.status[0].values')).toBeVisible();
+  const caret = line(page, '$.status[0].values').locator('.jt-caret');
+  if ((await caret.textContent()) === '▸') await caret.click();
+  await expect(line(page, '$.status[0].values[3].value')).toBeVisible();
+
+  // A key name still shows only itself (and its value), not its entry.
+  await search.fill('level');
+  await expect(line(page, '$.status[0].level')).toBeVisible();
+  await expect(line(page, '$.status[0].name')).toHaveCount(0);
+
+  // Outside lists, other fields stay hidden.
+  await search.fill('');
+  await broker.publish('cfg', JSON.stringify({ cfg: { a: 'x-ray', b: 'yes' } }));
+  await waitForTopic(page, 'cfg');
+  await selectTopic(page, 'cfg');
+  await search.fill('x-ray');
+  await expect(line(page, '$.cfg.a')).toBeVisible();
+  await expect(line(page, '$.cfg.b')).toHaveCount(0);
+  expect(errors).toEqual([]);
+});

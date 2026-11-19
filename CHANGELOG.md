@@ -28,6 +28,9 @@ All notable changes to MQTT Scope. The format follows
   as `"21.5"` (ROS diagnostics send every value as text) can now be charted
   with *Chart this field* and added to plots from the right-click menu, like
   numbers.
+- **Search shows the whole entry.** A search hit on a value inside a list entry
+  shows that entry in full: searching a diagnostics key such as `BRAKE_MODE`
+  shows its value, and searching a value shows which key it belongs to.
 
 ## [0.4.1] - 2026-11-06
 

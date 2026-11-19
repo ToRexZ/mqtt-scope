@@ -63,7 +63,8 @@ saved messages. Runs on Linux, Windows and macOS.
   exactly in Text and Raw and kept exact when re-publishing; the Tree view warns
   that it rounds them.
 - Search: in the Tree view it filters a large JSON document down to the
-  matching branches.
+  matching branches. A value found inside a list entry shows the whole entry,
+  so searching a diagnostics key (`BRAKE_MODE`) shows its value too.
 - Right-click a value in the Tree view to chart it (*Chart this field*) or add
   it to a plot; numbers written as text (`"21.5"`, as ROS diagnostics send
   them) count as numbers.

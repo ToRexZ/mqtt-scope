@@ -14,12 +14,14 @@ what you were looking for.
 
 ## Goals
 
-- When a search matches anything inside an entry of an array (an object
+- When a search matches a value inside an entry of an array (an object
   directly in an array), the innermost such entry is shown in full: all its
-  fields, nested containers shown closed (they open on click).
+  fields, nested containers open or closed as they were (a click toggles).
+  A matching key name shows its own value already, so it doesn't open its
+  entry (searching `temp` across robots still shows just each robot's temp).
   - `BRAKE_MODE` → `{ "key": "BRAKE_MODE", "value": "3" }`.
   - `BRAKE_SYSTEM/FRONT_WHEEL` (a `status[].name`) → that status entry: level,
-    message, hardware_id and its `values` list (closed).
+    message, hardware_id and its `values` list.
   - `21.5` (a value) → its entry, so you see which key it belongs to.
 - Matches stay highlighted and counted as today; the match count and the
   "Showing only branches that match" note don't change.

@@ -35,32 +35,39 @@ export function containerPaths(value, maxDepth = Infinity) {
 // Finds keys and primitive values containing `query` (case-insensitive).
 // Returns { visible, matches, count }: `matches` are the matching nodes,
 // `visible` those plus every ancestor, used to show only matching branches.
+// `whole`: for a value matching inside a list entry (an object directly in an
+// array), the innermost such entry, which the tree shows in full: searching a
+// diagnostics key ({ key: "MODE", value: "3" }) shows its value too. (A
+// matching key name shows its own value already.)
 export function searchJson(value, query) {
   const q = query.toLowerCase();
   const visible = new Set();
   const matches = new Set();
+  const whole = new Set();
   let count = 0;
-  const hit = (p, chain) => {
+  const hit = (p, chain, entry) => {
     count++;
     matches.add(p);
     visible.add(p);
     for (const a of chain) visible.add(a);
+    if (entry) whole.add(entry);
   };
-  const walk = (v, path, chain) => {
+  const isEntry = (c) => c !== null && typeof c === 'object' && !Array.isArray(c);
+  const walk = (v, path, chain, entry) => {
     if (v !== null && typeof v === 'object') {
       const isArr = Array.isArray(v);
       const inner = [...chain, path];
       for (const [k, c] of Object.entries(v)) {
         const p = childPath(path, isArr ? Number(k) : k);
-        if (!isArr && k.toLowerCase().includes(q)) hit(p, inner);
-        walk(c, p, inner);
+        if (!isArr && k.toLowerCase().includes(q)) hit(p, inner, null);
+        walk(c, p, inner, isArr && isEntry(c) ? p : entry);
       }
     } else if (String(v).toLowerCase().includes(q)) {
-      hit(path, chain);
+      hit(path, chain, entry);
     }
   };
-  walk(value, '$', []);
-  return { visible, matches, count };
+  walk(value, '$', [], null);
+  return { visible, matches, count, whole };
 }
 
 const preview = (v) => {
@@ -78,6 +85,7 @@ export class JsonTree {
     // When searching, only branches in `visible` are shown and opened.
     this.visible = opts.search?.visible || null;
     this.matches = opts.search?.matches || new Set();
+    this.whole = opts.search?.whole || new Set();
     this.forced = this.visible ? new Set(this.visible) : new Set();
     this.changed = opts.changed || new Set();
     this.changedAncestors = opts.changedAncestors || new Set();
@@ -115,8 +123,9 @@ export class JsonTree {
     const wrap = el('div', 'jt-node');
     const line = el('div', 'jt-line');
     line.title = path;
-    // Below a matching key everything is shown, not just further matches.
-    this.info.set(line, { path, segs, value, container: isContainer, unfiltered: unfiltered || this.matches.has(path) });
+    // Below a matching key, and in a matching list entry, everything is shown,
+    // not just further matches.
+    this.info.set(line, { path, segs, value, container: isContainer, unfiltered: unfiltered || this.matches.has(path) || this.whole.has(path) });
     if (this.changed.has(path)) line.classList.add('jt-changed');
 
     const caret = el('span', 'jt-caret', isContainer ? '▸' : '');
