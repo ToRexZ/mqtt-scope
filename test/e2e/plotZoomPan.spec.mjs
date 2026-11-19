@@ -51,6 +51,7 @@ async function wheel(page, i, fx, init, { drawn = true } = {}) {
   const clientX = c.x + g.left + (g.right - g.left) * fx;
   const clientY = c.y + (g.top + g.bottom) / 2;
   await canvas.dispatchEvent('wheel', { clientX, clientY, deltaX: 0, deltaY: 0, ...init });
+  await frame(page); // wheel steps apply at the next frame
 }
 
 test('wheel zooms around the pointer, sideways wheel and drags pan, right drag box-zooms', async ({ env }) => {
@@ -216,6 +217,7 @@ test('live plots: the first wheel fixes the range; the pop-out zooms and pans on
   const wc = await wcanvas.boundingBox();
   const wg = await win.evaluate(() => ({ ...window.__plotWindow.chart.geom }));
   await wcanvas.dispatchEvent('wheel', { clientX: wc.x + (wg.left + wg.right) / 2, clientY: wc.y + (wg.top + wg.bottom) / 2, deltaY: -300 });
+  await frame(win);
   const wr = await win.evaluate(() => window.__plotWindow.chart.range);
   expect(width(wr)).toBeLessThan((wg.t1 - wg.t0) * 0.6);
   await expect(win.locator('.reset-view')).toBeVisible();
@@ -232,6 +234,7 @@ test('live plots: the first wheel fixes the range; the pop-out zooms and pans on
   // A value zoom there stays through a wheel step (time only).
   await win.evaluate(() => window.__plotWindow.chart.opts.onZoom({ ...window.__plotWindow.chart.range, yMin: 21, yMax: 23 }));
   await wcanvas.dispatchEvent('wheel', { clientX: wc.x + (g2.left + g2.right) / 2, clientY: wc.y + (g2.top + g2.bottom) / 2, deltaY: 50 });
+  await frame(win);
   expect(await win.evaluate(() => [window.__plotWindow.chart.axis.yMin, window.__plotWindow.chart.axis.yMax])).toEqual([21, 23]);
   expect(close(width(boxed), (g2.t1 - g2.t0) * 0.5, (g2.t1 - g2.t0) * 0.02)).toBe(true);
   const g3 = await win.evaluate(() => ({ ...window.__plotWindow.chart.geom }));
@@ -342,5 +345,210 @@ test('Settings → Keyboard → Plot mouse: swap the drags; equal is refused; ke
   const after = await win.evaluate(() => window.__plotWindow.chart.range);
   expect(after.t0).toBeLessThan(before.t0);
   expect(close(width(after), width(before), 1)).toBe(true);
+  expect(errors).toEqual([]);
+});
+
+// One frame later (wheel steps are applied once per frame).
+const frame = (page) => page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+
+test('review fixes: two buttons, freeze limit, no-op wheel, trackpad, Esc, hover, scroll, re-render, menus', async ({ env }) => {
+  const { page, broker, errors } = await setup(env);
+  const canvas = cards(page).first().locator('canvas');
+  const c = await canvas.boundingBox();
+  const range = async () => (await charts(page))[0].range;
+  const zoomed = () => page.evaluate(() => window.__mqttscope.plots.zoomByTab.size > 0);
+  const geom = async () => (await charts(page))[0].geom;
+  const mid = async () => {
+    const g = await geom();
+    return { x: c.x + (g.left + g.right) / 2, y: c.y + (g.top + g.bottom) / 2, g };
+  };
+
+  // The hint says how it works now.
+  await expect(page.locator('.plots-hint')).toContainText('Wheel to zoom');
+
+  // Live and showing all its data: a wheel-down or a pan that changes nothing
+  // keeps the plots live.
+  await wheel(page, 0, 0.5, { deltaY: 400 });
+  await frame(page);
+  expect(await zoomed()).toBe(false);
+  let p = await mid();
+  await page.mouse.move(p.x, p.y);
+  await page.mouse.down();
+  await page.mouse.move(p.x + 80, p.y, { steps: 4 });
+  await page.mouse.up();
+  expect(await zoomed()).toBe(false);
+  await expect(page.locator('.plot-card .reset-view:visible')).toHaveCount(0);
+
+  // A trackpad swipe that is mostly vertical zooms (a little sideways noise is not a pan).
+  const w0 = width((await charts(page))[0].geom);
+  await wheel(page, 0, 0.5, { deltaY: -200, deltaX: 1 });
+  await frame(page);
+  expect(width(await range())).toBeLessThan(w0 * 0.8);
+
+  // Several wheel events in one frame make one zoom step of their sum.
+  await page.evaluate(() => {
+    const ch = [...window.__mqttscope.plots.charts.values()][0];
+    const orig = ch.opts.onZoom;
+    window.__zooms = 0;
+    ch.opts.onZoom = (z) => (window.__zooms++, orig(z));
+  });
+  const before3 = width(await range());
+  p = await mid();
+  await page.evaluate(({ x, y }) => {
+    const cv = document.querySelector('.plot-card canvas');
+    for (let i = 0; i < 3; i++) cv.dispatchEvent(new WheelEvent('wheel', { clientX: x, clientY: y, deltaY: -100, bubbles: true, cancelable: true }));
+  }, p);
+  await frame(page);
+  expect(await page.evaluate(() => window.__zooms)).toBe(1);
+  expect(close(width(await range()), before3 * Math.exp(-0.6), before3 * 0.01)).toBe(true);
+  // …and the time bar follows the pointer to the new range.
+  const hover = await page.evaluate(() => [...window.__mqttscope.plots.charts.values()][0].hoverTime);
+  const r3 = await range();
+  expect(close(hover, (r3.t0 + r3.t1) / 2, width(r3) * 0.02)).toBe(true);
+
+  // Two buttons at once: one drag; nothing is left listening afterwards.
+  p = await mid();
+  await page.mouse.move(p.x, p.y);
+  await page.mouse.down();
+  await page.mouse.move(p.x + 20, p.y, { steps: 2 });
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(p.x + 40, p.y, { steps: 2 });
+  await page.mouse.up({ button: 'right' });
+  // Left still held: releasing the other button doesn't end the pan.
+  const midPan = await range();
+  await page.mouse.move(p.x + 90, p.y, { steps: 3 });
+  await frame(page);
+  expect((await range()).t0).toBeLessThan(midPan.t0);
+  await page.mouse.up();
+  await frame(page);
+  const settled = await range();
+  await page.mouse.move(p.x - 150, p.y, { steps: 5 });
+  await frame(page);
+  expect(await range()).toEqual(settled);
+  await expect(page.locator('.chart-sel')).toHaveCount(0);
+  await expect(page.locator('.chart-box.panning')).toHaveCount(0);
+
+  // Right first, then left: the box stays the only drag.
+  await page.mouse.move(p.x - 100, p.y);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(p.x - 60, p.y, { steps: 2 });
+  await page.mouse.down();
+  await page.mouse.move(p.x, p.y, { steps: 2 });
+  await page.mouse.up();
+  await page.mouse.up({ button: 'right' });
+  await expect(page.locator('.chart-sel')).toHaveCount(0);
+  const boxed = await range();
+  expect(Number.isFinite(boxed.t0) && Number.isFinite(boxed.t1)).toBe(true);
+
+  // Esc during a drag cancels it (and goes back to live); later moves do nothing.
+  p = await mid();
+  await page.mouse.move(p.x - 50, p.y);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(p.x + 50, p.y, { steps: 3 });
+  await expect(page.locator('.chart-sel')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.chart-sel')).toHaveCount(0);
+  await page.mouse.up({ button: 'right' });
+  expect(await zoomed()).toBe(false);
+  await wheel(page, 0, 0.5, { deltaY: -300 });
+  await frame(page);
+  p = await mid();
+  await page.mouse.move(p.x, p.y);
+  await page.mouse.down();
+  await page.mouse.move(p.x + 40, p.y, { steps: 2 });
+  await page.keyboard.press('Escape');
+  await page.mouse.move(p.x + 120, p.y, { steps: 3 });
+  await frame(page);
+  expect(await zoomed()).toBe(false);
+  await page.mouse.up();
+
+  // A pan that ends outside the plot leaves no time bar or tooltip behind.
+  await wheel(page, 0, 0.5, { deltaY: -300 });
+  await frame(page);
+  p = await mid();
+  await page.mouse.move(p.x, p.y);
+  await page.mouse.down();
+  await page.mouse.move(p.x + 30, c.y + c.height + 80, { steps: 4 });
+  await page.mouse.up();
+  expect(await page.evaluate(() => {
+    const ch = [...window.__mqttscope.plots.charts.values()][0];
+    return [ch.localHover, ch.tip.hidden];
+  })).toEqual([false, true]);
+
+  // A right drag released elsewhere opens no other menu right then (Windows
+  // fires the menu on release); later a right-click there works again.
+  p = await mid();
+  await page.mouse.move(p.x - 40, p.y);
+  await page.mouse.down({ button: 'right' });
+  await page.mouse.move(p.x + 40, p.y, { steps: 3 });
+  await page.mouse.up({ button: 'right' });
+  const menuBlocked = await page.evaluate(() => {
+    const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 });
+    document.querySelector('.plot-tab').dispatchEvent(e);
+    return e.defaultPrevented;
+  });
+  expect(menuBlocked).toBe(true);
+  await expect(page.locator('.ctx-menu')).toHaveCount(0);
+  await new Promise((r) => setTimeout(r, 400));
+  await page.locator('.plot-tab').first().click({ button: 'right' });
+  await expect(page.locator('.ctx-menu')).toBeVisible();
+  await page.keyboard.press('Escape');
+
+  // The wheel over the Reset view button zooms like the plot under it.
+  await wheel(page, 0, 0.5, { deltaY: -300 }); // (the Esc above went back to live)
+  const rb = cards(page).first().locator('.reset-view');
+  await expect(rb).toBeVisible();
+  const beforeReset = width(await range());
+  const bb = await rb.boundingBox();
+  const prevented = await rb.evaluate((el, at) => {
+    const e = new WheelEvent('wheel', { clientX: at.x, clientY: at.y, deltaY: -200, bubbles: true, cancelable: true });
+    el.dispatchEvent(e);
+    return e.defaultPrevented;
+  }, { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 });
+  await frame(page);
+  expect(prevented).toBe(true);
+  expect(width(await range())).toBeLessThan(beforeReset);
+
+  // Scrolling the plots area: a wheel that reaches a plot mid-scroll doesn't zoom it.
+  const rs = await range();
+  await page.evaluate(() => document.querySelector('.plots-grid').dispatchEvent(new Event('scroll')));
+  await wheel(page, 0, 0.5, { deltaY: -200 });
+  await frame(page);
+  expect(await range()).toEqual(rs);
+  await new Promise((r) => setTimeout(r, 400));
+  await wheel(page, 0, 0.5, { deltaY: -200 });
+  await frame(page);
+  expect(width(await range())).toBeLessThan(width(rs));
+
+  // Zoomed into a gap, then the plots are drawn again: the wheel still works.
+  const pts = await page.evaluate(() => window.__mqttscope.plots.points('hall/temp', null).map((q) => q.t));
+  await page.evaluate((t) => window.__mqttscope.plots.zoom(window.__mqttscope.plots.plots[0], { t0: t - 5, t1: t + 5 }), (pts[3] + pts[4]) / 2);
+  await page.evaluate(() => window.__mqttscope.plots.renderAll());
+  await expect.poll(() => page.evaluate(() => [...window.__mqttscope.plots.charts.values()][0].geom)).toBeNull();
+  const cv2 = cards(page).first().locator('canvas');
+  const c2 = await cv2.boundingBox();
+  await cv2.dispatchEvent('wheel', { clientX: c2.x + c2.width / 2, clientY: c2.y + c2.height / 2, deltaY: 1500 });
+  await frame(page);
+  expect(width(await page.evaluate(() => [...window.__mqttscope.plots.charts.values()][0].range))).toBeGreaterThan(100);
+
+  // Frozen: zooming out and panning stop at the freeze, though data keeps coming.
+  await page.keyboard.press('Escape');
+  await page.locator('.plots-toolbar').getByRole('button', { name: 'Freeze' }).click();
+  const frozenAt = await page.evaluate(() => window.__mqttscope.plots.frozenAt);
+  for (let i = 0; i < 10; i++) {
+    await broker.publish('hall/temp', String(30 + i));
+    await new Promise((r) => setTimeout(r, 40));
+  }
+  await expect.poll(() => page.evaluate((f) => window.__mqttscope.plots.points('hall/temp', null).at(-1).t > f, frozenAt)).toBe(true);
+  await wheel(page, 0, 0.5, { deltaY: -300 });
+  await frame(page);
+  await wheel(page, 0, 0.5, { deltaY: 50000 });
+  await frame(page);
+  expect((await range()).t1).toBeLessThanOrEqual(frozenAt);
+  await wheel(page, 0, 0.5, { deltaY: -300 });
+  await frame(page);
+  await wheel(page, 0, 0.5, { deltaX: 1e7 });
+  await frame(page);
+  expect((await chartsNow(page))[0].range.t1).toBeLessThanOrEqual(frozenAt); // (may show no points: nothing drawn)
   expect(errors).toEqual([]);
 });

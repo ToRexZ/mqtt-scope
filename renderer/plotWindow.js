@@ -57,6 +57,7 @@ function start(init, keys) {
     onResetZoom: () => resetZoom(),
   });
   host.append(reset); // over the chart
+  reset.addEventListener('wheel', (e) => chart.onWheel(e), { passive: false }); // zooms like the plot under it
 
   // Header and legend depend on the plot type (a State transitions plot has
   // no legend), so they are drawn again when it changes.
@@ -89,7 +90,7 @@ function start(init, keys) {
   function redraw() {
     const series = chartSeries(plot, pointsOf);
     const yZoom = zoom && Number.isFinite(zoom.yMin) && Number.isFinite(zoom.yMax) ? zoom : null;
-    chart.setData(series, chartRange(plot, series, { zoom, frozenAt }), chartAxis(plot, yZoom), chartRange(plot, series, { frozenAt }));
+    chart.setData(series, chartRange(plot, series, { zoom, frozenAt }), chartAxis(plot, yZoom), chartRange(plot, series, { frozenAt }), frozenAt);
     updateLegend(legend, plot, pointsOf, { hoverTime: chart.hoverTime, frozenAt });
   }
 

@@ -2568,6 +2568,9 @@ body.popout .viewer-host {
   padding: 6px 10px;
   border-bottom: 1px solid var(--grid);
 }
+.keys-mouse .keys-row {
+  grid-template-columns: 1fr auto; /* a label and its choice, no reset button */
+}
 .keys-row.conflict {
   background: var(--del-bg);
 }

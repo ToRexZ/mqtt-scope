@@ -134,9 +134,9 @@ test('Ctrl+R while paused also drops the queued messages; zoom and freeze are re
   const canvas = page.locator('.plot-card canvas');
   const c = await canvas.boundingBox();
   await page.mouse.move(c.x + c.width * 0.3, c.y + 30);
-  await page.mouse.down();
+  await page.mouse.down({ button: 'right' }); // a right drag draws the zoom box
   await page.mouse.move(c.x + c.width * 0.8, c.y + 30, { steps: 5 });
-  await page.mouse.up();
+  await page.mouse.up({ button: 'right' });
   await expect(page.locator('.zoom-reset')).toBeVisible();
   await page.locator('.plots-toolbar').getByRole('button', { name: 'Freeze' }).click();
   // Pause and let messages queue up.

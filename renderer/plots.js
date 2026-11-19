@@ -14,7 +14,7 @@
 
 import { el, button, toast, promptText, showMenu, splitter } from './ui.js';
 import { icon, iconButton } from './icons.js';
-import { LineChart } from './chart.js';
+import { LineChart, noteScroll } from './chart.js';
 import { MAX_SERIES, seriesLabel } from './plotLayouts.js';
 import { PlotModel } from './plotModel.js';
 import { PlotData, pointsFromMessages } from './plotData.js';
@@ -561,6 +561,7 @@ export class PlotsPanel {
   build(host) {
     const settingsShown = loadPref('settings', true);
     this.root = el('div', 'plots' + (settingsShown ? '' : ' no-settings'));
+    this.root.addEventListener('scroll', () => noteScroll(), true); // a scroll in flight doesn't turn into a zoom
     const bar = el('div', 'plots-toolbar');
     this.tabStrip = el('div', 'plot-tabs');
     this.freezeBtn = button('Freeze', 'Stop the time axis so you can inspect (Space)', () => this.toggleFreeze());
@@ -578,7 +579,7 @@ export class PlotsPanel {
       this.freezeBtn,
       this.zoomBtn,
       this.settingsBtn,
-      el('span', 'muted small plots-hint', 'Drag a plot by its title to move it. Drag across a plot to zoom.'),
+      el('span', 'muted small plots-hint', 'Drag a plot by its title to move it. Wheel to zoom, drag to pan, right-drag a box to zoom.'),
     );
     const main = el('div', 'plots-main');
     this.side = el('div', 'plot-settings');
@@ -751,6 +752,7 @@ export class PlotsPanel {
       }),
     );
     host.append(reset); // over the chart
+    reset.addEventListener('wheel', (e) => this.charts.get(plot.id)?.onWheel(e), { passive: false }); // zooms like the plot under it
     return card;
   }
 
@@ -806,7 +808,7 @@ export class PlotsPanel {
       if (!chart) continue;
       const series = chartSeries(plot, pointsOf);
       const home = chartRange(plot, series, { frozenAt: this.frozenAt, now }); // without the zoom
-      chart.setData(series, chartRange(plot, series, { zoom, frozenAt: this.frozenAt, now }), chartAxis(plot, this.yZoom.get(plot.id)), home);
+      chart.setData(series, chartRange(plot, series, { zoom, frozenAt: this.frozenAt, now }), chartAxis(plot, this.yZoom.get(plot.id)), home, this.frozenAt);
     }
     this.updateLegends();
   }

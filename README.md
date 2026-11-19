@@ -328,7 +328,7 @@ new keys; clashes are flagged). Defaults (Ctrl is Cmd on macOS):
 | Ctrl+R | Reload: clear received messages and restart the plot timelines (stays connected) |
 | Esc | Leave a full-screen plot, reset plot zoom, restore the inspector |
 | ↑ ↓ ← → Enter | Navigate / expand the topic tree |
-| Drag across / double-click a plot | Zoom / back to live |
+| Double-click a plot / Esc | Back to live |
 | Drag a plot's title | Move the plot (Esc cancels) |
 | Enter / Shift+Enter | Next / previous search match |
 | Wheel (over a plot) | Zoom the timeline around the pointer |

@@ -37,6 +37,15 @@ Grafana, PlotJuggler).
 7. **Limits**: zoom in to 10 ms wide at most; zoom out stops at the data
    collected (the "All" range); panning stops at the first point and at now.
 8. Same behaviour in the pop-out plot window (its own zoom, as today).
+9. (Review, 19 Nov) One drag at a time: a second button does nothing, and
+   only the drag's own button ends it. Esc during a drag cancels it (and goes
+   back to live). A wheel step or pan that changes nothing keeps the plot
+   live; zooming out to everything there is returns to the normal view. A
+   frozen plot never zooms or pans past the freeze, though data keeps coming.
+   Wheel steps within a frame are applied together; the time bar follows the
+   pointer. A wheel that reaches a plot while the plots area is scrolling
+   keeps scrolling. A right drag released elsewhere opens no menu there.
+   The wheel over a plot's Reset view button zooms that plot.
 
 ## Non-goals
 
