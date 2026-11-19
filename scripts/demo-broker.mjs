@@ -3,7 +3,8 @@
 //   node scripts/demo-broker.mjs [--port 1883] [--ws-port 9001] [--fleet 500]
 //
 // Publishes VDA5050-style AGV messages, sensor values, factory machine
-// states, binary payloads and a large retained JSON document.
+// states, ROS-style diagnostics, binary payloads and a large retained JSON
+// document.
 
 import { createServer } from 'node:net';
 import { createServer as createHttpServer } from 'node:http';
@@ -180,6 +181,42 @@ setInterval(() => {
 }, 500);
 
 setInterval(() => publish('logs/gateway', `${new Date().toISOString()} INFO gateway: forwarded ${Math.floor(rnd(10, 400))} frames`), 1500);
+
+// ROS diagnostics (diagnostic_msgs/DiagnosticArray as JSON): two nodes take
+// turns on one topic, every value is text, and the entries come in a different
+// order now and then (plot a value by its name; search a key; chart "21.5").
+const shuffle = (arr) => (Math.random() < 0.3 ? [...arr].reverse() : arr);
+const diagNodes = [
+  {
+    hardware: 'brake_controller',
+    devices: ['BRAKE_SYSTEM/FRONT_WHEEL', 'BRAKE_SYSTEM/REAR_WHEEL'],
+    values: (t, i) => [
+      ['BRAKE_MODE', Math.sin(t / 3 + i) > 0 ? 'HOLD' : 'RELEASE'],
+      ['PRESSURE_BAR', String(round(5 + Math.sin(t + i) * 0.8 + rnd(-0.05, 0.05), 2))],
+      ['TEMPERATURE', String(round(38 + i * 3 + Math.sin(t / 5) * 2 + rnd(-0.1, 0.1), 2))],
+      ['PAD_WEAR_PCT', String(72 - i * 9)],
+    ],
+  },
+  {
+    hardware: 'motor_driver',
+    devices: ['MOTOR/LEFT', 'MOTOR/RIGHT'],
+    values: (t, i) => [
+      ['CURRENT_A', String(round(3 + Math.sin(t * 1.5 + i) + rnd(-0.1, 0.1), 2))],
+      ['TEMPERATURE', String(round(55 + i * 4 + Math.sin(t / 4) * 3, 2))],
+      ['STATE', Math.random() < 0.02 ? 'FAULT' : 'OK'],
+    ],
+  },
+];
+let diagTurn = 0;
+setInterval(() => {
+  const node = diagNodes[diagTurn++ % diagNodes.length];
+  const t = Date.now() / 1000;
+  const status = node.devices.map((name, i) => {
+    const level = node.values(t, i).some(([, v]) => v === 'FAULT') ? 2 : 0;
+    return { level, name, message: level ? 'Fault' : 'OK', hardware_id: node.hardware, values: shuffle(node.values(t, i).map(([key, value]) => ({ key, value }))) };
+  });
+  json('diagnostics', { header: { stamp: { sec: Math.floor(t), nanosec: Math.round((t % 1) * 1e9) }, frame_id: '' }, status: shuffle(status) });
+}, 500);
 
 // Edge cases: leading slash, empty levels, empty payload, unicode.
 publish('/leading/slash', 'topic starts with a slash', { retain: true });
