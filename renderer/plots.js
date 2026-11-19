@@ -805,7 +805,8 @@ export class PlotsPanel {
       const chart = this.charts.get(plot.id);
       if (!chart) continue;
       const series = chartSeries(plot, pointsOf);
-      chart.setData(series, chartRange(plot, series, { zoom, frozenAt: this.frozenAt, now }), chartAxis(plot, this.yZoom.get(plot.id)));
+      const home = chartRange(plot, series, { frozenAt: this.frozenAt, now }); // without the zoom
+      chart.setData(series, chartRange(plot, series, { zoom, frozenAt: this.frozenAt, now }), chartAxis(plot, this.yZoom.get(plot.id)), home);
     }
     this.updateLegends();
   }

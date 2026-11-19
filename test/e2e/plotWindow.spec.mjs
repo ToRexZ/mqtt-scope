@@ -1,5 +1,5 @@
 // A plot popped out into its own window: live data, its own controls
-// (Space freezes, dragging zooms, Esc and double-click reset), and it closes
+// (Space freezes, a right drag zooms, Esc and double-click reset), and it closes
 // with its main window.
 
 import { test, expect, makeUserData, profile, connect, waitForTopic, until } from './fixtures.mjs';
@@ -53,9 +53,9 @@ test('Space freezes and resumes; dragging zooms; Esc and double-click go back to
     const c = await canvas.boundingBox();
     const g = await win.evaluate(() => window.__plotWindow.chart.geom);
     await win.mouse.move(c.x + g.left + (g.right - g.left) * 0.25, c.y + g.y.top + 10);
-    await win.mouse.down();
+    await win.mouse.down({ button: 'right' }); // a right drag draws the zoom box
     await win.mouse.move(c.x + g.left + (g.right - g.left) * 0.75, c.y + g.y.bottom - 10, { steps: 6 });
-    await win.mouse.up();
+    await win.mouse.up({ button: 'right' });
     return g;
   };
   const before = await zoomIn();

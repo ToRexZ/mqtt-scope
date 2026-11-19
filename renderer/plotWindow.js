@@ -47,7 +47,8 @@ function start(init, keys) {
   const chart = new LineChart(host, {
     onHover: () => updateLegend(legend, plot, pointsOf, { hoverTime: chart.hoverTime, frozenAt }),
     onZoom: (z) => {
-      zoom = z;
+      // A time-only zoom (wheel, pan) keeps the value zoom.
+      zoom = Number.isFinite(z.yMin) || !zoom ? z : { ...z, yMin: zoom.yMin, yMax: zoom.yMax };
       reset.hidden = false;
       redraw();
     },
@@ -86,7 +87,7 @@ function start(init, keys) {
   function redraw() {
     const series = chartSeries(plot, pointsOf);
     const yZoom = zoom && Number.isFinite(zoom.yMin) && Number.isFinite(zoom.yMax) ? zoom : null;
-    chart.setData(series, chartRange(plot, series, { zoom, frozenAt }), chartAxis(plot, yZoom));
+    chart.setData(series, chartRange(plot, series, { zoom, frozenAt }), chartAxis(plot, yZoom), chartRange(plot, series, { frozenAt }));
     updateLegend(legend, plot, pointsOf, { hoverTime: chart.hoverTime, frozenAt });
   }
 

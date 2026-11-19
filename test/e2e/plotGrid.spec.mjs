@@ -332,10 +332,10 @@ test('dragging zooms: time for every plot, values for the plot dragged in; doubl
     const y0 = c.y + g.y.top + (g.y.bottom - g.y.top) * 0.2;
     const y1 = c.y + g.y.top + (g.y.bottom - g.y.top) * 0.6;
     await page.mouse.move(x0, y0);
-    await page.mouse.down();
+    await page.mouse.down({ button: 'right' }); // a right drag draws the zoom box
     await page.mouse.move(x1, y1, { steps: 6 });
     await expect(page.locator('.chart-sel')).toBeVisible();
-    await page.mouse.up();
+    await page.mouse.up({ button: 'right' });
     return g;
   };
   const resetOn = (i) => cards(page).nth(i).locator('.reset-view');
@@ -499,13 +499,13 @@ test('vertical lines at the timestamps: on by default, turned off per plot in it
 test('"Reset view" sits in the same corner over the chart of every zoomed plot, lines or state lanes', async ({ env }) => {
   const { page, errors } = await setup(env, { height: 1200 });
   await cards(page).first().locator('.kind-toggle .seg-btn[data-kind="states"]').click();
-  // Zoom by dragging across the State transitions plot.
+  // Zoom by right-dragging across the State transitions plot.
   const canvas = cards(page).first().locator('canvas');
   const c = await box(canvas);
   await page.mouse.move(c.x + c.width * 0.3, c.y + c.height / 2);
-  await page.mouse.down();
+  await page.mouse.down({ button: 'right' });
   await page.mouse.move(c.x + c.width * 0.8, c.y + c.height / 2, { steps: 6 });
-  await page.mouse.up();
+  await page.mouse.up({ button: 'right' });
   for (const i of [0, 1]) {
     const button = cards(page).nth(i).locator('.reset-view');
     await expect(button).toBeVisible();

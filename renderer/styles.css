@@ -1621,6 +1621,10 @@ body.moving-plot * {
   background: var(--accent);
   filter: brightness(1.15);
 }
+.chart-box.panning,
+.chart-box.panning canvas {
+  cursor: grabbing;
+}
 .plot-canvas .chart-box {
   min-height: 0;
   user-select: none;
