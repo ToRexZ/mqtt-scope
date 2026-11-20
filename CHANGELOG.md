@@ -6,7 +6,7 @@ All notable changes to MQTT Scope. The format follows
 
 ## [Unreleased]
 
-## [0.5.0] - 2026-11-19
+## [0.5.0] - 2026-11-20
 
 ### Added
 
