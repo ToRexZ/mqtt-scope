@@ -396,7 +396,8 @@ export class MessageViewer {
 
     // Only mark matches in message content, never in hints or placeholders.
     const content = this.mode === 'chart' ? null : this.body.querySelector('.jt, .code, pre, .diff-table, .branch');
-    this.hits = content ? markMatches(content, this.query) : [];
+    // In the Tree, sizes ("{ 2 keys }") and list indices aren't part of the message.
+    this.hits = content ? markMatches(content, this.query, { skip: content.matches('.jt') ? '.jt-summary, .jt-index' : null }) : [];
     this.hitIndex = Math.min(this.hitIndex, Math.max(0, this.hits.length - 1));
     this.updateHits(false);
     this.body.scrollTop = scrollTop;

@@ -83,6 +83,26 @@ describe('searchJson', () => {
     assert.deepEqual(sorted(searchJson(v, 'null').visible), ['$', '$.nothing']);
   });
 
+  test('whole: the innermost list entry around each match, shown in full', () => {
+    const d = { status: [{ name: 'BRAKE', level: 1, values: [{ key: 'MODE', value: '3' }, { key: 'TEMP', value: '21' }] }] };
+    const mode = searchJson(d, 'mode');
+    assert.deepEqual(sorted(mode.whole), ['$.status[0].values[0]']);
+    assert.deepEqual(sorted(mode.matches), ['$.status[0].values[0].key']);
+    assert.equal(mode.count, 1);
+    assert.deepEqual(sorted(searchJson(d, 'brake').whole), ['$.status[0]']);
+    assert.deepEqual(sorted(searchJson(d, '21').whole), ['$.status[0].values[1]']);
+    assert.deepEqual(sorted(searchJson(d, 'level').whole), [], 'a key name already shows its value');
+    assert.deepEqual(sorted(searchJson(d, 'values').whole), []);
+    assert.deepEqual(sorted(searchJson(v, 'abc').whole), ['$.list[0]'], "'ABCD' is not an entry");
+    assert.deepEqual(sorted(searchJson(v, '21.5').whole), [], 'not in a list');
+    assert.deepEqual(sorted(searchJson(v, 'NAME').whole), []);
+    assert.deepEqual(sorted(searchJson([[{ a: 'x' }]], 'x').whole), ['$[0][0]'], 'an entry of a nested list');
+    assert.deepEqual(sorted(searchJson([{ a: [{ b: 'x' }] }], 'x').whole), ['$[0].a[0]'], 'innermost only');
+    assert.deepEqual(sorted(searchJson({ list: [{ level: 'level-high', x: 1 }] }, 'level').whole), ['$.list[0]'], 'a value match opens the entry, a key match alone does not');
+    assert.deepEqual(sorted(searchJson({ list: [{ level: 'level-high', x: 1 }] }, 'level').matches), ['$.list[0].level']);
+    assert.equal(searchJson({ list: [{ level: 'level-high', x: 1 }] }, 'level').count, 2, 'the key and its value');
+  });
+
   test('array indices are not matched as keys', () => {
     const r = searchJson(['a', 'b'], '0');
     assert.equal(r.count, 0);

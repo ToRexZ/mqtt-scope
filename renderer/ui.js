@@ -154,11 +154,13 @@ export function splitter(handle, { axis, storageKey, initial, min, max, apply, i
 
 const MAX_MARKS = 5000;
 
-// Wraps case-insensitive matches of `query` inside `root` in <mark> elements.
-export function markMatches(root, query) {
+// Wraps case-insensitive matches of `query` inside `root` in <mark> elements,
+// leaving out text inside elements matching `skip` (e.g. a tree's sizes).
+export function markMatches(root, query, { skip = null } = {}) {
   if (!query) return [];
   const q = query.toLowerCase();
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const filter = skip ? { acceptNode: (n) => (n.parentElement?.closest(skip) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) } : null;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, filter);
   const hits = [];
   const textNodes = [];
   for (let n = walker.nextNode(); n; n = walker.nextNode()) textNodes.push(n);
