@@ -654,6 +654,9 @@ function registerIpc() {
   });
 
   ipcMain.handle('clipboard:write', (_e, text) => clipboard.writeText(String(text)));
+  ipcMain.on('app:backgroundThrottling', (e, on) => {
+    if (!e.sender.isDestroyed()) e.sender.setBackgroundThrottling(on !== false);
+  });
   ipcMain.handle('app:newWindow', () => {
     createMainWindow();
   });

@@ -137,14 +137,20 @@ saved messages. Runs on Linux, Windows and macOS.
 **Publisher**
 - JSON (validated, format/minify), text or hex-byte payloads; QoS; retain;
   Ctrl+Enter to send; load a payload from a file.
+- **Repeat**: tick *Repeat at*, type a rate in Hz (0.01–100) or pick one from
+  ▾, and **Start** sends the message again and again (a heartbeat, a command
+  that must keep arriving) until **Stop**. The button counts what was sent; the
+  message is the one at Start (edits wait for the next Start); a disconnect or
+  a failed publish stops it. While it runs, the publisher's header and the tab
+  (↻) say so, also when the publisher is collapsed or the window hidden.
 - **Saved messages**: store frequently sent messages (name + topic + payload +
   options). Messages for the selected topic are listed first; ▶ sends one with a
   single click. A **Recent** list keeps the last 50 publishes.
 - Safety for live systems: the topic follows the tree selection only until you
   edit the message (**Follow tree** turns it back on); Retain is never copied
   from received messages and resets when the topic changes; retained publishes
-  ask for confirmation; a publish in flight blocks repeats (double clicks, held
-  Ctrl+Enter); topics containing `+` or `#` are refused.
+  ask for confirmation; a publish in flight blocks a second send from double
+  clicks or a held Ctrl+Enter; topics containing `+` or `#` are refused.
 
 ![Publisher with saved messages](docs/screenshots/publisher-saved.png)
 

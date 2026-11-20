@@ -340,7 +340,7 @@ test("a tab's state survives export and import", async ({ env }) => {
   await page.locator('#publisher-host .payload-editor').fill('go now');
   await page.locator('#publisher-host select').nth(0).selectOption('2');
   await page.locator('#publisher-host select').nth(1).selectOption('text');
-  await page.locator('#publisher-host .pub-row .check input').check();
+  await page.locator('#publisher-host .publisher').getByLabel('Retain').check();
 
   // A plot with points, zoomed and frozen, on screen.
   await page.evaluate(() => window.__mqttscope.plots.addSeries(null, 'robot/value', null));

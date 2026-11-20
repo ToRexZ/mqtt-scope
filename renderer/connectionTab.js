@@ -140,6 +140,11 @@ export class ConnectionTab {
     return this.root.querySelector(sel);
   }
 
+  // Its publisher is repeating a message (marked on the tab).
+  get repeating() {
+    return !!this.publisher?.repeater.running;
+  }
+
   get label() {
     return this.profile?.name || 'New connection';
   }
@@ -212,6 +217,7 @@ export class ConnectionTab {
       getSelectedTopic: () => this.selected?.path ?? null,
       onToggle: (collapsed) => this.els.right.classList.toggle('pub-collapsed', collapsed),
       onPersist: () => this.shell.savedMessagesChanged(this),
+      onRepeatChange: () => this.shell.onChange(this),
     });
   }
 
@@ -490,6 +496,7 @@ export class ConnectionTab {
   }
 
   onStatus(s) {
+    if (s.state !== 'connected') this.publisher.stopRepeat('disconnected');
     this.status = s;
     if (s.state === 'connected') this.everConnected = true;
     // The client's own retries keep a failure; a new attempt, a connection or

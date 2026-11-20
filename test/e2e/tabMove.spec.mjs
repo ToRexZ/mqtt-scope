@@ -171,6 +171,23 @@ test('a tab moves with its connection; messages published during the move all ar
   await w1.locator('#publisher-host .topic-input').fill('cmd/go');
   await w1.locator('#publisher-host .payload-editor').fill('draft payload');
   await w1.locator('#publisher-host select').nth(1).selectOption('text');
+  await w1.locator('#publisher-host .publisher').getByLabel('Repeat at').check();
+  await w1.locator('#publisher-host input[name="repeat-rate"]').fill('5');
+  // …and it is repeating: moving the tab stops it.
+  // (Counted at the broker: a second client would change the counts below.)
+  const repeats = { received: [] };
+  a.aedes.on('publish', (packet, client) => client && packet.topic === 'cmd/go' && repeats.received.push(packet));
+  const w1Id = await windowIdOf(w1);
+  const w1Throttling = (set) =>
+    app.evaluate(({ BrowserWindow }, [on, id]) => {
+      const wc = BrowserWindow.getAllWindows().find((x) => x.webContents.id === id).webContents;
+      if (on !== null) wc.setBackgroundThrottling(on);
+      return wc.getBackgroundThrottling();
+    }, [set, w1Id]);
+  await w1Throttling(true); // as for a user's window
+  await w1.locator('#publisher-host .pub-row-main .btn.primary').click();
+  await expect.poll(() => repeats.received.length).toBeGreaterThanOrEqual(2);
+  expect(await w1Throttling(null)).toBe(false);
 
   const seen = watchClients(a);
   // Window 2 takes a while to build the tab, so the move spans several
@@ -228,9 +245,16 @@ test('a tab moves with its connection; messages published during the move all ar
   expect(
     await w2.page.evaluate(() => {
       const tab = window.__mqttscope.shell.active;
-      return [tab.selected?.path, tab.publisher.topic.value, tab.publisher.payload.value, tab.publisher.format.value, tab.plots.plots[0].title];
+      const p = tab.publisher;
+      return [tab.selected?.path, p.topic.value, p.payload.value, p.format.value, tab.plots.plots[0].title, p.repeatBox.checked, p.rateInput.value, p.sendBtn.textContent];
     }),
-  ).toEqual(['seq', 'cmd/go', 'draft payload', 'text', 'Renamed']);
+  ).toEqual(['seq', 'cmd/go', 'draft payload', 'text', 'Renamed', true, '5', 'Start']);
+  const sentBefore = repeats.received.length;
+  await new Promise((r) => setTimeout(r, 700));
+  expect(repeats.received.length, 'no repeat after the move').toBe(sentBefore);
+  await expect(w1.locator('.toast.error'), 'stopped by the move, not by a failed publish').toHaveCount(0);
+  expect(await w1Throttling(null), 'window 1 throttles again').toBe(true);
+  await w2.page.locator('#publisher-host .publisher').getByLabel('Repeat at').uncheck();
   await waitForLayout(userData, 'a', (d) => d.tabs[0].plots[0].title === 'Renamed');
 
   // The connection belongs to window 2 now: it publishes from there, and
