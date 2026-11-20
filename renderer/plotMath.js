@@ -152,3 +152,39 @@ export function decimate(points, t0, t1, buckets) {
   }
   return out;
 }
+
+// ------------------------------------------------------------ zoom and pan
+
+// The time range zoomed by `factor` (< 1 in, > 1 out) around time `at`, which
+// stays where it is on screen; no wider than `extent`, no narrower than
+// `minWidth` ms, and moved back inside `extent`.
+export function zoomAround(range, at, factor, extent, minWidth = 10) {
+  const span = extent.t1 - extent.t0;
+  const width = Math.min(span, Math.max(Math.min(minWidth, span), (range.t1 - range.t0) * factor));
+  const frac = range.t1 > range.t0 ? (at - range.t0) / (range.t1 - range.t0) : 0.5;
+  const t0 = at - frac * width;
+  return inside({ t0, t1: t0 + width }, extent);
+}
+
+// The time range moved by `dt` ms, kept inside `extent` (same width).
+export const panBy = (range, dt, extent) => inside({ t0: range.t0 + dt, t1: range.t1 + dt }, extent);
+
+function inside(r, extent) {
+  const width = Math.min(r.t1 - r.t0, extent.t1 - extent.t0);
+  const t0 = Math.min(Math.max(r.t0, extent.t0), extent.t1 - width);
+  return { t0, t1: t0 + width };
+}
+
+// How far zooming out and panning may go: the data collected, from the first
+// point to the latest of the range's end and the last point (the range shown
+// is always inside).
+export function dataExtent(series, range) {
+  let t0 = range.t0;
+  let t1 = range.t1;
+  for (const s of series) {
+    if (!s.points.length) continue;
+    t0 = Math.min(t0, s.points[0].t);
+    t1 = Math.max(t1, s.points[s.points.length - 1].t);
+  }
+  return { t0, t1 };
+}

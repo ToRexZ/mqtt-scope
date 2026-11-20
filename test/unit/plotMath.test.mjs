@@ -1,7 +1,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { Worker } from 'node:worker_threads';
-import { niceTicks, formatValue, nearest, windowRange, seriesKey } from '../../renderer/plotMath.js';
+import { niceTicks, formatValue, nearest, windowRange, seriesKey, zoomAround, panBy, dataExtent } from '../../renderer/plotMath.js';
 import { prng } from './_util.mjs';
 import { sanitizeSeries } from '../../renderer/plotLayouts.js';
 
@@ -338,5 +338,32 @@ describe('isBinary caching', async () => {
     assert.equal(isBinary(pts), false);
     pts.push({ t: 5, v: 0 });
     assert.equal(isBinary(pts), true);
+  });
+});
+
+describe('zoom and pan', () => {
+  const ext = { t0: 0, t1: 1000 };
+  test('zoomAround keeps the time under the pointer', () => {
+    assert.deepEqual(zoomAround({ t0: 0, t1: 1000 }, 250, 0.5, ext), { t0: 125, t1: 625 });
+    assert.deepEqual(zoomAround({ t0: 400, t1: 600 }, 500, 2, ext), { t0: 300, t1: 700 });
+    assert.deepEqual(zoomAround({ t0: 0, t1: 200 }, 0, 2, ext), { t0: 0, t1: 400 });
+  });
+  test('zoomAround stops at the data and at 10 ms', () => {
+    assert.deepEqual(zoomAround({ t0: 0, t1: 1000 }, 300, 4, ext), { t0: 0, t1: 1000 });
+    assert.deepEqual(zoomAround({ t0: 900, t1: 1000 }, 950, 4, ext), { t0: 600, t1: 1000 }, 'moved back inside');
+    assert.deepEqual(zoomAround({ t0: 0, t1: 20 }, 10, 0.1, ext), { t0: 5, t1: 15 });
+    assert.deepEqual(zoomAround({ t0: 0, t1: 4 }, 2, 0.5, { t0: 0, t1: 4 }), { t0: 0, t1: 4 }, 'less data than 10 ms');
+    assert.deepEqual(zoomAround({ t0: 5, t1: 5 }, 5, 2, ext), { t0: 0, t1: 10 }, 'a zero-wide range widens around its middle');
+  });
+  test('panBy keeps the width and stops at both ends', () => {
+    assert.deepEqual(panBy({ t0: 200, t1: 400 }, 100, ext), { t0: 300, t1: 500 });
+    assert.deepEqual(panBy({ t0: 200, t1: 400 }, 700, ext), { t0: 800, t1: 1000 });
+    assert.deepEqual(panBy({ t0: 200, t1: 400 }, -500, ext), { t0: 0, t1: 200 });
+  });
+  test('dataExtent: from the first point to the latest of the range end and the last point', () => {
+    const series = [{ points: [{ t: 100 }, { t: 900 }] }, { points: [{ t: 50 }, { t: 300 }] }, { points: [] }];
+    assert.deepEqual(dataExtent(series, { t0: 500, t1: 1000 }), { t0: 50, t1: 1000 });
+    assert.deepEqual(dataExtent(series, { t0: 0, t1: 600 }), { t0: 0, t1: 900 }, 'the range is always inside');
+    assert.deepEqual(dataExtent([{ points: [] }], { t0: 5, t1: 9 }), { t0: 5, t1: 9 });
   });
 });

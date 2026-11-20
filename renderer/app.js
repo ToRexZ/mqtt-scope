@@ -12,6 +12,7 @@ import { DEFAULT_SETTINGS, normalizeSettings, openSettings } from './settings.js
 import { TabSet } from './tabSet.js';
 import { TabStrip, dotState } from './tabStrip.js';
 import { initUpdateButton } from './updateButton.js';
+import { setPlotMouse } from './chart.js';
 import { ACTIONS, bindingIndex, comboFromEvent, keyBelongsToTarget, pointerFocus, resolveBindings, toAccelerator } from './keys.js';
 
 const api = window.api;
@@ -40,6 +41,7 @@ function applySettings(next) {
   for (const tab of tabs.values()) tab.applySettings(settings); // history limits apply to each tab
   bindings = resolveBindings(settings.keys);
   keyIndex = bindingIndex(bindings);
+  setPlotMouse(settings.mouse);
   // The menu shows the current shortcuts (the keys themselves are handled here).
   api.setMenuShortcuts?.(Object.fromEntries(ACTIONS.map((a) => [a.id, toAccelerator(bindings[a.id])])));
 }

@@ -102,10 +102,12 @@ saved messages. Runs on Linux, Windows and macOS.
   single series can still be drawn as a state lane below the y-axis.
 - **Time window**: 1 min, 5 min, 15 min, 1 h or All, or **Custom…** to pick
   any hours and minutes up to 24 h (e.g. 1 h 30 min).
-- **Zoom**: drag across a plot to zoom into that time range (all plots in the
-  tab follow) and, when you drag a box, that value range. Double-click, Esc or
-  **Reset view** (on each zoomed plot, and in the toolbar) returns to the live
-  view.
+- **Zoom and pan**: the mouse wheel zooms the timeline around the pointer;
+  the sideways wheel (or Shift+wheel) and a left drag move along it; a right
+  drag across a plot zooms into that time range and, when you drag a box, that
+  value range. All plots in the tab follow. Double-click, Esc or **Reset view**
+  (on each zoomed plot, and in the toolbar) returns to the live view. Which
+  drag pans and which zooms is set in Settings → Keyboard → Plot mouse.
 - **Vertical lines at timestamps** (like Lichtblick's time grid) run through
   the data and the state lanes; turn them off per plot in the settings panel
   (X axis).
@@ -326,9 +328,12 @@ new keys; clashes are flagged). Defaults (Ctrl is Cmd on macOS):
 | Ctrl+R | Reload: clear received messages and restart the plot timelines (stays connected) |
 | Esc | Leave a full-screen plot, reset plot zoom, restore the inspector |
 | ↑ ↓ ← → Enter | Navigate / expand the topic tree |
-| Drag across / double-click a plot | Zoom / back to live |
+| Double-click a plot / Esc | Back to live |
 | Drag a plot's title | Move the plot (Esc cancels) |
 | Enter / Shift+Enter | Next / previous search match |
+| Wheel (over a plot) | Zoom the timeline around the pointer |
+| Sideways wheel or Shift+wheel | Move along the timeline |
+| Left drag / right drag (over a plot) | Pan / zoom into a box (rebindable: Settings → Keyboard → Plot mouse) |
 
 ## Settings and data
 

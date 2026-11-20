@@ -122,7 +122,7 @@ export function csvRange(plot, series, opts = {}) {
 
 // Axis settings for the chart: a value zoom wins over the plot's fixed range.
 export function chartAxis(plot, yZoom = null) {
-  return { yMin: yZoom ? yZoom.yMin : plot.yMin, yMax: yZoom ? yZoom.yMax : plot.yMax, kind: plot.kind, timeGrid: plot.timeGrid !== false };
+  return { yMin: yZoom ? yZoom.yMin : plot.yMin, yMax: yZoom ? yZoom.yMax : plot.yMax, yZoomed: !!yZoom, kind: plot.kind, timeGrid: plot.timeGrid !== false };
 }
 
 // Legend value of a series, as { text, title }: the point nearest the

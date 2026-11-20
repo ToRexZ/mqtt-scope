@@ -188,8 +188,8 @@ describe('chart input', () => {
 
   test('axis: a value zoom wins over the fixed range; plot type and time grid are passed on', () => {
     const p = plot({ yMin: 0, yMax: 100, kind: 'states' });
-    assert.deepEqual(chartAxis(p), { yMin: 0, yMax: 100, kind: 'states', timeGrid: true });
-    assert.deepEqual(chartAxis(p, { yMin: 10, yMax: 20 }), { yMin: 10, yMax: 20, kind: 'states', timeGrid: true });
+    assert.deepEqual(chartAxis(p), { yMin: 0, yMax: 100, yZoomed: false, kind: 'states', timeGrid: true });
+    assert.deepEqual(chartAxis(p, { yMin: 10, yMax: 20 }), { yMin: 10, yMax: 20, yZoomed: true, kind: 'states', timeGrid: true }, 'a value zoom (pan drags move it)');
     assert.equal(chartAxis(plot({ timeGrid: false })).timeGrid, false);
   });
 });

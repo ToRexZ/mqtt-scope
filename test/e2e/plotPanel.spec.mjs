@@ -53,7 +53,7 @@ test('settings panel: rename, window, legend, y axis, series label, colour, disp
   await panel(page).locator('input[name="plot-yMin"]').press('Tab');
   await panel(page).locator('input[name="plot-yMax"]').fill('100');
   await panel(page).locator('input[name="plot-yMax"]').press('Tab');
-  await expect.poll(() => page.evaluate(() => [...window.__mqttscope.plots.charts.values()][0].axis)).toEqual({ yMin: 0, yMax: 100, kind: 'timeseries', timeGrid: true });
+  await expect.poll(() => page.evaluate(() => [...window.__mqttscope.plots.charts.values()][0].axis)).toEqual({ yMin: 0, yMax: 100, yZoomed: false, kind: 'timeseries', timeGrid: true });
 
   // Booleans default to a state bar.
   expect(await chartSeries(page)).toEqual([

@@ -5,13 +5,17 @@
 // its own line above the bar, so labels are never cut to fit a gutter.
 //
 // Hovering shows a time bar and a tooltip; other charts can be told to show
-// the bar at the same instant (setHoverTime). Dragging selects a region to
-// zoom into (opts.onZoom); double-click asks to reset (opts.onResetZoom).
+// the bar at the same instant (setHoverTime). The wheel zooms the timeline
+// around the pointer, the sideways wheel (or Shift+wheel) and a pan drag move
+// it, and a box drag selects a region to zoom into: all reported through
+// opts.onZoom. Which drag pans and which draws the box: setPlotMouse().
+// Double-click asks to reset (opts.onResetZoom).
 
 import { el } from './ui.js';
 import { formatTime } from './payload.js';
-import { niceTicks, formatValue, nearest, stateSegments, isBinary, pointsBetween, decimate } from './plotMath.js';
+import { niceTicks, formatValue, nearest, stateSegments, isBinary, pointsBetween, decimate, zoomAround, panBy, dataExtent } from './plotMath.js';
 import { paletteVar, seriesCss } from './plotView.js';
+import { DEFAULT_MOUSE, normalizeMouse, dragAction } from './mouseBindings.js';
 
 export { niceTicks, formatValue };
 
@@ -23,12 +27,33 @@ const MIN_BAR = 10;
 const MIN_DRAG = 6;
 const TIME_STEPS = [1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 21600, 43200, 86400].map((s) => s * 1000);
 
+const WHEEL_ZOOM = 0.002; // zoom factor per pixel of wheel: exp(deltaY × this)
+
+// The drags of every chart in this window (Settings → Keyboard → Plot mouse).
+let mouse = { ...DEFAULT_MOUSE };
+export function setPlotMouse(bindings) {
+  mouse = normalizeMouse(bindings);
+}
+
+// The plots area scrolled just now: a wheel that reaches a plot mid-scroll
+// keeps scrolling rather than zooming it.
+let scrolledAt = -Infinity;
+const SCROLL_GRACE_MS = 300;
+export function noteScroll() {
+  scrolledAt = performance.now();
+}
+
+const sameRange = (a, b) =>
+  Math.abs(a.t0 - b.t0) < 1e-6 && Math.abs(a.t1 - b.t1) < 1e-6 && (a.yMin ?? null) === (b.yMin ?? null) && (a.yMax ?? null) === (b.yMax ?? null);
+const BUTTON_MASK = [1, 4, 2]; // MouseEvent.buttons bit of button 0 (left), 1 (middle), 2 (right)
+
 // Colour of a series for the canvas: its own colour, else its palette colour.
 const seriesColor = (s, token) => s.color || token(paletteVar(s.slot));
 
 export class LineChart {
   // opts.onHover(t | null): the hovered time (for syncing other charts).
-  // opts.onZoom({ t0, t1, yMin?, yMax? }): a region was selected by dragging.
+  // opts.onZoom({ t0, t1, yMin?, yMax? }): zoomed or panned (no yMin/yMax:
+  //   the value range stays as it is).
   // opts.onResetZoom(): double-click.
   constructor(container, opts = {}) {
     this.opts = opts;
@@ -65,18 +90,67 @@ export class LineChart {
       this.requestDraw();
       this.opts.onHover?.(null);
     });
-    this.canvas.addEventListener('mousedown', (e) => this.startDrag(e));
+    this.canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 1) e.preventDefault(); // no autoscroll
+      if (this.drag) return; // one drag at a time: a second button does nothing
+      const action = dragAction(e, mouse);
+      if (action === 'box') this.startDrag(e);
+      else if (action === 'pan') this.startPan(e);
+    });
+    this.canvas.addEventListener('contextmenu', (e) => e.preventDefault()); // right drags; plots have no menu
+    this.canvas.addEventListener('wheel', (e) => this.onWheel(e), { passive: false });
     this.canvas.addEventListener('dblclick', () => this.opts.onResetZoom?.());
   }
 
   // series: [{ label, slot, color?, display?, width?, points: [{t, v}] }]
   // range: { t0, t1 } or null for the data extent.
   // axis: { yMin?, yMax?, kind?: 'timeseries' | 'states', timeGrid?: vertical lines at the time ticks }.
-  setData(series, range = null, axis = {}) {
+  // home: the range shown without a zoom (null: the data); zooming out and
+  //   panning may go as far as it and the data collected.
+  // until: the freeze (ms) — zooming and panning never go past it.
+  setData(series, range = null, axis = {}, home = null, until = null) {
     this.series = series;
     this.range = range;
     this.axis = axis || {};
+    this.home = home;
+    this.until = until;
     this.draw();
+  }
+
+  // The plot area and time range to zoom or pan in: what is drawn, else
+  // (zoomed in where there are no points) the last layout with this range.
+  viewGeom() {
+    if (this.geom) return this.geom;
+    const base = this.lastGeom || this.defaultGeom(); // a new chart (plots drawn again) has no last layout
+    if (!base || !this.range) return null;
+    return { ...base, t0: this.range.t0, t1: this.range.t1, y: null };
+  }
+
+  defaultGeom() {
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    return w && h ? { left: 48, right: w - PAD.r, top: PAD.t, bottom: h - PAD.b } : null;
+  }
+
+  // `r` shows everything there is to see (the data and the normal view).
+  showsAll(r) {
+    const full = this.extentFor(r);
+    const tol = Math.max(1e-6, (full.t1 - full.t0) * 0.02); // live data moves on between frames
+    const covers = (a, b) => a.t0 <= b.t0 + tol && a.t1 >= b.t1 - tol;
+    return covers(r, full) && (!this.home || covers(this.home, full));
+  }
+
+  // The time range differs from the normal view.
+  isZoomed() {
+    return this.home ? !(this.range && sameRange(this.range, this.home)) : this.range !== null;
+  }
+
+  // How far zooming out and panning may go from `range`.
+  extentFor(range) {
+    const h = this.home;
+    const e = dataExtent(this.series, h ? { t0: Math.min(range.t0, h.t0), t1: Math.max(range.t1, h.t1) } : range);
+    if (this.until !== null && this.until !== undefined) e.t1 = Math.max(range.t1, Math.min(e.t1, this.until)); // data after the freeze is not shown
+    return e;
   }
 
   // Time bar from another chart; ignored while this chart is hovered itself.
@@ -105,56 +179,183 @@ export class LineChart {
 
   // ------------------------------------------------------------ zoom
 
+  // Wheel over the plotting area: zoom around the pointer, or pan sideways.
+  // Steps of one frame add up and are applied once, at the next frame.
+  onWheel(e) {
+    const g = this.viewGeom();
+    if (!g || performance.now() - scrolledAt < SCROLL_GRACE_MS) return;
+    const rect = this.canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    if (x < g.left || x > g.right || y < g.top || y > g.bottom) return;
+    e.preventDefault(); // the plots area doesn't scroll under the pointer
+    const w = (this.wheel ||= { from: { t0: g.t0, t1: g.t1 }, range: { t0: g.t0, t1: g.t1 }, frame: 0 });
+    const range = w.range;
+    const extent = this.extentFor(range);
+    // Mostly sideways (a side wheel, a trackpad swipe) or Shift: pan; else zoom.
+    const sideways = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.shiftKey ? e.deltaY || e.deltaX : 0;
+    if (sideways) w.range = panBy(range, (sideways / (g.right - g.left)) * (range.t1 - range.t0), extent);
+    else if (e.deltaY) w.range = zoomAround(range, range.t0 + ((x - g.left) / (g.right - g.left)) * (range.t1 - range.t0), Math.exp(e.deltaY * WHEEL_ZOOM), extent);
+    w.x = x;
+    w.frame ||= requestAnimationFrame(() => {
+      this.wheel = null;
+      if (sameRange(w.range, w.from)) return; // nothing moved: stay live
+      if (this.showsAll(w.range)) {
+        // Zoomed out to everything there is: that is the normal view.
+        if (this.isZoomed()) this.opts.onResetZoom?.();
+        return;
+      }
+      this.opts.onZoom?.(w.range);
+      this.hoverAt(w.x); // the time bar follows the pointer into the new range
+    });
+  }
+
+  // Shows the time bar at canvas x (the pointer), as a mouse move would.
+  hoverAt(x) {
+    const g = this.viewGeom();
+    if (!g || x < g.left || x > g.right) return;
+    this.localHover = true;
+    this.hoverTime = timeAt(g, x);
+    this.requestDraw();
+    this.opts.onHover?.(this.hoverTime);
+  }
+
+  // After a drag: the time bar stays only if the pointer is over the plot.
+  hoverAfterDrag(ev) {
+    const rect = this.canvas.getBoundingClientRect();
+    if (ev && ev.clientX >= rect.left && ev.clientX <= rect.right && ev.clientY >= rect.top && ev.clientY <= rect.bottom) return this.hoverAt(ev.clientX - rect.left);
+    this.localHover = false;
+    this.hoverTime = null;
+    this.tip.hidden = true;
+    this.requestDraw();
+    this.opts.onHover?.(null);
+  }
+
+  // Follows one drag of e.button until that button is released (done(ev)),
+  // or it is cancelled by Esc or a lost release (cancel()). A right drag
+  // keeps a context menu from opening where it is released (Windows opens it
+  // on release).
+  follow(e, { move, done, cancel }) {
+    const button = e.button;
+    const mask = BUTTON_MASK[button] ?? 0;
+    const blockMenu = (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation(); // nor the app's own menus
+    };
+    if (button === 2) window.addEventListener('contextmenu', blockMenu, true);
+    const finish = (ev, ok) => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+      window.removeEventListener('keydown', onKey, true);
+      if (button === 2) setTimeout(() => window.removeEventListener('contextmenu', blockMenu, true), 300);
+      this.drag = null;
+      this.endDrag = null;
+      if (ok) done(ev);
+      else cancel();
+      this.hoverAfterDrag(ev);
+    };
+    const onMove = (ev) => (ev.buttons & mask ? move(ev) : finish(ev, false)); // released outside the window
+    const onUp = (ev) => ev.button === button && finish(ev, true);
+    const onKey = (ev) => ev.key === 'Escape' && finish(null, false); // Esc also goes back to live (the app's Esc)
+    this.endDrag = () => finish(null, false);
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    window.addEventListener('keydown', onKey, true);
+  }
+
+  // Dragging moves the timeline (and the values, in a value zoom) with the
+  // pointer; at most one zoom report per frame, none when nothing moved.
+  startPan(e) {
+    const g = this.viewGeom();
+    if (!g) return;
+    const rect = this.canvas.getBoundingClientRect();
+    const x0 = e.clientX - rect.left;
+    const y0 = e.clientY - rect.top;
+    if (x0 < g.left || x0 > g.right || y0 < g.top || y0 > g.bottom) return;
+    e.preventDefault();
+    const range = { t0: g.t0, t1: g.t1 };
+    const extent = this.extentFor(range);
+    const values = this.axis.yZoomed && g.y ? { min: g.y.min, max: g.y.max, px: g.y.bottom - g.y.top } : null;
+    const start = values ? { ...range, yMin: values.min, yMax: values.max } : range;
+    let last = start;
+    let pending = null;
+    let frame = 0;
+    const report = () => {
+      frame = 0;
+      if (pending && !sameRange(pending, last)) this.opts.onZoom?.((last = pending));
+      pending = null;
+    };
+    this.drag = { pan: true };
+    this.root.classList.add('panning');
+    this.follow(e, {
+      move: (ev) => {
+        const dx = ev.clientX - rect.left - x0;
+        const dy = ev.clientY - rect.top - y0;
+        const z = panBy(range, (-dx / (g.right - g.left)) * (range.t1 - range.t0), extent);
+        if (values) {
+          const dv = (dy / values.px) * (values.max - values.min);
+          Object.assign(z, { yMin: values.min + dv, yMax: values.max + dv });
+        }
+        pending = z;
+        frame ||= requestAnimationFrame(report);
+      },
+      done: () => {
+        if (frame) cancelAnimationFrame(frame);
+        report();
+        this.root.classList.remove('panning');
+      },
+      cancel: () => {
+        if (frame) cancelAnimationFrame(frame);
+        pending = null;
+        this.root.classList.remove('panning');
+      },
+    });
+  }
+
+  // A box drag selects the time range (and the values, when it starts in the
+  // numeric area and is tall enough) to zoom into.
   startDrag(e) {
     const g = this.geom;
-    if (e.button !== 0 || !g) return;
+    if (!g) return;
     const rect = this.canvas.getBoundingClientRect();
     const x0 = e.clientX - rect.left;
     const y0 = e.clientY - rect.top;
     if (x0 < g.left || x0 > g.right || y0 < g.top || y0 > g.bottom) return;
     e.preventDefault(); // no text selection while dragging
-    // Value zoom only when the drag starts in the numeric area.
     const yZoom = !!g.y && y0 >= g.y.top && y0 <= g.y.bottom;
     const sel = el('div', 'chart-sel');
     this.root.append(sel);
-    this.drag = { x0, y0, x1: x0, y1: y0, yZoom, sel };
+    const d = { x0, y0, x1: x0, y1: y0, yZoom, sel };
+    this.drag = d;
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-    const move = (ev) => {
-      const d = this.drag;
-      d.x1 = clamp(ev.clientX - rect.left, g.left, g.right);
-      d.y1 = ev.clientY - rect.top;
-      const tall = d.yZoom && Math.abs(d.y1 - d.y0) >= 12;
-      const top = tall ? clamp(Math.min(d.y0, d.y1), g.y.top, g.y.bottom) : g.top;
-      const bottom = tall ? clamp(Math.max(d.y0, d.y1), g.y.top, g.y.bottom) : g.bottom;
-      Object.assign(sel.style, {
-        left: `${Math.min(d.x0, d.x1)}px`,
-        width: `${Math.abs(d.x1 - d.x0)}px`,
-        top: `${top}px`,
-        height: `${bottom - top}px`,
-      });
-    };
-    const up = () => {
-      const d = this.drag;
-      this.endDrag();
-      if (Math.abs(d.x1 - d.x0) < MIN_DRAG) return;
-      // `g`: the geometry when the drag started (the chart may have redrawn since).
-      const zoom = { t0: timeAt(g, Math.min(d.x0, d.x1)), t1: timeAt(g, Math.max(d.x0, d.x1)) };
-      if (d.yZoom && Math.abs(d.y1 - d.y0) >= 12) {
-        const valueAt = (y) => g.y.min + (1 - (clamp(y, g.y.top, g.y.bottom) - g.y.top) / (g.y.bottom - g.y.top)) * (g.y.max - g.y.min);
-        zoom.yMin = valueAt(Math.max(d.y0, d.y1));
-        zoom.yMax = valueAt(Math.min(d.y0, d.y1));
-      }
-      this.opts.onZoom?.(zoom);
-    };
-    this.endDrag = () => {
-      window.removeEventListener('mousemove', move);
-      window.removeEventListener('mouseup', up);
-      sel.remove();
-      this.drag = null;
-      this.endDrag = null;
-    };
-    window.addEventListener('mousemove', move);
-    window.addEventListener('mouseup', up);
+    this.follow(e, {
+      move: (ev) => {
+        d.x1 = clamp(ev.clientX - rect.left, g.left, g.right);
+        d.y1 = ev.clientY - rect.top;
+        const tall = d.yZoom && Math.abs(d.y1 - d.y0) >= 12;
+        const top = tall ? clamp(Math.min(d.y0, d.y1), g.y.top, g.y.bottom) : g.top;
+        const bottom = tall ? clamp(Math.max(d.y0, d.y1), g.y.top, g.y.bottom) : g.bottom;
+        Object.assign(sel.style, {
+          left: `${Math.min(d.x0, d.x1)}px`,
+          width: `${Math.abs(d.x1 - d.x0)}px`,
+          top: `${top}px`,
+          height: `${bottom - top}px`,
+        });
+      },
+      done: () => {
+        sel.remove();
+        if (Math.abs(d.x1 - d.x0) < MIN_DRAG) return;
+        // `g`: the geometry when the drag started (the chart may have redrawn since).
+        const zoom = { t0: timeAt(g, Math.min(d.x0, d.x1)), t1: timeAt(g, Math.max(d.x0, d.x1)) };
+        if (d.yZoom && Math.abs(d.y1 - d.y0) >= 12) {
+          const valueAt = (y) => g.y.min + (1 - (clamp(y, g.y.top, g.y.bottom) - g.y.top) / (g.y.bottom - g.y.top)) * (g.y.max - g.y.min);
+          zoom.yMin = valueAt(Math.max(d.y0, d.y1));
+          zoom.yMax = valueAt(Math.min(d.y0, d.y1));
+        }
+        this.opts.onZoom?.(zoom);
+      },
+      cancel: () => sel.remove(),
+    });
   }
 
   // ------------------------------------------------------------ drawing
@@ -240,6 +441,7 @@ export class LineChart {
     const Y = y ? (v) => top + (1 - (v - y.min) / (y.max - y.min)) * (numBottom - top) : null;
     // laneLabels: what each lane shows (read by tests and for debugging).
     this.geom = { left, right, top, bottom, t0, t1, y: y ? { top, bottom: numBottom, min: y.min, max: y.max } : null, lanes: states.length, laneLabels: [] };
+    this.lastGeom = this.geom; // the plot area, for zooming where nothing is drawn
 
     // Time axis.
     ctx.fillStyle = token('--muted');

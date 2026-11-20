@@ -5,7 +5,7 @@
 // in the main window starts it over.
 
 import { el, button } from './ui.js';
-import { LineChart } from './chart.js';
+import { LineChart, setPlotMouse } from './chart.js';
 import { sanitizePlot } from './plotLayouts.js';
 import { PlotData } from './plotData.js';
 import { seriesKey } from './plotMath.js';
@@ -18,7 +18,9 @@ const REDRAW_MS = 500;
 const api = window.api;
 
 const opened = await api.plotWindowInit();
-if (opened?.plot) start(opened, resolveBindings(normalizeSettings(await api.storeGet('settings').catch(() => null)).keys));
+const settings = normalizeSettings(await api.storeGet('settings').catch(() => null));
+setPlotMouse(settings.mouse);
+if (opened?.plot) start(opened, resolveBindings(settings.keys));
 
 function start(init, keys) {
   const plot = sanitizePlot(init.plot);
@@ -47,13 +49,15 @@ function start(init, keys) {
   const chart = new LineChart(host, {
     onHover: () => updateLegend(legend, plot, pointsOf, { hoverTime: chart.hoverTime, frozenAt }),
     onZoom: (z) => {
-      zoom = z;
+      // A time-only zoom (wheel, pan) keeps the value zoom.
+      zoom = Number.isFinite(z.yMin) || !zoom ? z : { ...z, yMin: zoom.yMin, yMax: zoom.yMax };
       reset.hidden = false;
       redraw();
     },
     onResetZoom: () => resetZoom(),
   });
   host.append(reset); // over the chart
+  reset.addEventListener('wheel', (e) => chart.onWheel(e), { passive: false }); // zooms like the plot under it
 
   // Header and legend depend on the plot type (a State transitions plot has
   // no legend), so they are drawn again when it changes.
@@ -86,7 +90,7 @@ function start(init, keys) {
   function redraw() {
     const series = chartSeries(plot, pointsOf);
     const yZoom = zoom && Number.isFinite(zoom.yMin) && Number.isFinite(zoom.yMax) ? zoom : null;
-    chart.setData(series, chartRange(plot, series, { zoom, frozenAt }), chartAxis(plot, yZoom));
+    chart.setData(series, chartRange(plot, series, { zoom, frozenAt }), chartAxis(plot, yZoom), chartRange(plot, series, { frozenAt }), frozenAt);
     updateLegend(legend, plot, pointsOf, { hoverTime: chart.hoverTime, frozenAt });
   }
 

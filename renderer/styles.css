@@ -1621,6 +1621,10 @@ body.moving-plot * {
   background: var(--accent);
   filter: brightness(1.15);
 }
+.chart-box.panning,
+.chart-box.panning canvas {
+  cursor: grabbing;
+}
 .plot-canvas .chart-box {
   min-height: 0;
   user-select: none;
@@ -2563,6 +2567,9 @@ body.popout .viewer-host {
   gap: 8px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--grid);
+}
+.keys-mouse .keys-row {
+  grid-template-columns: 1fr auto; /* a label and its choice, no reset button */
 }
 .keys-row.conflict {
   background: var(--del-bg);
