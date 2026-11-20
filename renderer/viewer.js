@@ -17,6 +17,7 @@ import {
   hexDump,
   extractNumber,
   unsafeJson,
+  isDecimal,
 } from './payload.js';
 import { JsonTree, countNodes, containerPaths, searchJson } from './jsonTree.js';
 import { diffJson, diffLines } from './jsonDiff.js';
@@ -531,7 +532,8 @@ export class MessageViewer {
   jsonMenu(e, info, root) {
     const json = info.container ? JSON.stringify(info.value, null, 2) : String(info.value);
     const segs = namedSegs(root, info.segs);
-    const numeric = typeof info.value === 'number' || typeof info.value === 'boolean';
+    // What plots can read: numbers, true/false and numbers written as text ("21.5").
+    const numeric = (typeof info.value === 'number' && Number.isFinite(info.value)) || typeof info.value === 'boolean' || isDecimal(info.value);
     showMenu(e.clientX, e.clientY, [
       { label: 'Copy value', action: () => this.copy(json, 'Value copied') },
       { label: 'Copy path', action: () => this.copy(info.path, 'Path copied') },
